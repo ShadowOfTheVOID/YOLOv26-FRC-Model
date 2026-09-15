@@ -1,0 +1,24 @@
+.env
+data/
+state/
+__pycache__/
+*.pyc
+.venv/
+data/.ocr_work/
+dataset/
+runs/
+weights/
+.venv-train/
+
+# Anything carrying the TBA key must never reach a remote.
+*WITH_KEY*
+.env.*
+
+# Build artifacts and model weights
+*.tgz
+*.tar.gz
+*.tar.xz
+*.zip
+*.pt
+logs/
+.DS_Store

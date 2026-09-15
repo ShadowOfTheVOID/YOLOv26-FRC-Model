@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # The suite deliberately needs no network, no ffmpeg and no video files,
+      # so CI is just these two packages and runs in under a second.
+      - run: pip install requests numpy
+      - run: python tests/test_pipeline.py
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: no API keys committed
+        run: |
+          # A TBA key is 64 chars of base64-ish. Fail the build if one is
+          # sitting in a tracked file, whatever the filename.
+          if git grep -nIE '(TBA_AUTH_KEY|X-TBA-Auth-Key)[[:space:]]*[=:][[:space:]]*["'"'"']?[A-Za-z0-9]{40,}' -- . ; then
+            echo "::error::a TBA API key appears to be committed"; exit 1
+          fi
+          if git ls-files | grep -i 'WITH_KEY'; then
+            echo "::error::a *WITH_KEY* file is tracked"; exit 1
+          fi
+          echo "clean"

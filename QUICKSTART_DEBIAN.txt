@@ -1,0 +1,90 @@
+================================================================
+  TBACroppedOutVid - run on the Debian laptop
+================================================================
+
+--- ON THE MAC: share the file -------------------------------
+
+  cd ~/dev/TBACroppedOutVid
+  ./deploy/make_code_archive.sh
+  python3 -m http.server 8000
+
+  Leave that running. Ctrl-C it when the download is done.
+
+--- ON DEBIAN: get it ----------------------------------------
+
+  Open a browser:   http://192.168.1.120:8000
+  Click:            tbavid_code.tgz
+
+--- ON DEBIAN: set up (once) ---------------------------------
+
+  mkdir -p ~/tbavid && cd ~/tbavid
+  tar -xzf ~/Downloads/tbavid_code.tgz
+
+  echo 'TBA_AUTH_KEY=PASTE_YOUR_KEY_HERE' > .env
+  chmod 600 .env
+
+  ./deploy/debian_setup.sh
+      installs ffmpeg, tesseract, python3-requests, python3-numpy,
+      fetches current yt-dlp, and tunes config.json for old hardware
+
+  If ~/.local/bin was just created, reload your shell:
+  source ~/.bashrc
+
+--- ON DEBIAN: check it works --------------------------------
+
+  python3 run.py pull -n 1 --dry-run
+      proves the key works and TBA is reachable. Downloads nothing.
+
+  time python3 run.py pull -n 1
+      one real match, start to finish. Note how long it takes --
+      that number tells you what a night is worth on this machine.
+
+  python3 run.py verify
+      checks the fuel counters against TBA's official scores
+
+  python3 run.py status
+      what you have so far
+
+--- ON DEBIAN: the real run ----------------------------------
+
+  nohup python3 run.py pull -n 20 --per-event-cap 2 > harvest.log 2>&1 &
+  tail -f harvest.log
+      Ctrl-C stops watching, not the run.
+
+  Before walking away, stop it sleeping. GNOME has no lid setting,
+  so scope an inhibit to the run itself:
+
+      systemd-inhibit --what=handle-lid-switch:sleep:idle \
+        --why=harvest \
+        nohup python3 run.py pull -n 20 --per-event-cap 2 \
+        > harvest.log 2>&1 &
+
+  Also: Settings > Power > Automatic Suspend > off (that one IS in the GUI).
+  Or simplest: leave the lid open and let the screen blank.
+
+  To stop early:  pkill -f 'run.py pull'
+  Safe to stop:   the ledger records each match as it finishes,
+                  so re-running continues instead of starting over.
+
+--- SENDING RESULTS BACK TO THE MAC --------------------------
+
+  On Debian, share the results folder:
+      cd ~/tbavid/data && python3 -m http.server 8000
+
+  On the Mac, from the project folder:
+      curl -O http://DEBIAN_IP:8000/scouting.db
+
+  Or for the frames (larger):
+      cd ~/tbavid && tar -czf frames.tgz data/frames data/labels
+      then download frames.tgz the same way.
+
+--- IF SOMETHING BREAKS --------------------------------------
+
+  "No TBA API key found"       .env missing or in the wrong folder
+  "Missing required tools"     re-run ./deploy/debian_setup.sh
+  yt-dlp errors on every video  yt-dlp too old: re-run the setup script
+  externally-managed-environment
+                               you used pip on system python; the
+                               setup script uses apt packages instead
+  very slow per match          try "score_labels": false in config.json
+                               (halves the time, loses fuel labels)
