@@ -31,6 +31,7 @@ review. Per-robot attribution is designed but not live — see
 | scouting database + API | [SCOUTING.md](SCOUTING.md) |
 | training a detector | [train/README.md](train/README.md) |
 | running it on Colab / Kaggle / Debian | [deploy/SETUP.md](deploy/SETUP.md) |
+| running it on Windows | [deploy/WINDOWS.md](deploy/WINDOWS.md) |
 
 ## Why
 

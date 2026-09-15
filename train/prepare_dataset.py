@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import platform
 import shutil
 import sys
 from collections import defaultdict
@@ -92,7 +93,9 @@ def main() -> int:
     ap.add_argument("--val-matches", nargs="*", default=None,
                     help="explicit match ids for val, overriding --val-frac")
     ap.add_argument("--copy", action="store_true",
-                    help="copy images instead of symlinking")
+                    help="copy images instead of symlinking (forced on Windows, "
+                         "which needs Developer Mode or admin rights to create "
+                         "a symlink; also required for a portable archive)")
     ap.add_argument("--clean", action="store_true", help="wipe dataset/ first")
     ap.add_argument("--per-match", type=int, default=0,
                     help="cap frames per match (0 = all). 60-100 diverse frames "
@@ -155,6 +158,13 @@ def main() -> int:
         n_val = max(1, round(len(matches) * args.val_frac)) if len(matches) > 1 else 0
         val = set(ranked[:n_val])
 
+    use_copy = args.copy
+    if not use_copy and platform.system() == "Windows":
+        # Creating a symlink on Windows needs Developer Mode or an elevated
+        # shell; without it Path.symlink_to raises and the whole build dies.
+        print("  Windows detected -- copying images instead of symlinking")
+        use_copy = True
+
     if args.clean and OUT.exists():
         shutil.rmtree(OUT)
 
@@ -169,10 +179,16 @@ def main() -> int:
             dst = OUT / "images" / split / src.name
             if dst.exists() or dst.is_symlink():
                 dst.unlink()
-            if args.copy:
+            if use_copy:
                 shutil.copy2(src, dst)
             else:
-                dst.symlink_to(src.resolve())
+                try:
+                    dst.symlink_to(src.resolve())
+                except OSError:
+                    # Fall back rather than abort: a dataset that costs extra
+                    # disk beats one that does not build.
+                    shutil.copy2(src, dst)
+                    use_copy = True
             counts[split] += 1
 
     yaml = OUT / "dataset.yaml"
