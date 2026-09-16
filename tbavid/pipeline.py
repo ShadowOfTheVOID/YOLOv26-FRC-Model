@@ -51,18 +51,23 @@ def _extras(cand: dict, meta: dict, **more) -> dict:
 # -- fetch -----------------------------------------------------------------
 def fetch(cfg: dict, count: int, retry_failed: bool = False,
           seed: Optional[int] = None, per_event_cap: int = 0,
-          dry_run: bool = False, shard: int = 0, shards: int = 1) -> List[str]:
+          dry_run: bool = False, shard: int = 0, shards: int = 1,
+          competitive_only: Optional[bool] = None) -> List[str]:
     """Pick, download, classify, crop and render. Returns the new video ids."""
     require_tools()
     ensure_dirs()
     led = Ledger()
 
+    if competitive_only is None:
+        competitive_only = cfg.get("competitive_only", True)
     who = f" (shard {shard + 1} of {shards})" if shards > 1 else ""
-    print(f"[1/4] picking {count} unseen {cfg['season']} videos from TBA{who}")
+    kind = "competitive " if competitive_only else ""
+    print(f"[1/4] picking {count} unseen {cfg['season']} {kind}videos from TBA{who}")
     client = TBAClient(tba_key(), cfg["tba_min_interval_s"])
     picks = pick_unseen(client, cfg["season"], count, led,
                         retry_failed=retry_failed, per_event_cap=per_event_cap,
-                        rng=random.Random(seed), shard=shard, shards=shards)
+                        rng=random.Random(seed), shard=shard, shards=shards,
+                        competitive_only=competitive_only)
     if not picks:
         print("  nothing new to pull -- every candidate is already in the ledger")
         return []

@@ -31,7 +31,8 @@ from tbavid.scoreboard import (banner_floor_px, clean_series, parse_pair,
                                plausible_step, probe_rows, tighten)
 from tbavid.shots import (_apply_min_shot, build_shots, cluster_shots, find_cuts,
                           merge_ranges)
-from tbavid.tba import match_label, pick_unseen, youtube_candidates
+from tbavid.tba import (TBAClient, is_competitive_event, match_label, pick_unseen,
+                        youtube_candidates)
 
 PASSED = 0
 FAILED: list = []
@@ -205,7 +206,7 @@ def test_ledger_and_picking():
     check("too_long stays skipped", led.seen("C", retry_failed=True))
 
     class FakeClient:
-        def event_keys(self, year):
+        def event_keys(self, year, competitive_only=True):
             return [f"2026e{i}" for i in range(6)]
 
         def event_matches(self, ek):
@@ -244,6 +245,67 @@ def test_ledger_and_picking():
           and match_label({"comp_level": "sf", "set_number": 3, "match_number": 1}) == "sf3m1")
 
 
+def test_competitive_filter():
+    # Offseason/preseason/unlabeled events run mixed rosters and demo rules;
+    # training on them teaches the detector a field that does not exist at a
+    # real event.
+    events = [{"key": "2026casj", "event_type": 0},    # regional
+              {"key": "2026dal", "event_type": 1},     # district
+              {"key": "2026cmptx", "event_type": 4},   # championship final
+              {"key": "2026foc", "event_type": 6},     # Festival of Champions
+              {"key": "2026iri", "event_type": 99},    # offseason
+              {"key": "2026week0", "event_type": 100}, # preseason
+              {"key": "2026huh", "event_type": -1},    # unlabeled
+              {"key": "2026nope"}]                     # no type at all
+    kept = [e["key"] for e in events if is_competitive_event(e)]
+    check("only official event types survive",
+          kept == ["2026casj", "2026dal", "2026cmptx", "2026foc"])
+
+    # event_keys() has to ask for /simple, not /keys: a bare key does not carry
+    # event_type, so the filter would have nothing to read.
+    c = TBAClient.__new__(TBAClient)   # no session or cache dir needed here
+    c.get = lambda path: events if path.endswith("/simple") else ["ALL"]
+    check("competitive event keys are filtered",
+          c.event_keys(2026) == ["2026casj", "2026dal", "2026cmptx", "2026foc"])
+    check("the escape hatch still returns every event",
+          c.event_keys(2026, competitive_only=False) == ["ALL"])
+
+    # Practice matches sit in the same event's match list as real play, and at
+    # some events share a stream with it.
+    matches = [{"key": "e_pm1", "event_key": "e", "comp_level": "pm",
+                "match_number": 1, "set_number": 0,
+                "videos": [{"type": "youtube", "key": "PRAC"}]},
+               {"key": "e_qm1", "event_key": "e", "comp_level": "qm",
+                "match_number": 1, "set_number": 0,
+                "videos": [{"type": "youtube", "key": "QUAL"}]},
+               {"key": "e_f1m1", "event_key": "e", "comp_level": "f",
+                "match_number": 1, "set_number": 1,
+                "videos": [{"type": "youtube", "key": "FINAL"}]}]
+    check("practice matches are not candidates",
+          [x["yt_key"] for x in youtube_candidates(matches)] == ["QUAL", "FINAL"])
+    check("playoffs count as competitive",
+          [x["label"] for x in youtube_candidates(matches)] == ["qm1", "f1m1"])
+    check("including non-competitive brings practice back",
+          [x["yt_key"] for x in youtube_candidates(matches, competitive_only=False)]
+          == ["PRAC", "QUAL", "FINAL"])
+
+    # A season with nothing but offseason events must stop, not silently walk
+    # the offseason catalogue.
+    class OffseasonOnly:
+        def event_keys(self, year, competitive_only=True):
+            return [] if competitive_only else ["2026iri"]
+
+        def event_matches(self, ek):
+            return []
+
+    empty = False
+    try:
+        pick_unseen(OffseasonOnly(), 2026, 1, Ledger(Path(tempfile.mkdtemp()) / "c.json"))
+    except SystemExit:
+        empty = True
+    check("no competitive events is a hard stop", empty)
+
+
 def test_sharding():
     from tbavid.tba import shard_of
     keys = [f"vid{i:05d}" for i in range(4000)]
@@ -258,7 +320,7 @@ def test_sharding():
     check("shards are balanced", spread < len(keys) * 0.05)
 
     class FakeClient:
-        def event_keys(self, y):
+        def event_keys(self, y, competitive_only=True):
             return [f"2026e{i:02d}" for i in range(30)]
 
         def event_matches(self, ek):
@@ -321,7 +383,8 @@ def test_db():
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_scoreboard,
                test_download_options, test_labels, test_render, test_identify,
-               test_ledger_and_picking, test_sharding, test_db):
+               test_ledger_and_picking, test_competitive_filter, test_sharding,
+               test_db):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

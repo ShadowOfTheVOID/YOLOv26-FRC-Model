@@ -206,6 +206,22 @@ python3 run.py db sync
 Merging is a union keyed on video id, so it is safe to run twice and safe to
 run out of order. Frames that already exist are left alone.
 
+## What counts as a match
+
+Only official competition footage is ever picked. Two filters do it:
+
+- **The event.** TBA's `event_type` has to be one of regional, district,
+  district championship, championship division, championship final or Festival
+  of Champions. Offseason (99), preseason (100) and unlabeled (-1) events are
+  never walked — they run mixed or stand-in rosters, non-standard fields and
+  demo rules, which is not what a competition detector should learn.
+- **The match.** Inside a kept event, only real match play counts:
+  `qm`, `ef`, `qf`, `sf`, `f`. Practice matches are skipped even when TBA has
+  a video for them.
+
+`--include-noncompetitive` (or `"competitive_only": false` in `config.json`)
+widens the catalogue to the whole season if you want it.
+
 ## Never pulling the same video twice
 
 `state/seen.json` records every YouTube video ID ever considered, keyed on the
@@ -226,6 +242,7 @@ All knobs live in `config.json`; see `tbavid/config.py` for defaults.
 | key | meaning |
 | --- | --- |
 | `season` | year to pull from |
+| `competitive_only` | official competition events and match play only (default true) |
 | `max_duration_s` | reject longer videos (TBA sometimes links full-day streams) |
 | `min_shot_s` | drop shots shorter than this even if main-camera |
 | `cut_sigma`, `cut_min_delta` | cut-detection sensitivity |

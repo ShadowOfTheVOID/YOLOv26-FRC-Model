@@ -20,6 +20,26 @@ from .config import CACHE_DIR
 
 BASE = "https://www.thebluealliance.com/api/v3"
 
+# TBA's event_type codes for real competition: regional, district, district
+# championship, championship division, championship final, district
+# championship division, Festival of Champions. Everything else -- offseason
+# (99), preseason (100) and unlabeled (-1) -- is exhibition play: mixed or
+# stand-in rosters, non-standard field setups and demo rules, none of which is
+# what a detector trained for competition footage should be learning from.
+COMPETITIVE_EVENT_TYPES = frozenset({0, 1, 2, 3, 4, 5, 6})
+
+# Real match play. TBA also carries practice matches ("pm") at some events, and
+# those are run with half-built robots and no scoring pressure.
+COMPETITIVE_COMP_LEVELS = frozenset({"qm", "ef", "qf", "sf", "f"})
+
+
+def is_competitive_event(event: dict) -> bool:
+    return event.get("event_type") in COMPETITIVE_EVENT_TYPES
+
+
+def is_competitive_match(match: dict) -> bool:
+    return match.get("comp_level") in COMPETITIVE_COMP_LEVELS
+
 
 class TBAClient:
     def __init__(self, auth_key: str, min_interval_s: float = 0.15):
@@ -100,8 +120,17 @@ class TBAClient:
         return None
 
     # -- endpoints ---------------------------------------------------------
-    def event_keys(self, year: int) -> List[str]:
-        return self.get(f"/events/{year}/keys") or []
+    def event_keys(self, year: int, competitive_only: bool = True) -> List[str]:
+        """Event keys for a season, official competition only by default.
+
+        /events/{year}/simple rather than /keys: the key alone does not say
+        whether an event is an offseason or preseason one, and event_type
+        does. It is still a single request per season.
+        """
+        if not competitive_only:
+            return self.get(f"/events/{year}/keys") or []
+        events = self.get(f"/events/{year}/simple") or []
+        return [e["key"] for e in events if e.get("key") and is_competitive_event(e)]
 
     def event_matches(self, event_key: str) -> List[dict]:
         return self.get(f"/event/{event_key}/matches") or []
@@ -117,10 +146,13 @@ def match_label(match: dict) -> str:
     return f"{level}{setn}m{num}"
 
 
-def youtube_candidates(matches: List[dict]) -> Iterator[Dict[str, str]]:
+def youtube_candidates(matches: List[dict],
+                       competitive_only: bool = True) -> Iterator[Dict[str, str]]:
     """Yield one candidate per distinct YouTube video ID in this event."""
     seen_here = set()
     for match in matches:
+        if competitive_only and not is_competitive_match(match):
+            continue
         for video in match.get("videos") or []:
             if video.get("type") != "youtube":
                 continue
@@ -164,6 +196,7 @@ def pick_unseen(
     rng: Optional[random.Random] = None,
     shard: int = 0,
     shards: int = 1,
+    competitive_only: bool = True,
 ) -> List[dict]:
     """Walk events in random order, collecting `count` never-pulled videos.
 
@@ -171,11 +204,16 @@ def pick_unseen(
     match list just to sample a handful of videos would be thousands of
     requests. Shuffling the event list first keeps the sample spread across
     venues rather than clustered in whatever events sort first.
+
+    With `competitive_only` (the default) the walk stays inside official
+    competition: offseason and preseason events never enter the catalogue, and
+    within an event only real match play is considered.
     """
     rng = rng or random.Random()
-    keys = client.event_keys(year)
+    keys = client.event_keys(year, competitive_only=competitive_only)
     if not keys:
-        raise SystemExit(f"TBA returned no events for {year}.")
+        where = "competitive events" if competitive_only else "events"
+        raise SystemExit(f"TBA returned no {where} for {year}.")
     rng.shuffle(keys)
 
     if shards < 1 or not (0 <= shard < shards):
@@ -194,7 +232,8 @@ def pick_unseen(
         if not matches:
             continue
 
-        candidates = list(youtube_candidates(matches))
+        candidates = list(youtube_candidates(matches,
+                                             competitive_only=competitive_only))
         rng.shuffle(candidates)
 
         from_this_event = 0
@@ -217,6 +256,7 @@ def pick_unseen(
             from_this_event += 1
 
     extra = f", {not_mine} owned by other shards" if shards > 1 else ""
-    print(f"  walked {events_walked} events, skipped {skipped} already-seen"
+    kind = "competitive " if competitive_only else ""
+    print(f"  walked {events_walked} {kind}events, skipped {skipped} already-seen"
           f"{extra}, picked {len(picked)}")
     return picked

@@ -61,6 +61,10 @@ DEFAULTS = {
     "score_latency_s": 0.0,
     "max_frames_per_video": 0,
     "ytdlp_cookies": "",
+    # Official competition only: no offseason or preseason events, and no
+    # practice matches. Set false (or pass --include-noncompetitive) to widen
+    # the catalogue to every event of the season.
+    "competitive_only": True,
     "keep_raw": True,
     "keep_clean": True,
     "tba_min_interval_s": 0.15,

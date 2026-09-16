@@ -37,11 +37,19 @@ def parse_shard(text):
     return idx - 1, total
 
 
+def competitive_only(args, cfg):
+    """The flag wins over config.json; config.json defaults to competitive."""
+    if getattr(args, "include_noncompetitive", False):
+        return False
+    return cfg.get("competitive_only", True)
+
+
 def cmd_pull(args, cfg):
     shard, shards = parse_shard(getattr(args, "shard", None))
     produced = pipeline.fetch(cfg, args.count, retry_failed=args.retry_failed,
                               seed=args.seed, per_event_cap=args.per_event_cap,
-                              dry_run=args.dry_run, shard=shard, shards=shards)
+                              dry_run=args.dry_run, shard=shard, shards=shards,
+                              competitive_only=competitive_only(args, cfg))
     if args.dry_run or not produced:
         return 0
     if args.review:
@@ -57,7 +65,8 @@ def cmd_fetch(args, cfg):
     shard, shards = parse_shard(getattr(args, "shard", None))
     pipeline.fetch(cfg, args.count, retry_failed=args.retry_failed,
                    seed=args.seed, per_event_cap=args.per_event_cap,
-                   dry_run=args.dry_run, shard=shard, shards=shards)
+                   dry_run=args.dry_run, shard=shard, shards=shards,
+                   competitive_only=competitive_only(args, cfg))
     return 0
 
 
@@ -207,6 +216,10 @@ def main(argv=None):
                        help="max videos from any single event (0 = no cap)")
         p.add_argument("--dry-run", action="store_true",
                        help="show what would be pulled without downloading")
+        p.add_argument("--include-noncompetitive", action="store_true",
+                       help="also consider offseason/preseason events and "
+                            "practice matches (default: official competition "
+                            "match play only)")
         p.add_argument("--shard", metavar="N/M",
                        help="split the catalogue across M people; you take "
                             "slice N (1-based). Needs no coordination -- the "

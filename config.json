@@ -1,5 +1,6 @@
 {
   "season": 2026,
+  "competitive_only": true,
   "max_duration_s": 900,
   "min_duration_s": 60,
   "max_height": 1080,
