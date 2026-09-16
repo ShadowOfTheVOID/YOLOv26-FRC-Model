@@ -37,6 +37,11 @@ harvest can be checked against that same standard.
   partial output.
 - `deploy/make_release.sh` no longer stages the deleted `QUICKSTART_DEBIAN.txt`,
   and now includes `DATA.md`, `CHANGELOG.md`, `LICENSE` and `docs/`.
+- Packaging works on Windows and macOS, not just Linux. Both `make_*.sh`
+  scripts are now thin wrappers around `deploy/package.py`, which uses
+  `zipfile`, `tarfile`, `lzma` and `hashlib` from the standard library instead
+  of `zip`, `tar`, `xz` and `sha256sum` — macOS has no `sha256sum` and Git Bash
+  usually has no `zip`. `release` now also writes `dist/SHA256SUMS`.
 
 ### Escape hatch
 

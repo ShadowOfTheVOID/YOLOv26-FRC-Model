@@ -87,7 +87,29 @@ powercfg /change standby-timeout-ac 0
 | --- | --- |
 | `deploy/*.sh` | bash only — use Git Bash or WSL, or follow the steps by hand |
 | `deploy/overnight.sh` | uses `caffeinate`; see `Start-Process` above |
+| packaging | **handled** — use `deploy/package.py`, see below |
 | symlinks in `prepare_dataset.py` | **handled** — it detects Windows and copies instead |
+
+## Packaging from Windows
+
+The `make_*.sh` wrappers are bash, but the work behind them is Python, so
+Windows builds the same archives as macOS and Linux with no Git Bash, no WSL
+and no `zip`/`tar`/`sha256sum` on PATH:
+
+```powershell
+python deploy\package.py release v0.2.0   # dist\tbavid-v0.2.0.{zip,tar.gz,tar.xz}
+python deploy\package.py code             # tbavid_code.tgz, keyless
+python deploy\package.py code --with-key  # includes .env -- your machines only
+```
+
+`release` also writes `dist\SHA256SUMS`. Every archive is checked for your TBA
+key before it is kept, and a build that finds one aborts and deletes what it
+made. Paths inside the archives always use forward slashes, so an archive built
+on Windows unpacks correctly on Linux.
+
+One caveat: Windows has no executable bit, so `.sh` files are written into the
+archive as `755` explicitly rather than copied from disk. They stay runnable
+for whoever unpacks them on macOS or Linux.
 
 Everything else — harvesting, crop detection, scoreboard OCR, the database,
 the API, training — behaves the same.

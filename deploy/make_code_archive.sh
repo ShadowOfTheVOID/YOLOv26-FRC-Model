@@ -8,56 +8,13 @@
 # Kaggle and Colab, where notebooks and their versions are shareable and
 # permanent. --with-key is for copying to a machine you control, over scp, and
 # the filename is loud so the two never get mixed up.
+#
+# The work happens in deploy/package.py so that macOS, Windows and Linux all
+# build the same archive from the same code. On Windows, skip this wrapper:
+#
+#   python deploy\package.py code
+#   python deploy\package.py code --with-key
 set -e
 cd "$(dirname "$0")/.."
-
-WITH_KEY=0
-[ "${1:-}" = "--with-key" ] && WITH_KEY=1
-
-# Built from what is actually on disk. A hardcoded list breaks the moment a
-# file is deleted from the repo: tar aborts on the missing member, set -e ends
-# the script, and the half-written archive is left behind having never reached
-# the key check below -- a keyless-looking artifact nobody checked for a key.
-FILES=""
-for item in run.py serve.py config.json requirements.txt tbavid/ train/ tests/ \
-            deploy/ docs/ README.md SCOUTING.md DATA.md CHANGELOG.md; do
-  [ -e "$item" ] && FILES="$FILES $item"
-done
-
-# Whatever goes wrong, do not leave a partial archive that looks finished.
-OUT=""
-trap '[ -n "$OUT" ] && [ -f "$OUT" ] && rm -f "$OUT"' EXIT
-
-if [ "$WITH_KEY" = "1" ]; then
-  if [ ! -f .env ]; then echo "no .env to include" >&2; exit 1; fi
-  OUT=${2:-tbavid_code_WITH_KEY.tgz}
-  tar -czf "$OUT" --exclude='__pycache__' --exclude='*.pyc' $FILES .env
-  chmod 600 "$OUT"
-  trap - EXIT
-  echo "wrote $OUT ($(du -h "$OUT" | cut -f1))  mode 600"
-  echo
-  echo "  !! This archive CONTAINS your TBA key."
-  echo "  !! Copy it only to machines you control (scp). Never upload it to"
-  echo "  !! Kaggle, Colab, GitHub or anywhere shareable."
-  echo "  !! For those, run this script with no arguments instead."
-else
-  OUT=${1:-tbavid_code.tgz}
-  # *WITH_KEY* files live in deploy/ alongside everything else, and deploy/ is
-  # bundled wholesale -- without this exclude the "safe to upload" archive
-  # quietly carries the key. That is not hypothetical; it happened.
-  tar -czf "$OUT" --exclude='__pycache__' --exclude='*.pyc' \
-      --exclude='*WITH_KEY*' $FILES
-
-  # Belt and braces: if a key is configured, prove it is not in the output.
-  if [ -f .env ]; then
-    KEY=$(grep '^TBA_AUTH_KEY=' .env | cut -d= -f2- | tr -d '\r\n')
-    if [ -n "$KEY" ] && tar -xzOf "$OUT" 2>/dev/null | grep -qF "$KEY"; then
-      echo "REFUSING: $OUT contains your TBA key." >&2
-      rm -f "$OUT"
-      exit 1
-    fi
-  fi
-  trap - EXIT
-  echo "wrote $OUT ($(du -h "$OUT" | cut -f1))"
-  echo "Contains no .env, no key, no data/, no state/ -- safe to upload."
-fi
+PY=${PY:-python3}
+exec "$PY" deploy/package.py code "$@"

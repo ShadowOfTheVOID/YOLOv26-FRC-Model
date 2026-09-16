@@ -306,6 +306,41 @@ def test_competitive_filter():
     check("no competitive events is a hard stop", empty)
 
 
+def test_packaging():
+    """The archive builders, which ship the code to other people's machines."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "package", Path(__file__).resolve().parent.parent / "deploy" / "package.py")
+    pkg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pkg)
+
+    files = pkg.collect()
+    arcs = {rel.as_posix() for _, rel in files}
+    check("packages the code", {"run.py", "tbavid/tba.py"} <= arcs)
+    # deploy/ is bundled wholesale, and *WITH_KEY* archives live in it. Without
+    # this exclusion the "safe to upload" bundle quietly carries the key.
+    check("never packages a WITH_KEY file",
+          not any("WITH_KEY" in a for a in arcs))
+    check("never packages caches or bulk data",
+          not any(p in a.split("/") for a in arcs
+                  for p in ("__pycache__", "data", "state", "dist")))
+    # Windows builds must not emit backslash paths, or the archive unpacks as
+    # one long filename on Linux.
+    check("archive paths are posix", not any("\\" in a for a in arcs))
+
+    # The check that matters: a key anywhere in the payload stops the build.
+    key = b"ZZZfakekeyfakekeyfakekeyfakekeyfakekey"
+    refused = False
+    try:
+        pkg.assert_keyless([("config.json", b'{"x": "' + key + b'"}')], key, "test")
+    except SystemExit:
+        refused = True
+    check("a key in the payload aborts the build", refused)
+    pkg.assert_keyless([("config.json", b"clean")], key, "test")   # must not raise
+    # No .env configured means no key to compare against, not "ship anything".
+    pkg.assert_keyless([("config.json", b"anything")], b"", "test")
+
+
 def test_audit():
     from tbavid import pipeline
 
@@ -416,7 +451,7 @@ def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_scoreboard,
                test_download_options, test_labels, test_render, test_identify,
                test_ledger_and_picking, test_competitive_filter, test_audit,
-               test_sharding, test_db):
+               test_packaging, test_sharding, test_db):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
