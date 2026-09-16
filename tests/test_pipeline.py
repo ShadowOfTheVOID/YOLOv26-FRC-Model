@@ -362,6 +362,25 @@ def test_packaging():
     # one long filename on Linux.
     check("archive paths are posix", not any("\\" in a for a in arcs))
 
+    # Release notes come from the CHANGELOG, so the two cannot drift apart.
+    doc = ("# Changelog\n\n"
+           "## v0.2.10 — 2026-10-01\n\nten.\n\n"
+           "## v0.2.0 — 2026-09-16\n\nzero.\n\n### Added\n\n- a thing\n\n"
+           "## v0.1.0-beta — 2026-09-15\n\nbeta.\n")
+    check("extracts the right section",
+          pkg.changelog_section("v0.2.0", doc) == "zero.\n\n### Added\n\n- a thing")
+    # A prefix match would hand v0.2.0's tag v0.2.10's notes.
+    check("v0.2.0 does not match v0.2.10",
+          pkg.changelog_section("v0.2.10", doc) == "ten.")
+    check("a leading v is optional",
+          pkg.changelog_section("0.1.0-beta", doc) == "beta.")
+    missing = False
+    try:
+        pkg.changelog_section("v9.9.9", doc)
+    except SystemExit:
+        missing = True
+    check("an unknown version fails rather than releasing empty notes", missing)
+
     # The check that matters: a key anywhere in the payload stops the build.
     key = b"ZZZfakekeyfakekeyfakekeyfakekeyfakekey"
     refused = False

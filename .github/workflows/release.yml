@@ -1,0 +1,104 @@
+name: release
+
+# Push a tag, get a release. Nothing is built or uploaded by hand:
+#
+#   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
+#
+# workflow_dispatch builds the same artifacts without publishing, so a
+# release can be rehearsed before the tag exists.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, e.g. v0.2.0 (dry run, publishes nothing)"
+        required: true
+
+permissions:
+  contents: write            # needed to create the release; nothing else
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Work out the version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A release that ships a crash is worse than a late one. v0.2.0's first
+      # archives carried a NameError that killed every download; this is the
+      # gate that would have caught it.
+      - run: pip install requests numpy
+      - name: Tests must pass before anything is published
+        run: python tests/test_pipeline.py
+
+      - name: No API key in the tree being released
+        run: |
+          if git grep -nIE '(TBA_AUTH_KEY|X-TBA-Auth-Key)[[:space:]]*[=:][[:space:]]*["'"'"']?[A-Za-z0-9]{40,}' -- . ; then
+            echo "::error::a TBA API key appears to be committed"; exit 1
+          fi
+          if git ls-files | grep -i 'WITH_KEY'; then
+            echo "::error::a *WITH_KEY* file is tracked"; exit 1
+          fi
+
+      - name: Build the archives
+        run: python deploy/package.py release "${{ steps.v.outputs.version }}"
+
+      # The notes are the CHANGELOG section, so the two can never disagree.
+      # A tag with no section fails here rather than publishing an empty body.
+      - name: Release notes from CHANGELOG.md
+        run: |
+          python deploy/package.py notes "${{ steps.v.outputs.version }}" > notes.md
+          {
+            echo
+            echo '## Artifacts'
+            echo
+            echo 'Source only — no videos, frames, database or model weights.'
+            echo 'Verify with `sha256sum -c SHA256SUMS`.'
+            echo
+            echo '| file | sha256 |'
+            echo '| --- | --- |'
+            awk '{print "| `" $2 "` | `" $1 "` |"}' dist/SHA256SUMS
+          } >> notes.md
+          cat notes.md
+
+      - name: Prove the archive actually runs
+        run: |
+          mkdir -p /tmp/verify
+          tar -xzf dist/tbavid-${{ steps.v.outputs.version }}.tar.gz -C /tmp/verify
+          cd /tmp/verify/tbavid-${{ steps.v.outputs.version }}
+          python tests/test_pipeline.py
+          python run.py --help > /dev/null
+
+      - name: Publish
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.v.outputs.version }}" \
+            --title "${{ steps.v.outputs.version }}" \
+            --notes-file notes.md \
+            dist/tbavid-*.zip dist/tbavid-*.tar.gz dist/tbavid-*.tar.xz \
+            dist/SHA256SUMS
+
+      - name: Dry run summary
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "Built and verified ${{ steps.v.outputs.version }}, published nothing."
+          echo "Push the tag to publish for real."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tbavid-${{ steps.v.outputs.version }}
+          path: dist/
