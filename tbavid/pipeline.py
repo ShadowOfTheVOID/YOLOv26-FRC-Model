@@ -511,6 +511,100 @@ def prune(cfg: dict, raw: bool = True, clean: bool = False) -> int:
     return freed
 
 
+def audit(cfg: dict, manifest: Optional[dict] = None,
+          client=None) -> Dict[str, object]:
+    """Report which videos in an existing harvest are not competitive.
+
+    Reports only -- nothing is deleted. A harvest taken before the
+    competitive filter existed can carry offseason events and practice
+    matches, and those frames are already merged into data/frames/ where
+    nothing distinguishes them from real competition footage.
+
+    One request per season: the competitive event list for a year is fetched
+    once (and cached), and every event in the manifest is checked against it.
+    """
+    from .tba import COMPETITIVE_COMP_LEVELS, TBAClient
+
+    if manifest is None:
+        manifest = load_manifest()
+    videos = manifest.get("videos", {})
+    if not videos:
+        print("manifest is empty -- nothing to audit")
+        return {"videos": 0, "frames": 0, "bad_videos": 0, "bad_frames": 0,
+                "events": {}, "unknown_years": []}
+
+    if client is None:
+        client = TBAClient(tba_key(), cfg["tba_min_interval_s"])
+
+    # Group by season so a manifest spanning years still costs one call each.
+    years = {}
+    for entry in videos.values():
+        ek = entry.get("event_key") or ""
+        if ek[:4].isdigit():
+            years.setdefault(int(ek[:4]), set()).add(ek)
+
+    competitive_events = set()
+    unknown_years = []
+    for year in sorted(years):
+        keys = client.event_keys(year, competitive_only=True)
+        if not keys:
+            # No answer is not the same as "none of these are competitive";
+            # say so rather than condemning the whole season's footage.
+            unknown_years.append(year)
+            continue
+        competitive_events.update(keys)
+
+    rows = {}
+    frames = bad_frames = bad_videos = 0
+    for vid, entry in sorted(videos.items()):
+        ek = entry.get("event_key") or ""
+        n = (entry.get("exported") or {}).get("written", 0)
+        frames += n
+        year = int(ek[:4]) if ek[:4].isdigit() else None
+        level = (entry.get("label") or "")[:2]
+
+        reasons = []
+        if year in unknown_years or not ek:
+            reasons.append("event type unknown")
+        elif ek not in competitive_events:
+            reasons.append("non-competitive event")
+        if level and level not in COMPETITIVE_COMP_LEVELS:
+            reasons.append(f"non-competitive match ({level})")
+
+        bad = any(r != "event type unknown" for r in reasons)
+        if bad:
+            bad_videos += 1
+            bad_frames += n
+        row = rows.setdefault(ek, {"videos": 0, "frames": 0, "reasons": set()})
+        row["videos"] += 1
+        row["frames"] += n
+        row["reasons"].update(reasons)
+
+    print(f"audited {len(videos)} videos / {frames} exported frames "
+          f"across {len(rows)} events\n")
+    print(f"  {'event':<14}{'videos':>7}{'frames':>8}  verdict")
+    for ek in sorted(rows, key=lambda k: -rows[k]["frames"]):
+        r = rows[ek]
+        verdict = ", ".join(sorted(r["reasons"])) or "competitive"
+        print(f"  {ek:<14}{r['videos']:>7}{r['frames']:>8}  {verdict}")
+
+    if unknown_years:
+        print(f"\n  ! TBA returned no event list for {unknown_years}; those "
+              f"events are reported as unknown, not as non-competitive.")
+    if bad_frames:
+        pct = bad_frames / frames * 100 if frames else 0
+        print(f"\n{bad_videos} video(s) and {bad_frames} frame(s) "
+              f"({pct:.1f}%) are not competition footage.")
+        print("Nothing was deleted. To drop them, remove those frames and "
+              "labels\nby event key and re-run `db build`.")
+    else:
+        print("\nevery video in this harvest is competition footage.")
+
+    return {"videos": len(videos), "frames": frames, "bad_videos": bad_videos,
+            "bad_frames": bad_frames, "events": rows,
+            "unknown_years": unknown_years}
+
+
 def status(cfg: dict) -> None:
     led = Ledger()
     manifest = load_manifest()

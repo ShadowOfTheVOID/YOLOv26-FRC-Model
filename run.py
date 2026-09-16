@@ -152,6 +152,11 @@ def cmd_serve(args, cfg):
     return 0
 
 
+def cmd_audit(args, cfg):
+    pipeline.audit(cfg)
+    return 0
+
+
 def cmd_status(args, cfg):
     pipeline.status(cfg)
     return 0
@@ -291,6 +296,11 @@ def main(argv=None):
 
     p = sub.add_parser("status", help="ledger and dataset summary")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("audit",
+                       help="report which harvested videos are not competitive "
+                            "(reports only, deletes nothing)")
+    p.set_defaults(func=cmd_audit)
 
     p = sub.add_parser("prune", help="delete sources/cleaned videos to reclaim disk")
     p.add_argument("--clean", action="store_true",

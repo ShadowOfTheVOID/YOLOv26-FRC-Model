@@ -28,6 +28,7 @@ review. Per-robot attribution is designed but not live — see
 | | |
 | --- | --- |
 | harvesting | this README |
+| the dataset itself + provenance | [DATA.md](DATA.md) |
 | scouting database + API | [SCOUTING.md](SCOUTING.md) |
 | training a detector | [train/README.md](train/README.md) |
 | running it on Colab / Kaggle / Debian | [deploy/SETUP.md](deploy/SETUP.md) |
@@ -89,6 +90,7 @@ Output lands in these folders:
 | `db hub` | record an event's hub geometry |
 | `serve` | read-only JSON API for the scouting app |
 | `prune` | delete downloaded sources to reclaim disk |
+| `audit` | report which harvested videos are not competition footage |
 
 ## How it decides what to keep
 

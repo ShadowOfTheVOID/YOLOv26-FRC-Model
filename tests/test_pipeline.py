@@ -306,6 +306,38 @@ def test_competitive_filter():
     check("no competitive events is a hard stop", empty)
 
 
+def test_audit():
+    from tbavid import pipeline
+
+    def vid(ek, label, frames):
+        return {"event_key": ek, "label": label, "status": "ok",
+                "exported": {"written": frames}}
+
+    manifest = {"videos": {
+        "a": vid("2026mimas", "qm33", 100),   # district, real play
+        "b": vid("2026kylou", "qm8", 40),     # offseason event
+        "c": vid("2026mimas", "pm1", 10),     # practice at a real event
+        "d": vid("2025xxxxx", "qm1", 7),      # season TBA will not answer for
+    }}
+
+    class Stub:
+        def event_keys(self, year, competitive_only=True):
+            return ["2026mimas"] if year == 2026 else []
+
+    out = pipeline.audit({}, manifest=manifest, client=Stub())
+    check("audit counts every frame", out["frames"] == 157)
+    # The offseason event and the practice match, not the unknown-season one:
+    # a season TBA did not answer for is unknown, and condemning it would
+    # delete good footage on no evidence.
+    check("audit flags offseason and practice only",
+          out["bad_videos"] == 2 and out["bad_frames"] == 50)
+    check("unknown season is reported, not condemned",
+          out["unknown_years"] == [2025]
+          and "event type unknown" in out["events"]["2025xxxxx"]["reasons"])
+    check("empty manifest audits cleanly",
+          pipeline.audit({}, manifest={"videos": {}})["frames"] == 0)
+
+
 def test_sharding():
     from tbavid.tba import shard_of
     keys = [f"vid{i:05d}" for i in range(4000)]
@@ -383,8 +415,8 @@ def test_db():
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_scoreboard,
                test_download_options, test_labels, test_render, test_identify,
-               test_ledger_and_picking, test_competitive_filter, test_sharding,
-               test_db):
+               test_ledger_and_picking, test_competitive_filter, test_audit,
+               test_sharding, test_db):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
