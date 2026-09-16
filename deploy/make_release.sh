@@ -19,7 +19,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 # Explicit allowlist. A denylist would eventually miss something, and the thing
 # it misses is the file with the key in it.
 for item in run.py serve.py config.json requirements.txt README.md SCOUTING.md \
-            QUICKSTART_DEBIAN.txt tbavid train tests deploy; do
+            DATA.md CHANGELOG.md LICENSE tbavid train tests deploy docs; do
   [ -e "$item" ] && cp -R "$item" "$STAGE/"
 done
 find "$STAGE" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
