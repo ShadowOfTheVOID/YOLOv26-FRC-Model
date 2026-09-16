@@ -61,6 +61,7 @@ def fetch(cfg: dict, count: int, retry_failed: bool = False,
     if competitive_only is None:
         competitive_only = cfg.get("competitive_only", True)
     who = f" (shard {shard + 1} of {shards})" if shards > 1 else ""
+    who_shard = f"{shard + 1}/{shards}" if shards > 1 else None
     kind = "competitive " if competitive_only else ""
     print(f"[1/4] picking {count} unseen {cfg['season']} {kind}videos from TBA{who}")
     client = TBAClient(tba_key(), cfg["tba_min_interval_s"])
@@ -93,7 +94,7 @@ def fetch(cfg: dict, count: int, retry_failed: bool = False,
             continue
         print(f"  downloaded {raw.name} ({meta['duration']:.0f}s)")
 
-        entry = _process(raw, vid, cand, meta, cfg)
+        entry = _process(raw, vid, cand, meta, cfg, shard_label=who_shard)
         if entry.get("error"):
             print(f"  ! {entry['error']}")
             led.record(yt, L.FAILED, **_extras(cand, meta, error=entry["error"]))
@@ -111,7 +112,8 @@ def fetch(cfg: dict, count: int, retry_failed: bool = False,
     return produced
 
 
-def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict) -> dict:
+def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
+             shard_label: Optional[str] = None) -> dict:
     """Analyse, crop and render one downloaded file into a manifest entry."""
     analysis = shots.analyze(raw, cfg, thumb_dir=THUMB_DIR, thumb_prefix=f"{vid}_")
     if analysis.get("error"):
@@ -179,7 +181,7 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict) -> dict:
     return {
         **{k: cand[k] for k in ("yt_key", "match_key", "event_key", "label")},
         "teams": cand.get("teams") or {},
-        "shard": f"{shard + 1}/{shards}" if shards > 1 else None,
+        "shard": shard_label,
         "worker": cfg.get("worker") or None,
         "title": meta.get("title", ""),
         "source_duration": meta.get("duration", analysis["duration"]),
@@ -331,7 +333,10 @@ def reprocess(cfg: dict, only: Optional[List[str]] = None) -> int:
         meta = {"title": entry.get("title", ""),
                 "duration": entry.get("source_duration") or 0.0}
         print(f"\n[reprocess] {vid}")
-        fresh = _process(raw, vid, cand, meta, cfg)
+        # Keep the shard that originally pulled this video: reprocessing
+        # rebuilds the entry from scratch and would otherwise erase it.
+        fresh = _process(raw, vid, cand, meta, cfg,
+                         shard_label=entry.get("shard"))
         if fresh.get("error"):
             print(f"  ! {fresh['error']}")
             continue
