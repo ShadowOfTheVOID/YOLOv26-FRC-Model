@@ -61,6 +61,9 @@ Build the archive on the Mac:
 ```bash
 ./deploy/make_code_archive.sh --with-key     # for a machine you control
 ./deploy/make_code_archive.sh                # keyless, for Kaggle/Colab
+
+# Both are wrappers around this, which runs anywhere Python does:
+python3 deploy/package.py code --with-key
 ```
 
 ### Getting it across, with a desktop on the Debian side

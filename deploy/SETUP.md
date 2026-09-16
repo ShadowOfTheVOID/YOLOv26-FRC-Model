@@ -198,7 +198,8 @@ provide.
 1. **Build the code archive** on your Mac and upload it to the top level of
    My Drive:
    ```bash
-   ./deploy/make_code_archive.sh          # 76 KB, no .env, no data
+   ./deploy/make_code_archive.sh          # no .env, no data
+   python3 deploy/package.py code         # same thing; works on Windows too
    ```
 2. **Add your TBA key to Colab secrets** — key icon in the left sidebar, name
    it `TBA_AUTH_KEY`, enable for the notebook. Do not paste it into a cell.

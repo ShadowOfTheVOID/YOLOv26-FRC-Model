@@ -15,6 +15,7 @@ weights/
 .env.*
 
 # Build artifacts and model weights
+dist/
 *.tgz
 *.tar.gz
 *.tar.xz
