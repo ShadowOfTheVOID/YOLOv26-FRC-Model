@@ -306,6 +306,40 @@ def test_competitive_filter():
     check("no competitive events is a hard stop", empty)
 
 
+def test_no_unbound_globals():
+    """Every global a function reads must actually exist.
+
+    _process() referenced `shard` and `shards`, which are parameters of
+    fetch(), not of it. Nothing caught it: the crash lands after the
+    download, shot analysis, crop, render and OCR have all run, so it needs
+    a real video to reach and the suite deliberately has none. Reading the
+    symbol table costs nothing and covers every function here.
+    """
+    import builtins
+    import symtable
+
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in sorted((root / "tbavid").glob("*.py")) + \
+                [root / "run.py", root / "serve.py"]:
+        top = symtable.symtable(path.read_text(), str(path), "exec")
+        defined = {s.get_name() for s in top.get_symbols()} | set(dir(builtins))
+
+        def walk(table, trail):
+            for child in table.get_children():
+                name = f"{trail}.{child.get_name()}" if trail else child.get_name()
+                for sym in child.get_symbols():
+                    if (sym.is_global() and not sym.is_assigned()
+                            and sym.get_name() not in defined):
+                        offenders.append(f"{path.name}:{name}() -> {sym.get_name()}")
+                walk(child, name)
+        walk(top, "")
+
+    check(f"no function reads an undefined global ({'; '.join(offenders)})"
+          if offenders else "no function reads an undefined global",
+          not offenders)
+
+
 def test_packaging():
     """The archive builders, which ship the code to other people's machines."""
     import importlib.util
@@ -327,6 +361,25 @@ def test_packaging():
     # Windows builds must not emit backslash paths, or the archive unpacks as
     # one long filename on Linux.
     check("archive paths are posix", not any("\\" in a for a in arcs))
+
+    # Release notes come from the CHANGELOG, so the two cannot drift apart.
+    doc = ("# Changelog\n\n"
+           "## v0.2.10 — 2026-10-01\n\nten.\n\n"
+           "## v0.2.0 — 2026-09-16\n\nzero.\n\n### Added\n\n- a thing\n\n"
+           "## v0.1.0-beta — 2026-09-15\n\nbeta.\n")
+    check("extracts the right section",
+          pkg.changelog_section("v0.2.0", doc) == "zero.\n\n### Added\n\n- a thing")
+    # A prefix match would hand v0.2.0's tag v0.2.10's notes.
+    check("v0.2.0 does not match v0.2.10",
+          pkg.changelog_section("v0.2.10", doc) == "ten.")
+    check("a leading v is optional",
+          pkg.changelog_section("0.1.0-beta", doc) == "beta.")
+    missing = False
+    try:
+        pkg.changelog_section("v9.9.9", doc)
+    except SystemExit:
+        missing = True
+    check("an unknown version fails rather than releasing empty notes", missing)
 
     # The check that matters: a key anywhere in the payload stops the build.
     key = b"ZZZfakekeyfakekeyfakekeyfakekeyfakekey"
@@ -451,7 +504,7 @@ def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_scoreboard,
                test_download_options, test_labels, test_render, test_identify,
                test_ledger_and_picking, test_competitive_filter, test_audit,
-               test_packaging, test_sharding, test_db):
+               test_packaging, test_no_unbound_globals, test_sharding, test_db):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

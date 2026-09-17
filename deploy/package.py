@@ -143,6 +143,38 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def changelog_section(version: str, text: str) -> str:
+    """The body of one release's section in CHANGELOG.md.
+
+    Headings look like `## v0.2.0 -- 2026-09-16`. Matching on the version
+    token alone keeps the date out of it, and requires the heading to be
+    exactly that version so v0.2.0 never matches v0.2.10.
+    """
+    want = version if version.startswith("v") else f"v{version}"
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and line[3:].split()[:1] == [want]:
+            start = i + 1
+            break
+    if start is None:
+        raise SystemExit(f"CHANGELOG.md has no section for {want}")
+    body = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        body.append(line)
+    return "\n".join(body).strip()
+
+
+def cmd_notes(args) -> int:
+    path = ROOT / "CHANGELOG.md"
+    if not path.exists():
+        raise SystemExit("no CHANGELOG.md")
+    print(changelog_section(args.version, path.read_text()))
+    return 0
+
+
 def cmd_release(args) -> int:
     version = args.version or dt.date.today().strftime("%Y.%m.%d")
     name = f"tbavid-{version}"
@@ -220,6 +252,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("release", help="dist/ archives for a GitHub release")
     p.add_argument("version", nargs="?", help="defaults to today's date")
     p.set_defaults(func=cmd_release)
+
+    p = sub.add_parser("notes", help="print one release's CHANGELOG section")
+    p.add_argument("version", help="e.g. v0.2.0")
+    p.set_defaults(func=cmd_notes)
 
     p = sub.add_parser("code", help="one .tgz of the code for another machine")
     p.add_argument("out", nargs="?", help="output path")

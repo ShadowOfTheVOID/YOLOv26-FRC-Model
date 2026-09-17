@@ -2,6 +2,11 @@
 
 Notable changes per release. Dates are the release date, not the merge date.
 
+Each `## vX.Y.Z` section below is the release body: `.github/workflows/release.yml`
+reads it with `python3 deploy/package.py notes vX.Y.Z` when the tag is pushed,
+so the notes and this file cannot drift apart. A tag with no section here fails
+the build rather than publishing an empty release.
+
 ## v0.2.0 — 2026-09-16
 
 Harvesting is now restricted to official competition footage, and an existing
@@ -28,8 +33,33 @@ harvest can be checked against that same standard.
   because a bare event key does not carry `event_type`. Still one request per
   season, still cached and revalidated with `If-None-Match`.
 
+### Added (release process)
+
+- **Releases are cut by pushing a tag.** `.github/workflows/release.yml` runs
+  the suite, scans the tree for a committed key, builds all three archives with
+  `deploy/package.py`, extracts the notes from this file, proves the built
+  archive runs by extracting it and running the suite from inside it, then
+  creates the GitHub release with the archives and `SHA256SUMS` attached.
+  Nothing is built or uploaded by hand, and the checksums in the notes are
+  always the ones from the artifacts actually attached.
+- `workflow_dispatch` builds and verifies a version without publishing, so a
+  release can be rehearsed before its tag exists.
+- `python3 deploy/package.py notes vX.Y.Z` prints a release's section from this
+  file.
+
 ### Fixed
 
+- **`run.py pull` crashed on every video it successfully downloaded.**
+  `_process()` read `shard` and `shards`, which are parameters of `fetch()`,
+  not of it — `NameError: name 'shards' is not defined`. The conditional
+  tested `shards > 1` first, so it raised on single-worker runs too, and it
+  raised at the very end: after the download, shot analysis, crop, render and
+  scoreboard OCR had all completed for that video. Present since the initial
+  commit and in the `Beta` release. The shard is now passed in, and
+  `reprocess` preserves the one already recorded instead of erasing it.
+- A test walks the symbol table of every function in `tbavid/`, `run.py` and
+  `serve.py` and fails on any global that no module global defines. The crash
+  above needed a real video to reach, which the suite deliberately has none of.
 - `deploy/make_code_archive.sh` built its file list from a hardcoded string and
   aborted once `QUICKSTART_DEBIAN.txt` was deleted from the repo — leaving a
   half-written archive behind that had never reached the keyless check. The

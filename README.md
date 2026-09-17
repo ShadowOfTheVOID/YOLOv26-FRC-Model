@@ -237,6 +237,24 @@ TBA responses are cached in `state/tba_cache/` and revalidated with
 a season has ~1000 events and we stop as soon as enough unseen videos are
 found.
 
+## Cutting a release
+
+Add a `## vX.Y.Z` section to [CHANGELOG.md](CHANGELOG.md), then push the tag:
+
+```bash
+git tag -a v0.3.0 -m "v0.3.0" && git push origin v0.3.0
+```
+
+CI does the rest — runs the suite, refuses to proceed if a key is committed,
+builds the `.zip`/`.tar.gz`/`.tar.xz`, extracts the notes from the changelog,
+checks the built archive actually runs, and publishes the release with
+`SHA256SUMS` attached. A tag with no changelog section fails rather than
+publishing empty notes.
+
+To rehearse without publishing, run the `release` workflow manually from the
+Actions tab with a version — it builds and verifies, and uploads the artifacts
+for inspection without creating a release.
+
 ## Config
 
 All knobs live in `config.json`; see `tbavid/config.py` for defaults.
