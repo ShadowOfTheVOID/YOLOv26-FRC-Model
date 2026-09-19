@@ -1,5 +1,7 @@
 * text=auto eol=lf
 *.sh text eol=lf
+*.command text eol=lf
+*.bat text eol=crlf
 *.py text eol=lf
 *.ipynb text eol=lf
 *.jpg binary
