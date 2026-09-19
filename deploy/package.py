@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Explicit allowlist. A denylist would eventually miss something, and the thing
 # it misses is the file with the key in it.
 INCLUDE = ["run.py", "serve.py", "config.json", "requirements.txt", "README.md",
+           "start.command", "start.sh", "start.bat",
            "SCOUTING.md", "DATA.md", "CHANGELOG.md", "LICENSE",
            "tbavid", "train", "tests", "deploy", "docs"]
 
@@ -88,8 +89,8 @@ def assert_keyless(blobs, key: bytes, what: str) -> None:
 
 
 def _mode_for(path: Path) -> int:
-    """Windows has no executable bit; keep .sh runnable when built there."""
-    if path.suffix == ".sh" or path.name.endswith(".bash"):
+    """Windows has no executable bit; keep .sh/.command runnable anyway."""
+    if path.suffix in (".sh", ".command") or path.name.endswith(".bash"):
         return 0o755
     return 0o755 if os.access(path, os.X_OK) else 0o644
 
