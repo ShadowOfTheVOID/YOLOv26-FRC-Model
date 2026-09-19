@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from tbavid import pipeline
-from tbavid.config import VIDEO_DIR, load_config
+from tbavid.config import ROOT, VIDEO_DIR, load_config
 
 # Python block-buffers stdout when it is a pipe, so a backgrounded run showed
 # nothing at all for minutes while it was in fact working. Progress output is
@@ -156,7 +156,7 @@ def cmd_release(args, cfg):
     """Release tooling lives in deploy/, which is not an importable package --
     it ships in the archives but is not part of tbavid itself."""
     import importlib.util
-    path = Path(__file__).resolve().parent / "deploy" / "release.py"
+    path = ROOT / "deploy" / "release.py"
     spec = importlib.util.spec_from_file_location("tbavid_release", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
