@@ -161,9 +161,11 @@ def cmd_release(args, cfg):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     argv = [args.version]
-    for flag in ("tag", "push", "skip_tests"):
+    for flag in ("tag", "push", "sync", "skip_tests"):
         if getattr(args, flag):
             argv.append("--" + flag.replace("_", "-"))
+    if args.message:
+        argv += ["-m", args.message]
     return mod.main(argv)
 
 
@@ -316,6 +318,10 @@ def main(argv=None):
                    help="write the annotated tag locally; does not push")
     p.add_argument("--push", action="store_true",
                    help="push the tag, which publishes the release")
+    p.add_argument("--sync", action="store_true",
+                   help="git checkout main && git pull --ff-only first")
+    p.add_argument("-m", "--message",
+                   help="tag message (default: version + CHANGELOG's first line)")
     p.add_argument("--skip-tests", action="store_true",
                    help="re-run after a known-good test pass")
     p.set_defaults(func=cmd_release)

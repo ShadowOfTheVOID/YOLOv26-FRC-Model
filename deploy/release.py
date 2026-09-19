@@ -4,6 +4,13 @@
     python3 run.py release v0.2.1            # check and build, change nothing
     python3 run.py release v0.2.1 --tag      # ...and write the tag locally
     python3 run.py release v0.2.1 --push     # ...and push it, which publishes
+    python3 run.py release v0.2.1 --sync --push    # ...from a fresh main
+
+The long way round, which this replaces:
+
+    git checkout main && git pull
+    git tag -a v0.2.0 -m "v0.2.0 -- competitive-only harvesting"
+    git push origin v0.2.0
 
 Releasing here is "push a tag and let .github/workflows/release.yml do the
 rest", which is a good arrangement with one sharp edge: every check lives on
@@ -115,18 +122,41 @@ def check_tree_clean():
     ok("working tree is clean")
 
 
-def check_branch():
+def sync_main():
+    """`git checkout main && git pull` -- the first line of the ritual.
+
+    Only ever a fast-forward: if main and origin/main have diverged, that is
+    a situation with a human-sized decision in it, not something to resolve
+    on the way to a tag.
+    """
     branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     if branch != "main":
-        warn(f"on branch {branch}, not main -- the tag will point there")
-    else:
+        proc = git("checkout", "main", check=False)
+        if proc.returncode != 0:
+            raise Failed("could not switch to main:\n  "
+                         + proc.stderr.strip())
+        ok(f"switched from {branch} to main")
+    proc = git("pull", "--ff-only", check=False)
+    if proc.returncode != 0:
+        raise Failed("git pull --ff-only failed -- main has diverged from "
+                     "origin.\n  Sort that out first; a tag is not the moment "
+                     "to be merging.\n  " + proc.stderr.strip())
+    ok("main is up to date with origin")
+
+
+def check_branch(synced=False):
+    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != "main":
+        warn(f"on branch {branch}, not main -- the tag will point there.\n"
+             "        Pass --sync to release from an up-to-date main instead.")
+    elif not synced:
         ok("on main")
     git("fetch", "--quiet", "origin", check=False)
     behind = git("rev-list", "--count", "HEAD..@{upstream}",
                  check=False)
     if behind.returncode == 0 and behind.stdout.strip() not in ("", "0"):
         warn(f"{behind.stdout.strip()} commit(s) on the remote are not in "
-             "this checkout")
+             "this checkout -- --sync pulls them")
 
 
 def check_no_key():
@@ -178,6 +208,30 @@ def check_archive(version):
         ok("the archive unpacks, passes its tests and runs")
 
 
+def tag_message(version, override=None):
+    """`v0.2.0 -- competitive-only harvesting`.
+
+    The summary is the CHANGELOG section's first line of prose, which is
+    already a one-line description of the release written for humans. Anything
+    else would be a second place to keep the same sentence.
+    """
+    if override:
+        return override
+    notes = package.changelog_section(version, (ROOT / "CHANGELOG.md").read_text())
+    summary = ""
+    for line in notes.splitlines():
+        line = line.strip()
+        if line and not line.startswith(("#", "-", "*", "|")):
+            summary = line.rstrip(".")
+            break
+    if not summary:
+        return version
+    # A tag subject past ~72 characters is a tag subject nobody reads.
+    if len(summary) > 68:
+        summary = summary[:65].rsplit(" ", 1)[0] + "..."
+    return f"{version} -- {summary}"
+
+
 # ------------------------------------------------------------------ driver
 
 def main(argv=None) -> int:
@@ -189,6 +243,11 @@ def main(argv=None) -> int:
                     help="write the annotated tag locally (still not pushed)")
     ap.add_argument("--push", action="store_true",
                     help="push the tag, which publishes the release")
+    ap.add_argument("--sync", action="store_true",
+                    help="git checkout main && git pull --ff-only first")
+    ap.add_argument("-m", "--message",
+                    help="tag message (default: version + the CHANGELOG's "
+                         "first line)")
     ap.add_argument("--skip-tests", action="store_true",
                     help="for a re-run after a known-good test pass")
     args = ap.parse_args(argv)
@@ -202,7 +261,10 @@ def main(argv=None) -> int:
         step("git")
         check_tag_free(version)
         check_tree_clean()
-        check_branch()
+        if args.sync:
+            sync_main()
+            check_tag_free(version)      # the pull may have brought it in
+        check_branch(synced=args.sync)
         check_no_key()
         if args.skip_tests:
             step("tests")
@@ -229,9 +291,7 @@ def main(argv=None) -> int:
         print(f"    git tag -a {version} -m {version} && git push origin {version}")
         return 0
 
-    notes = package.changelog_section(version, (ROOT / "CHANGELOG.md").read_text())
-    subject = next((l.strip() for l in notes.splitlines() if l.strip()), version)
-    git("tag", "-a", version, "-m", f"{version}\n\n{subject}")
+    git("tag", "-a", version, "-m", tag_message(version, args.message))
     print(f"  tagged {version} locally")
 
     if not args.push:
