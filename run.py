@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from tbavid import pipeline
-from tbavid.config import VIDEO_DIR, load_config
+from tbavid.config import ROOT, VIDEO_DIR, load_config
 
 # Python block-buffers stdout when it is a pipe, so a backgrounded run showed
 # nothing at all for minutes while it was in fact working. Progress output is
@@ -150,6 +150,23 @@ def cmd_serve(args, cfg):
     from tbavid import api
     api.serve(args.host, args.port)
     return 0
+
+
+def cmd_release(args, cfg):
+    """Release tooling lives in deploy/, which is not an importable package --
+    it ships in the archives but is not part of tbavid itself."""
+    import importlib.util
+    path = ROOT / "deploy" / "release.py"
+    spec = importlib.util.spec_from_file_location("tbavid_release", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    argv = [args.version]
+    for flag in ("tag", "push", "sync", "skip_tests"):
+        if getattr(args, flag):
+            argv.append("--" + flag.replace("_", "-"))
+    if args.message:
+        argv += ["-m", args.message]
+    return mod.main(argv)
 
 
 def cmd_audit(args, cfg):
@@ -293,6 +310,21 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8781)),
                    help="honours $PORT, which most hosts inject")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("release",
+                       help="check, build and (optionally) tag a release")
+    p.add_argument("version", help="e.g. v0.2.1")
+    p.add_argument("--tag", action="store_true",
+                   help="write the annotated tag locally; does not push")
+    p.add_argument("--push", action="store_true",
+                   help="push the tag, which publishes the release")
+    p.add_argument("--sync", action="store_true",
+                   help="git checkout main && git pull --ff-only first")
+    p.add_argument("-m", "--message",
+                   help="tag message (default: version + CHANGELOG's first line)")
+    p.add_argument("--skip-tests", action="store_true",
+                   help="re-run after a known-good test pass")
+    p.set_defaults(func=cmd_release)
 
     p = sub.add_parser("status", help="ledger and dataset summary")
     p.set_defaults(func=cmd_status)
