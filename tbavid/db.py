@@ -185,6 +185,124 @@ def _migrate(con: sqlite3.Connection) -> None:
     con.commit()
 
 
+def write_live(con: sqlite3.Connection, event_key: str, match_key: str,
+               series: Dict[str, list], totals: Dict[str, Optional[int]],
+               teams: Optional[Dict[str, list]] = None,
+               label: str = "", note: str = "") -> Dict[str, int]:
+    """Write one live-scouted match: the timeline, the totals and the roster.
+
+    Separate from `build`, which rebuilds everything from the manifest and
+    would erase anything the manifest does not know about -- and the manifest
+    is the DATASET's record, which a live read deliberately never enters. So
+    these rows have no `video_id`, no crop and no frames, and that is the
+    correct shape rather than a gap: nothing was kept to point at.
+
+    `status` is 'live' so the two can always be told apart afterwards. A row
+    read off a broadcast as it happened and a row read off a downloaded video
+    are the same measurement of the same counter, but not the same evidence --
+    the live one cannot be re-read, because the video is gone.
+
+    Idempotent per match: re-running replaces that match's timeline rather than
+    appending a second copy of it.
+    """
+    year = int(event_key[:4]) if event_key[:4].isdigit() else None
+    con.execute("INSERT OR IGNORE INTO events(event_key, year) VALUES (?,?)",
+                (event_key, year))
+
+    # A live read is only as good as the OCR: no readings at all means the
+    # counters were never found or never parsed, and that must not land as a
+    # confident zero.
+    ok = 1 if any(series.get(a) for a in ("blue", "red")) else 0
+    con.execute("""
+        INSERT INTO matches (match_key, event_key, comp_level, label, status,
+                             blue_fuel, red_fuel, scoreboard_ok, scoreboard_note)
+        VALUES (?,?,?,?,'live',?,?,?,?)
+        ON CONFLICT(match_key) DO UPDATE SET
+            event_key=excluded.event_key, status=excluded.status,
+            blue_fuel=excluded.blue_fuel, red_fuel=excluded.red_fuel,
+            scoreboard_ok=excluded.scoreboard_ok,
+            scoreboard_note=excluded.scoreboard_note,
+            label=COALESCE(excluded.label, matches.label)
+        """, (match_key, event_key, _comp_level(label), label or None,
+              totals.get("blue"), totals.get("red"), ok, note or None))
+
+    if teams:
+        con.execute("DELETE FROM match_teams WHERE match_key=?", (match_key,))
+        for alliance in ("blue", "red"):
+            for station, team in enumerate(teams.get(alliance) or [], start=1):
+                try:
+                    number = int(str(team).replace("frc", ""))
+                except (TypeError, ValueError):
+                    continue
+                con.execute("INSERT OR IGNORE INTO match_teams"
+                            "(match_key, alliance, station, team) VALUES (?,?,?,?)",
+                            (match_key, alliance, station, number))
+
+    con.execute("DELETE FROM score_events WHERE match_key=?", (match_key,))
+    rows = 0
+    for alliance, points in (series or {}).items():
+        prev = None
+        for point in points:
+            t, v = point[0], point[1]
+            if prev is not None and v > prev:
+                con.execute("INSERT INTO score_events"
+                            "(match_key,t_source,alliance,balls,total)"
+                            " VALUES (?,?,?,?,?)",
+                            (match_key, float(t), alliance, int(v - prev), int(v)))
+                rows += 1
+            prev = v
+    con.commit()
+    return {"score_events": rows, "scoreboard_ok": ok}
+
+
+def _comp_level(label: str) -> Optional[str]:
+    """'qm14' -> 'qm'. Advisory only; an unrecognised label stays NULL."""
+    for level in ("qm", "sf", "qf", "ef", "f"):
+        if label.startswith(level):
+            return level
+    return None
+
+
+def export_for_serving(dest: Path, src: Path = None) -> Path:
+    """Write a copy of the database that can be served from a read-only disk.
+
+    Not `cp`. The working database runs in WAL mode, and a WAL database needs
+    to create its `-shm` companion before anything -- including a strictly
+    read-only connection -- can read it. Copy one onto a host that mounts its
+    data directory read-only, which is what `deploy/frc-harvest.service` does
+    on purpose, and the API starts cleanly and then fails every request with
+    "attempt to write a readonly database". Verified as an unprivileged user
+    against a 0555 directory, which is exactly what systemd's ReadOnlyPaths
+    produces.
+
+    So the copy is taken through SQLite's own backup API -- which waits for a
+    consistent snapshot rather than catching the file mid-write, the other way
+    `cp` gets this wrong -- and then switched out of WAL. A DELETE-journal
+    database needs no sidecar files at all and reads fine with nothing but the
+    read bit.
+    """
+    src = src or DB_PATH
+    if not src.exists():
+        raise SystemExit(f"{src} does not exist -- run `run.py db sync` first")
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    for stale in (dest, Path(f"{dest}-wal"), Path(f"{dest}-shm")):
+        stale.unlink(missing_ok=True)
+
+    source = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    target = sqlite3.connect(dest)
+    try:
+        source.backup(target)
+        # Collapses any WAL the snapshot carried into the main file and leaves
+        # nothing beside it for a reader to have to create.
+        target.execute("PRAGMA journal_mode=DELETE")
+        target.execute("VACUUM")
+    finally:
+        target.close()
+        source.close()
+    return dest
+
+
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)

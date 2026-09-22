@@ -1,0 +1,65 @@
+# systemd unit for the harvest's read-only API.
+#
+#   sudo cp deploy/frc-harvest.service /etc/systemd/system/
+#   sudo systemctl enable --now frc-harvest
+#
+# This is what stops the API being something somebody has to remember to start.
+# `python3 serve.py` on a laptop dies when the lid closes, and the scouting hub
+# then shows an empty column that looks exactly like "no footage of these
+# robots" -- see server/vision.py in the scouting app for why those two states
+# are told apart. Under systemd it comes back after a crash, after a reboot,
+# and after the host is rebuilt.
+#
+# There are no secrets here, and that is not an oversight: the API is GET-only
+# over a database that is rebuildable from its own manifest, so there is
+# nothing to authenticate to. Contrast mirror/deploy/frc-mirror.service in the
+# scouting app, which carries two.
+#
+# HARVESTING DOES NOT RUN HERE. This serves a database somebody else built.
+# `run.py pull` and `run.py stream` want ffmpeg, yt-dlp, numpy and hours of a
+# machine's attention; this wants python3 and a file. Build the database where
+# the videos are, then copy it over:
+#
+#   python3 run.py db sync                          # on the harvest machine
+#   scp data/scouting.db host:/var/lib/frc-harvest/  # then this serves it
+#
+# So the unit is deliberately read-only on everything except nothing at all.
+
+[Unit]
+Description=FRC broadcast harvest read-only API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=frcharvest
+Group=frcharvest
+WorkingDirectory=/opt/YOLOv26-FRC-Model
+# TBAVID_DATA is where serve.py looks for scouting.db -- see tbavid/config.py.
+# Pointed at the state directory rather than into the checkout so a `git pull`
+# on the code never touches the data, and a copied-in database never shows up
+# as a dirty working tree.
+Environment=TBAVID_DATA=/var/lib/frc-harvest
+Environment=HOST=127.0.0.1
+Environment=PORT=8781
+ExecStart=/usr/bin/python3 /opt/YOLOv26-FRC-Model/serve.py
+
+Restart=always
+RestartSec=5
+
+# It opens one SQLite file read-only and answers GETs. It has no business
+# writing anything, so it cannot.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=frc-harvest
+ReadOnlyPaths=/var/lib/frc-harvest
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,65 @@
+# systemd unit for the ball counter on a game system.
+#
+#   sudo cp deploy/frc-counter.service /etc/systemd/system/
+#   sudo systemctl edit frc-counter      # set the weights, camera and hubs
+#   sudo systemctl enable --now frc-counter
+#
+# This is the one unit here that needs real hardware. `frc-harvest.service`
+# serves a SQLite file with python3 and nothing else; this loads a neural
+# network and runs it on every frame of a live camera. On a CPU it will fall
+# behind the field and the count will lag or drop balls, which is worse than
+# no count at all because it looks like a count. Run it where there is a GPU,
+# and check `--frames` on a recording first to see what frame rate you get.
+#
+# It holds no secrets. It reads a camera and writes one SQLite file.
+
+[Unit]
+Description=FRC fuel counter (detector, no scoreboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=frccounter
+Group=frccounter
+WorkingDirectory=/opt/YOLOv26-FRC-Model
+Environment=TBAVID_DATA=/var/lib/frc-counter
+
+# systemctl edit frc-counter, then set these to your field:
+#   [Service]
+#   Environment=COUNTER_WEIGHTS=/var/lib/frc-counter/best.pt
+#   Environment=COUNTER_SOURCE=0
+#   Environment=COUNTER_HUB_BLUE=300,100,100,100
+#   Environment=COUNTER_HUB_RED=700,100,100,100
+#
+# Give it the hub boxes rather than letting it learn them. Learning spends the
+# first ninety frames finding the hub and counts nothing while it does, which
+# is correct but is ninety frames of a match you do not get back. Read them off
+# one frame once -- the camera does not move -- and they are right every time
+# after.
+Environment=COUNTER_WEIGHTS=/var/lib/frc-counter/best.pt
+Environment=COUNTER_SOURCE=0
+
+ExecStart=/opt/YOLOv26-FRC-Model/.venv-detect/bin/python \
+    /opt/YOLOv26-FRC-Model/run.py count \
+    --weights ${COUNTER_WEIGHTS} \
+    --source ${COUNTER_SOURCE} \
+    --hub-blue ${COUNTER_HUB_BLUE} \
+    --hub-red ${COUNTER_HUB_RED}
+
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=frc-counter
+ReadWritePaths=/var/lib/frc-counter
+# A camera is a device, so unlike the API unit this one cannot hide /dev.
+DeviceAllow=char-video4linux rw
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

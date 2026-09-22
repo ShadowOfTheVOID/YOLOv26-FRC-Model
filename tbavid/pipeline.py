@@ -8,13 +8,14 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import crop, download, labels, ledger as L, render, review, scoreboard, shots
+from . import (crop, download, formats, labels, ledger as L, render, review,
+               scoreboard, shots, stream as stream_mod)
 from .config import (DATA, FRAME_DIR, LABEL_DIR, MANIFEST_PATH, OCR_WORK,
                      RAW_DIR, REVIEW_DIR, THUMB_DIR, VIDEO_DIR, ensure_dirs,
                      tba_key)
 from .ffm import probe, require_tools
 from .ledger import Ledger
-from .tba import TBAClient, pick_unseen
+from .tba import TBAClient, match_label, pick_unseen
 
 QUARANTINE_DIR = REVIEW_DIR / "quarantine"
 
@@ -143,10 +144,21 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
         if located.get("error"):
             print(f"  scoreboard: {located['error']}")
 
+    # Which broadcast this is, decided before a pixel is measured: the event's
+    # district came from TBA with the candidate, and the profile it selects
+    # tunes the crop detectors and then checks their answers. See formats.py.
+    fmt, why = formats.select(district=cand.get("district", ""),
+                              event_key=cand.get("event_key", ""),
+                              title=meta.get("title", ""),
+                              cfg=cfg,
+                              event_type=cand.get("event_type"))
+    print(f"  format: {fmt.name} ({why})")
+
     try:
         crop_box = crop.resolve_crop(raw, analysis, cfg,
                                      banner_floor_px=scoreboard.banner_floor_px(located),
-                                     event_key=cand.get("event_key", ""))
+                                     event_key=cand.get("event_key", ""),
+                                     fmt=fmt)
     except ValueError as exc:
         return {"error": str(exc)}
     for note in crop_box["notes"]:
@@ -181,6 +193,9 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
     return {
         **{k: cand[k] for k in ("yt_key", "match_key", "event_key", "label")},
         "teams": cand.get("teams") or {},
+        "district": cand.get("district", ""),
+        "event_type": cand.get("event_type"),
+        "format": {"name": fmt.name, "why": why, "provenance": fmt.provenance},
         "shard": shard_label,
         "worker": cfg.get("worker") or None,
         "title": meta.get("title", ""),
@@ -194,6 +209,139 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
         "reviewed": False,
         "exported": None,
     }
+
+
+def ingest_stream(cfg: dict, url: str = "", local: Optional[Path] = None,
+                  event_key: str = "", from_match: str = "",
+                  listen_only: bool = False, limit: int = 0,
+                  force: bool = False) -> int:
+    """One event-day stream in, one manifest entry per match out.
+
+    The whole reason this exists: a district weekend publishes a single
+    multi-hour broadcast, so the per-match picker in `tba.py` finds nothing and
+    every match would otherwise have to be cut out and fed in by hand.
+    """
+    require_tools()
+    ensure_dirs()
+
+    if local:
+        raw = Path(local).expanduser()
+        if not raw.exists():
+            raise SystemExit(f"{raw} does not exist")
+        info = probe(raw) or {}
+        meta = {"title": raw.stem, "duration": info.get("duration", 0.0),
+                "id": raw.stem}
+        print(f"[1/4] reading {raw} ({meta['duration'] / 60:.0f} min)")
+    else:
+        print(f"[1/4] fetching the whole stream -- this is a long download")
+        raw, fail, meta = stream_mod.download_stream(url, RAW_DIR, cfg)
+        if fail or raw is None:
+            print(f"  ! could not fetch it: {fail}")
+            return 1
+        print(f"  got {raw.name} ({meta.get('duration', 0) / 60:.0f} min)")
+
+    print("[2/4] listening for the field")
+    heard = stream_mod.listen(raw, cfg, duration_s=meta.get("duration") or 0.0)
+    for line in heard["report"]:
+        print(f"  {line}" if not line.startswith(" ") else line)
+    windows = heard["windows"]
+    if not windows:
+        print("\n  Nothing match-shaped in the audio. Either this is not an event\n"
+              "  broadcast, or its field sounds do not carry on this mix. Try\n"
+              "  `--listen-only` on a second stream from the same venue before\n"
+              "  assuming the detector is at fault.")
+        return 1
+    print(f"  {len(windows)} match-shaped interval(s)")
+    if listen_only:
+        for i, w in enumerate(windows, 1):
+            print(f"    {i:>3}. {w['start'] / 60:>6.1f} min  "
+                  f"{w['duration']:>5.0f}s  {w['basis']}")
+        print("\n  --listen-only: nothing was cut and nothing was written.")
+        return 0
+
+    # Identity comes from TBA or not at all -- see stream.align.
+    matches, event_rec = [], {}
+    if event_key:
+        client = TBAClient(tba_key(), cfg["tba_min_interval_s"])
+        matches = stream_mod.event_matches(client, event_key,
+                                          cfg.get("competitive_only", True))
+        event_rec = client.event(event_key)
+        print(f"  TBA has {len(matches)} match(es) at {event_key}")
+    plan = stream_mod.align(windows, matches, from_match=from_match)
+    print(f"[3/4] identity: {plan['basis']}")
+    if not plan["identified"]:
+        print("  No match keys assigned. The clips still become training frames --\n"
+              "  they enter the database under their own video id, so no roster\n"
+              "  joins onto them and no team is credited with anything.")
+
+    manifest = load_manifest()
+    stem = meta.get("id") or "stream"
+    district = formats.district_of(event_rec)
+    produced = []
+    pairs = plan["pairs"][:limit] if limit else plan["pairs"]
+
+    print(f"[4/4] cutting and processing {len(pairs)} clip(s)")
+    for i, (win, match) in enumerate(pairs, 1):
+        label = match_label(match) if match else f"seg{i:03d}"
+        vid = f"{event_key or stem}_{label}_{stem}"
+        if vid in manifest["videos"] and not force:
+            print(f"  {i}/{len(pairs)} {label}: already in the manifest, skipping")
+            continue
+        dest = RAW_DIR / f"{vid}.mp4"
+        print(f"  {i}/{len(pairs)} {label}: {win['start'] / 60:.1f} min "
+              f"+{win['duration']:.0f}s ({win['basis']})")
+        clip = stream_mod.cut(raw, win["start"], win["end"], dest)
+        if clip is None:
+            print("    ! the cut failed; skipping")
+            continue
+
+        cand = {
+            # Unique per clip, because the ledger and the manifest are both
+            # keyed on it and every clip came out of one source video.
+            "yt_key": f"{stem}#{i:03d}",
+            "match_key": (match or {}).get("key", ""),
+            "event_key": event_key or (match or {}).get("event_key", ""),
+            "label": label,
+            "district": district,
+            "event_type": event_rec.get("event_type"),
+            "teams": {side: [t.replace("frc", "") for t in
+                             (((match or {}).get("alliances") or {})
+                              .get(side, {}).get("team_keys") or [])]
+                      for side in ("blue", "red")} if match else {},
+        }
+        entry = _process(clip, vid, cand,
+                         {"title": f"{meta.get('title', '')} -- {label}",
+                          "duration": win["duration"]}, cfg)
+        if entry.get("error"):
+            print(f"    ! {entry['error']}")
+            _cleanup_raw(clip, cfg)
+            continue
+        # Kept on the entry so a scouting row can always be traced back to what
+        # established its identity, rather than that being lost at import.
+        entry["identity"] = {
+            "basis": plan["basis"],
+            "cue": win["basis"],
+            "source": "stream",
+            "source_id": stem,
+            "at_s": win["start"],
+        }
+        manifest["videos"][vid] = entry
+        produced.append(vid)
+        save_manifest(manifest)
+
+    if not produced:
+        print("\nnothing new was produced")
+        return 1
+    print(f"\nexporting frames from {len(produced)} clip(s)")
+    total = export(cfg, only=produced)
+    named = sum(1 for v in produced if manifest["videos"][v].get("match_key"))
+    print(f"\ndone: {len(produced)} clip(s), {total} frames, "
+          f"{named} identified against TBA's schedule")
+    if named < len(produced):
+        print(f"      {len(produced) - named} clip(s) have no match key, so they\n"
+              f"      train the detector and credit nobody. `--from-match` is how\n"
+              f"      you name them if you know where the day starts.")
+    return 0
 
 
 def _cleanup_raw(raw: Path, cfg: dict) -> None:
@@ -328,7 +476,12 @@ def reprocess(cfg: dict, only: Optional[List[str]] = None) -> int:
         if raw is None:
             print(f"  ! {vid}: no source available")
             continue
-        cand = {k: entry.get(k, "") for k in ("yt_key", "match_key", "event_key", "label")}
+        cand = {k: entry.get(k, "")
+                for k in ("yt_key", "match_key", "event_key", "label", "district")}
+        # None, not "": an entry harvested before the type was recorded has no
+        # type, and a profile gated on one must fail that gate rather than be
+        # waived -- see formats.Format.matches.
+        cand["event_type"] = entry.get("event_type")
         cand["teams"] = entry.get("teams") or {}
         meta = {"title": entry.get("title", ""),
                 "duration": entry.get("source_duration") or 0.0}

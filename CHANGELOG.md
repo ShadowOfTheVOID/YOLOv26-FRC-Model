@@ -7,6 +7,195 @@ reads it with `python3 deploy/package.py notes vX.Y.Z` when the tag is pushed,
 so the notes and this file cannot drift apart. A tag with no section here fails
 the build rather than publishing an empty release.
 
+## Unreleased
+
+Three things: a whole event day can be harvested from one stream, the crop
+knows which broadcast it is looking at, and the scouting app can read this
+harvest's output as a source of its own.
+
+### Added
+
+- **`run.py detect` — a trained `.pt` finally has somewhere to go.** Until now
+  `ultralytics` appeared in exactly one file, on the training side: a finished
+  model loaded nowhere, the `detections` table was written by nothing, and
+  `identify.py` waited on "a tracker upstream" that did not exist. Everything
+  downstream of the detector was designed and unreachable. This runs the model
+  over the exported frames in play order with tracking persisted between them,
+  and records boxes, classes, confidences and tracks — each tagged with the
+  weights that produced it, so two models' opinions can never be read as one.
+  Idempotent per match, so better weights replace a match rather than
+  accumulating beside it.
+  It does **not** close the per-robot gap and does not pretend to:
+  `assign_tracks` still needs a scorer, `identify.py` still measures a bumper
+  number at ~5 px tall, and with no scorer it records nothing rather than
+  naming whichever team sorts first. `--assign` reports that as the answer.
+- **`run.py count` — scored fuel from the detector alone, no scoreboard and no
+  OCR** (`tbavid/count.py`, plus `deploy/frc-counter.service`). Everything else
+  that produces a fuel number reads the broadcast's burned-in counter, which is
+  right when there is one and no answer at all on a field that renders none — a
+  practice field, an offseason event, a demo, somebody's own game system. The
+  same `.pt` already has a `fuel` class and a hub per alliance, so this counts
+  the event itself: a fuel track vanishing inside a hub region.
+  Almost all of it is refusing the three things that look identical to that — a
+  one-frame false detection, a ball a robot drove in front of (it never crossed
+  *into* the hub), and a ball that passed *over* it and comes back the other
+  side. The last cannot be settled in the moment, so a score is held for a few
+  frames and a reappearance withdraws it, which is the same shape as
+  `clean_series` wanting two reads before believing a large jump. Every refusal
+  is counted and reported, because a counter that rejects silently is one
+  nobody can debug.
+  Note the deliberate opposite of `detect`: that one discards fuel track ids
+  because it runs at 3 fps where a ball moves further between samples than its
+  own width; this runs at a camera's native rate where tracking the ball is the
+  whole method.
+- **`run.py count --scoreboard` — the scoreboard at a scrimmage**
+  (`tbavid/field.py`). With no FMS, the count is not a cross-check against a
+  real score, it *is* the score, and a number on a laptop nobody can see, with
+  no clock and no way to correct it, is not a scoreboard. So: a match clock, so
+  fuel thrown about between matches does not score and the detector stops at
+  the buzzer; the score handed out as JSON over stdlib HTTP and as one line
+  per change on stdout, with no display of its own because whatever shows the
+  score at a field already exists; and a referee's correction, which works
+  after the buzzer because that is when corrections happen. `detected`
+  and `adjusted` are kept apart in the record and on screen, because "the
+  camera missed two" and "the camera saw two that never happened" are different
+  facts about a setup. Points per ball are configurable and default to 1, since
+  `db.py` already refuses to convert fuel to points and a scrimmage runs
+  whatever rules its organiser chose.
+- **The training code produces a model for counting, not just for scouting.**
+  `train/subset_classes.py` derives a `fuel`/`hub_blue`/`hub_red` dataset from
+  the labelled five-class one, remapping the label indices — the step that
+  fails silently if it is wrong, since a model trains perfectly happily on fuel
+  labelled as hubs. `train.py` gained `--data`, so a derived set can actually
+  be trained (it previously hardcoded the five-class path, and counted that
+  one's labels while training against another), and `--export`, because on a
+  CPU box ONNX is often the difference between keeping up with the camera and
+  not. `train/benchmark.py` measures achievable frame rate on the machine you
+  will use, reporting the p95 as well as the median: a model averaging 30 fps
+  that stalls for 200 ms every few seconds drops balls in the stalls while
+  looking fine on the average.
+  With two class orders now in play, a model that does not carry its own class
+  names is refused by both `detect.load` and `count.run_source` rather than
+  assumed to be the five-class one — that assumption would relabel every
+  detection without failing anything.
+- **The counter checks itself, because nothing else can.** With no FMS there
+  is no second number anywhere that would disagree with a wrong count, and the
+  failure that matters is silent: a box too slow for the camera misses balls
+  between the frames it does see, and the score comes out low with no gap and
+  nothing odd about it. `--expect-fps` gives it the camera's rate and it
+  reports whether it is keeping up, what fraction of frames went past unseen,
+  and every reason it refused a ball — in the same payload as the score.
+  Without that rate it reports `keepingUp: null` rather than guessing, since it
+  cannot tell a slow processor from a slow camera. And `POST /clock` follows an
+  outside clock, which is the only quantity at a scrimmage that can be compared
+  against anything — moving it never moves the score.
+- **Deployment is documented end to end** in [DEPLOY.md](DEPLOY.md): three
+  roles with three different dependency sets, in the order to do them, with
+  the `.pt` as the only step left. `requirements-detect.txt` keeps torch and
+  ultralytics out of `requirements.txt` on purpose — the API host runs
+  `serve.py` with python3 and nothing else, and a test now asserts that the
+  whole serving path imports no third-party package, because breaking that
+  promise would only show up on a machine nobody is sitting at.
+- **`run.py live` — scout a live feed and keep no video.** Everything else
+  here builds a training set, which is no use to somebody who wants to know how
+  an alliance is scoring this afternoon. This reads the burned-in fuel counter
+  off a live stream and deletes every frame the moment it has been read: peak
+  disk is one chunk, nothing enters the manifest or the dataset, and the clip
+  is unlinked on the failure paths too. What it gives is the per-alliance
+  scoring timeline for the match on the field — when fuel went in, to the
+  second — which nothing else in either repo produces live. What it cannot give
+  is which robot: the counter says an alliance scored and never which of its
+  three did, and being live does not move that ceiling.
+  It refuses to guess the match: `--match` names it or `--hub` asks a running
+  scouting hub what is on the field, and one is required, because a timeline
+  filed against the wrong key credits an alliance's scoring to six robots that
+  were not on it. Rows are marked `status='live'`, since a reading that cannot
+  be re-read is not the same evidence as one that can.
+- **`run.py stream` — one broadcast in, one clip per match out.** Events that
+  publish a single multi-hour stream per day rather than per-match uploads were
+  simply unreachable: the picker looks for `match.videos[]` and finds nothing,
+  and `download.py` refuses the stream it is handed. Now the matches are found
+  inside it and cut out, and the clips go through the same pipeline as anything
+  else. `--file` reads one already on disk; `--listen-only` reports what the
+  audio contains without writing anything.
+- **Matches are found by listening, not watching** (`tbavid/audio.py`). Between
+  matches the camera is looking at the same field from the same place, so there
+  is no cut for `shots.py` to find. The field's start sound and buzzer are the
+  only events in a broadcast that are loud, tonal, repeated dozens of times and
+  separated by a fixed interval — and the fixed interval is what identifies
+  them. There is no frequency in the file: a band-pass at the horn's pitch
+  would need that pitch from somewhere, and a wrong guess finds nothing while
+  looking exactly like a stream with no matches in it. Every loud tonal burst
+  is collected and the spacing that repeats most consistently is the match, so
+  it works on the Webcast Unit's YouTube feed, a Twitch re-encode or a phone in
+  the stands alike.
+- **`deploy/frc-harvest.service` and `run.py db export`, so the API is not
+  something somebody has to start.** `python3 serve.py` on a laptop dies with
+  the lid, and the scouting app then shows an empty column that looks exactly
+  like "no footage of these robots" rather than "nothing is listening" -- two
+  states it goes out of its way to distinguish. Under systemd it survives a
+  crash, a reboot and a host rebuild, and it carries no secrets because a
+  GET-only API over a rebuildable database has nothing to authenticate to.
+  `db export` exists because `cp` is not good enough and fails confusingly: the
+  working database is WAL, a WAL database must create its `-shm` companion
+  before even a read-only connection can read it, and the unit mounts its data
+  directory read-only on purpose -- so a copied database starts fine and then
+  answers every request with "attempt to write a readonly database". Confirmed
+  as an unprivileged user against a 0555 directory. The export goes through
+  SQLite's backup API, which also avoids catching the file mid-write, and
+  leaves one file with no sidecars. See [deploy/HOSTING.md](deploy/HOSTING.md).
+- **Identity comes from TBA or not at all.** Audio says where a match is, never
+  which one it is, and `db.py` joins a roster onto the match key — so one
+  mislabelled clip credits an alliance's fuel to six robots that were not on
+  the field. Keys are assigned when the confirmed cue count equals TBA's match
+  count, when recovered cues close the gap to it exactly, or when
+  `--from-match` says where the day starts. Otherwise none are, and that is not
+  a failure: training frames do not need a match key, scouting rows do, so an
+  unidentified clip keeps its frames and enters the database under its own
+  video id where no roster can join onto it.
+
+- **Broadcast layout profiles** (`tbavid/formats.py`). The crop has always
+  measured the overlay from the pixels, which needs no list of events kept up
+  to date. What it could not do is know when it was wrong, and it failed
+  silently both ways: a divider found on a single-camera feed crops away the
+  bottom of the field, and frames that lost half a field still look plausible.
+  A profile says what a layout is supposed to be, so a measurement can be
+  checked against it. The measurement still wins — a profile only tunes the
+  thresholds, supplies the fallback when detection is inconclusive, and vetoes
+  a band its layout does not have.
+- **`ca_district`, for FIRST California's weekend district events** —
+  `2026caclv`, `2026casnf`, `2026calas`, `2026caven`, `2026caoec` and
+  Aerospace Valley. One field camera, a banner across the top, no permanent
+  side panel, so its main job is that veto. Marked `declared` rather than
+  `measured`: the veto and thresholds are in force, but the banner range
+  describes the layout as specified, because no California district footage has
+  been through this pipeline yet — and those events are not one production
+  (most are FIRST Webcast Unit on YouTube; Central Valley is on Twitch), so
+  the range is wide and per-event calibration is worth doing.
+- **A profile can be gated to a TBA `event_type`,** and `ca_district` is gated
+  to a weekend district event. FIRST California's state championships
+  (`2026cancmp` and its southern counterpart) carry district `ca` and are a
+  different, larger production: selecting them into a profile whose whole
+  contribution is a no-split-screen veto would keep an entire side-camera
+  panel in the training set if they do run one, which is the failure the
+  profiles exist to prevent with the sign flipped. They fall through to
+  `generic`, which has no opinion. An event whose type could not be read fails
+  the gate rather than having it waived, and config still outranks it — that
+  gate stops the pipeline guessing, not a person who has measured one.
+- **`run.py formats`** — list the profiles, ask which one an event would get
+  and why, or measure a real download with `--calibrate`. Calibration prints
+  the profile its measurements imply and writes nothing; promoting a profile
+  from `declared` to `measured` stays a person's edit, after they have looked
+  at the frames.
+- **The district comes from TBA.** `/events/{year}/simple` — the one request
+  per season the video picker already makes — carries each event's `district`,
+  so the layout is known before the download and costs no extra request. A
+  regional reads as no district, which is also how a regional is recognised.
+  `crop.format` and `crop.formats` override it per run or per event.
+- Every manifest entry records which profile it got and why, and the crop notes
+  carry the reconciliation, so a refused divider is visible afterwards rather
+  than being a number that quietly differs.
+
 ## v0.2.0 — 2026-09-16
 
 Harvesting is now restricted to official competition footage, and an existing

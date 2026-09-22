@@ -6,7 +6,24 @@
 ```bash
 .venv/bin/python run.py db sync     # build from manifest + fetch rosters from TBA
 .venv/bin/python run.py serve       # read-only JSON API on 127.0.0.1:8781
+.venv/bin/python run.py db export   # a copy a host can serve read-only
 ```
+
+**Don't run `serve` off a laptop if a scouting app depends on it.** It stops
+when the lid closes, and the app then shows an empty column that looks exactly
+like "no footage of these robots" rather than "nothing is listening". Put it
+under systemd on a host instead — one unit, no secrets, nothing to start by
+hand: [deploy/HOSTING.md](deploy/HOSTING.md). Copy the database with `db
+export` and not `cp`; that page says why, and it is not a small difference.
+
+## Two ways rows get here
+
+`db sync` builds everything from the manifest, which is the dataset's record.
+`run.py live` writes straight into these tables instead, from a live broadcast,
+keeping no video — so those rows have no `video_id`, no crop and no frames, and
+carry `status='live'`. That is the right shape rather than a gap: nothing was
+kept to point at, and a reading that cannot be re-read is worth being able to
+tell apart from one that can.
 
 ## Tables
 

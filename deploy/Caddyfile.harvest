@@ -1,0 +1,30 @@
+# The harvest API behind TLS, as a block to paste into the scouting app's
+# Caddyfile (mirror/deploy/Caddyfile) on the same host.
+#
+#   sudo systemctl reload caddy
+#
+# A subdomain rather than a path on the mirror's site, so the mirror's own
+# Content-Security-Policy and view passcode stay entirely its own business and
+# this cannot end up inside them.
+
+harvest.systemoverload.org {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# There is no authentication on the API itself: it is GET-only over match
+	# video metadata, frame filenames, scoreboard readings and detection
+	# boxes. Nothing private and nothing about a person -- but readable by
+	# anyone who finds the URL, and cheap to scrape. Uncomment to gate it, and
+	# put the same user and password in the scouting hub's harvest address as
+	# https://user:pass@harvest.example.org.
+	#
+	#   basic_auth {
+	#       harvest <bcrypt hash from `caddy hash-password`>
+	#   }
+
+	reverse_proxy 127.0.0.1:8781
+}
