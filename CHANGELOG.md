@@ -48,6 +48,19 @@ harvest's output as a source of its own.
   because it runs at 3 fps where a ball moves further between samples than its
   own width; this runs at a camera's native rate where tracking the ball is the
   whole method.
+- **`run.py count --scoreboard` — the scoreboard at a scrimmage**
+  (`tbavid/field.py`). With no FMS, the count is not a cross-check against a
+  real score, it *is* the score, and a number on a laptop nobody can see, with
+  no clock and no way to correct it, is not a scoreboard. So: a match clock, so
+  fuel thrown about between matches does not score and the detector stops at
+  the buzzer; a display served over stdlib HTTP for a projector and a phone,
+  both the same document so they cannot disagree; and a referee's ±1, which
+  works after the buzzer because that is when corrections happen. `detected`
+  and `adjusted` are kept apart in the record and on screen, because "the
+  camera missed two" and "the camera saw two that never happened" are different
+  facts about a setup. Points per ball are configurable and default to 1, since
+  `db.py` already refuses to convert fuel to points and a scrimmage runs
+  whatever rules its organiser chose.
 - **Deployment is documented end to end** in [DEPLOY.md](DEPLOY.md): three
   roles with three different dependency sets, in the order to do them, with
   the `.pt` as the only step left. `requirements-detect.txt` keeps torch and

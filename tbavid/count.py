@@ -42,14 +42,21 @@ few pixels from where it was and tracking it is the whole method. Same class in
 the same weights, opposite decision, for the same reason: what the frame rate
 can support.
 
-## What it is not
+## When this IS the score
 
-It is not the field's score and does not claim to be. It cannot see a ball that
-never appears -- one occluded for its whole flight -- and it will miscount if
-the hub region is wrong. Where a real scoreboard exists, that is the number to
-trust; `run.py verify` already checks this repo's readings against TBA's
-official totals, and counting is the thing to check, not the thing to check
-against.
+At a scrimmage there is no Field Management System, so nothing else is
+counting and there is no better number to defer to. That is the case this was
+built for, and it is why `field.py` exists: a count is not a scoreboard until
+it has a match clock, a display people can see, and a referee who can correct
+it. `run.py count --scoreboard` is the whole thing.
+
+Where a real scoreboard does exist -- a broadcast with a burned-in counter --
+read that instead. It is the field's own arithmetic and this is not.
+
+Either way the limits are the same and worth saying plainly, because at a
+scrimmage nothing else will catch them: it cannot see a ball occluded for its
+whole flight, and a hub region that is slightly wrong costs real balls. The
+answer to both is the referee, not a better threshold.
 """
 from __future__ import annotations
 

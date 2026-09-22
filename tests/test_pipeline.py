@@ -31,6 +31,7 @@ from tbavid.live import Counter as LiveCounter
 from tbavid.count import BallCounter, hub_of, hubs_from_db, learn_hubs
 from tbavid.detect import (CLASSES, alliance_of, frame_path, model_source,
                            rows_from_boxes, write_rows)
+from tbavid.field import AUTO, ENDED, IDLE, TELEOP, Match
 from tbavid.identify import best_assignment, vote
 from tbavid.labels import Timeline, source_time
 from tbavid.ledger import Ledger
@@ -1169,6 +1170,88 @@ def test_hub_geometry():
         con.close()
 
 
+def test_scrimmage_scoreboard():
+    """At a scrimmage there is no FMS, so this count IS the score.
+
+    That changes what it has to be. A number nobody can see, with no clock and
+    no way to correct it, is not a scoreboard - and the three things added for
+    that are each here because of something the counter cannot do alone.
+    """
+    m = Match("Q1", auto_s=1.0, teleop_s=2.0,
+              points_per_ball={AUTO: 4.0, TELEOP: 2.0})
+
+    # People throw fuel around between matches and robots get tested on the
+    # field. A counter running continuously would add all of it to the score.
+    check("a ball before the match starts is refused",
+          m.ball("blue") is False and m.phase() == IDLE)
+
+    m.start()
+    check("the clock starts in auto", m.phase() == AUTO)
+    m.ball("blue"); m.ball("blue")
+    blue = m.state()["alliances"]["blue"]
+    check("auto balls score at the auto rate",
+          blue["total"] == 2 and blue["points"] == 8.0)
+
+    # Phases are what make per-phase scoring possible at all, and a scrimmage
+    # is exactly where those rates get changed.
+    m.started_at -= 1.05
+    check("the clock rolls into teleop on its own", m.phase() == TELEOP)
+    m.ball("blue")
+    blue = m.state()["alliances"]["blue"]
+    check("and teleop balls score at the teleop rate",
+          blue["balls"] == {AUTO: 2, TELEOP: 1} and blue["points"] == 10.0)
+
+    # THE feature that makes this usable as a real scoreboard. count.py is
+    # careful and still fallible - it cannot see a ball occluded for its whole
+    # flight. Everywhere else this repository answers uncertainty by recording
+    # nothing, which is useless when a match needs a final score in thirty
+    # seconds. So a person gets the last word.
+    m.adjust("red", 2)
+    red = m.state()["alliances"]["red"]
+    check("a referee can add a ball the camera missed", red["total"] == 2)
+    check("and the two are never folded together",
+          red["detected"] == 0 and red["adjusted"] == 2)
+    m.adjust("red", -1)
+    check("a referee can take one away too",
+          m.state()["alliances"]["red"]["total"] == 1)
+    m.adjust("red", -50)
+    check("but cannot drive a score below zero",
+          m.state()["alliances"]["red"]["total"] == 0)
+    check("a zero adjustment changes nothing", m.adjust("blue", 0) is False)
+    check("an alliance that does not exist is refused",
+          m.adjust("purple", 1) is False)
+
+    # Most corrections happen after the buzzer - somebody saw a ball go in that
+    # the camera did not - so the detector stops and the referee does not.
+    m.started_at -= 5.0
+    check("the match ends on its own", m.phase() == ENDED)
+    before = m.state()["alliances"]["blue"]["total"]
+    check("the detector is ignored after the buzzer", m.ball("blue") is False)
+    m.adjust("blue", 1)
+    check("but a referee can still correct it",
+          m.state()["alliances"]["blue"]["total"] == before + 1)
+
+    check("the totals are what db.write_live files",
+          m.totals() == {"blue": 4, "red": 0})
+    check("and the log says who put each ball there",
+          {row["by"] for row in m.state()["log"]} == {"detector", "ref"})
+
+    # Points default to one a ball, because db.py refuses to convert fuel to
+    # points and a scrimmage runs whatever rules its organiser chose.
+    plain = Match("Q2")
+    plain.start()
+    plain.ball("blue")
+    check("with no rates configured the display shows ball count",
+          plain.state()["alliances"]["blue"]["points"] == 1.0)
+
+    # Reset is what happens between matches, and it must leave nothing behind.
+    plain.reset("Q3")
+    st = plain.state()
+    check("reset clears the score, the log and the clock",
+          st["alliances"]["blue"]["total"] == 0 and st["log"] == []
+          and st["phase"] == IDLE and st["label"] == "Q3")
+
+
 def test_api_stays_stdlib():
     """The serving path must import nothing but the standard library.
 
@@ -1372,7 +1455,7 @@ def main() -> int:
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
                test_serving_export, test_live_counter, test_live_rows,
                test_detect_rows, test_detect_writes, test_api_stays_stdlib,
-               test_ball_counting, test_hub_geometry):
+               test_ball_counting, test_hub_geometry, test_scrimmage_scoreboard):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

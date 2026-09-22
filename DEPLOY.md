@@ -107,17 +107,58 @@ scoreboard), and now robot and hub positions and tracks. You do not have "team
 a higher-resolution source than a broadcast, or start-of-match station
 positions from TBA's roster — neither of which is written.
 
-## 5. Counting balls with no scoreboard
+## 5. Being the scoreboard at a scrimmage
 
 Everything above reads fuel off the broadcast's burned-in counter, which is the
-field's own arithmetic and beats any vision system. On a field that renders no
-counter — a practice field, an offseason event, a demo, your own game system —
-there is nothing to read, and the only statement of what scored is the ball
-going in. The same `.pt` already has a `fuel` class and a hub per alliance.
+field's own arithmetic and beats any vision system. **At a scrimmage there is
+no FMS**, so nothing else is counting. This is not a cross-check against a real
+score — it *is* the score, and it has to behave like one.
 
 ```bash
-.venv-detect/bin/python run.py count --weights runs/<name>/weights/best.pt     --source 0 --hub-blue 300,100,100,100 --hub-red 700,100,100,100
+.venv-detect/bin/python run.py count --weights runs/<name>/weights/best.pt \
+    --source 0 --hub-blue 300,100,100,100 --hub-red 700,100,100,100 \
+    --scoreboard --auto-points 4 --teleop-points 2
 ```
+
+It prints two addresses on the field wifi:
+
+| | |
+| --- | --- |
+| `http://<host>:8780/` | the display — a projector, or a spare laptop |
+| `http://<host>:8780/?ref=1` | the same page plus START / STOP / RESET and ±1 per alliance |
+
+Both are the same document, so the scoring table and the projector cannot
+disagree about what the score is.
+
+**Three things a counter needs before it is a scoreboard**, each because of
+something counting alone cannot do:
+
+- **A match clock.** Fuel gets thrown around between matches and robots get
+  tested on the field. Nothing scores until START and the detector stops at the
+  buzzer; a counter running continuously would add all of it to the score.
+- **A display.** Two big numbers and a clock, over stdlib HTTP, so there is
+  nothing to install at a gym.
+- **A referee's override.** The one that matters. The counter is careful and
+  still fallible — it cannot see a ball occluded for its whole flight.
+  Everywhere else this repo answers uncertainty by recording nothing, which is
+  right for a scouting number that can simply be absent and useless when a
+  match needs a final score in thirty seconds. So the person at the table has
+  the last word, ±1 at a time, and it keeps working after the buzzer because
+  that is when most corrections happen. The record keeps **both** halves:
+  `detected` and `adjusted` are never folded together, because "the camera
+  missed two" and "the camera saw two that never happened" are different facts
+  about your setup and both are worth knowing afterwards. The display says so
+  too — *"14 balls · 12 seen +2 by ref"*.
+
+**Points are yours to set.** `--auto-points` / `--teleop-points` default to 1,
+so with nothing configured the display shows the ball count. `db.py` already
+refuses to convert fuel to points — "the 2026 fuel-to-points rule is not pinned
+down here" — and a scrimmage runs whatever rules you chose. Nothing here
+invents them.
+
+There is no password on the scoreboard. It is a closed field network for an
+afternoon, and a password on the scoring table is one somebody has to type
+while a match waits. Do not put it on the open internet.
 
 and as a service, on the box with the camera:
 
@@ -169,10 +210,10 @@ counted 2 ball(s): blue=2, red=0
   recording before trusting it at an event.
 - **It cannot see a ball it never detects.** One occluded for its whole flight
   is simply missing.
-- **It is not the field's score** and does not claim to be. Where a real
-  scoreboard exists, read that — `run.py verify` already checks this repo's
-  readings against TBA's official totals, and counting is the thing to check,
-  not the thing to check against.
+- **Where a real scoreboard exists, read that instead.** At a scrimmage there
+  isn't one, which is the whole point — but at a real event the burned-in
+  counter is the field's own arithmetic, and `run.py verify` already checks
+  this repo's readings against TBA's official totals.
 
 `--match` files the result exactly like any other reading, so it reaches a
 scouting app through the same API.
@@ -180,7 +221,7 @@ scouting app through the same API.
 ## Checklist
 
 ```bash
-python3 tests/test_pipeline.py                    # 207 checks, no network
+python3 tests/test_pipeline.py                    # 225 checks, no network
 python3 run.py status                             # the harvest
 python3 run.py formats                            # layout profiles
 curl -s localhost:8781/health                     # the API host
