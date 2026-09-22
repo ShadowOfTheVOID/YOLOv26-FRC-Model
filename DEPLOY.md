@@ -107,10 +107,80 @@ scoreboard), and now robot and hub positions and tracks. You do not have "team
 a higher-resolution source than a broadcast, or start-of-match station
 positions from TBA's roster — neither of which is written.
 
+## 5. Counting balls with no scoreboard
+
+Everything above reads fuel off the broadcast's burned-in counter, which is the
+field's own arithmetic and beats any vision system. On a field that renders no
+counter — a practice field, an offseason event, a demo, your own game system —
+there is nothing to read, and the only statement of what scored is the ball
+going in. The same `.pt` already has a `fuel` class and a hub per alliance.
+
+```bash
+.venv-detect/bin/python run.py count --weights runs/<name>/weights/best.pt     --source 0 --hub-blue 300,100,100,100 --hub-red 700,100,100,100
+```
+
+and as a service, on the box with the camera:
+
+```bash
+sudo cp deploy/frc-counter.service /etc/systemd/system/
+sudo systemctl edit frc-counter        # weights, camera, hub boxes
+sudo systemctl enable --now frc-counter
+```
+
+**Give it the hub boxes.** Without them it spends the first 90 frames learning
+where the hub is and counts nothing while it does — correct, because with no
+hub there is no *in* for a ball to go, but 90 frames of a match you do not get
+back. The camera does not move, so reading them off one frame once is right
+every time after. `run.py db hub --event <key> --alliance blue --box x,y,w,h`
+records them per event and `--event` then picks them up.
+
+### How it decides a ball scored
+
+A ball that goes in stops being visible, so the event is a fuel track
+**vanishing inside a hub region**. Three other things look exactly like that,
+and refusing them is most of what [`tbavid/count.py`](tbavid/count.py) does:
+
+| looks like a score | why it isn't | rule |
+| --- | --- | --- |
+| a one-frame false detection | a real ball was there for longer | `--min-frames` |
+| a ball a robot drove in front of | it never crossed *into* the hub | entry required (`--allow-inside` to disable) |
+| a ball that passed *over* the hub | it comes back the other side | a score is held `--reacquire` frames and a reappearance withdraws it |
+
+That last one is the same shape as `scoreboard.clean_series` wanting two reads
+before believing a large jump: commit late, let the next few frames take it
+back. It costs a fraction of a second of latency against being confidently
+wrong about a score.
+
+Every refusal is counted and reported, because a counter that rejects silently
+is one nobody can debug:
+
+```
+counted 2 ball(s): blue=2, red=0
+  not counted: 1 vanished away from any hub
+```
+
+### Honest limits
+
+- **It needs the frame rate.** `detect` deliberately throws fuel track ids away
+  because it runs at 3 fps, where a ball moves further between samples than its
+  own width. This runs on a live camera at native rate, where tracking a ball
+  is the whole method. On a CPU it will fall behind and drop balls, which is
+  worse than no count because it looks like one. Check with `--frames` on a
+  recording before trusting it at an event.
+- **It cannot see a ball it never detects.** One occluded for its whole flight
+  is simply missing.
+- **It is not the field's score** and does not claim to be. Where a real
+  scoreboard exists, read that — `run.py verify` already checks this repo's
+  readings against TBA's official totals, and counting is the thing to check,
+  not the thing to check against.
+
+`--match` files the result exactly like any other reading, so it reaches a
+scouting app through the same API.
+
 ## Checklist
 
 ```bash
-python3 tests/test_pipeline.py                    # 187 checks, no network
+python3 tests/test_pipeline.py                    # 207 checks, no network
 python3 run.py status                             # the harvest
 python3 run.py formats                            # layout profiles
 curl -s localhost:8781/health                     # the API host

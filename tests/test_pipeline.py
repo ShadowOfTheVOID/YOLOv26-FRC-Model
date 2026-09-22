@@ -28,6 +28,7 @@ from tbavid import stream as S
 from tbavid.crop import Profile, detect_bottom, detect_top
 from tbavid.db import build, connect, export_for_serving, summary, write_live
 from tbavid.live import Counter as LiveCounter
+from tbavid.count import BallCounter, hub_of, hubs_from_db, learn_hubs
 from tbavid.detect import (CLASSES, alliance_of, frame_path, model_source,
                            rows_from_boxes, write_rows)
 from tbavid.identify import best_assignment, vote
@@ -1041,6 +1042,133 @@ def test_live_rows():
         con.close()
 
 
+HUB = {"blue": (300.0, 100.0, 100.0, 100.0), "red": (700.0, 100.0, 100.0, 100.0)}
+
+
+def _fly(tid, x0, y0, x1, y1, n, start=0):
+    """A ball moving in a straight line over n frames."""
+    return {tid: [(start + i, (x0 + (x1 - x0) * i / (n - 1),
+                               y0 + (y1 - y0) * i / (n - 1), 12.0, 12.0))
+                  for i in range(n)]}
+
+
+def _play(paths, **kw):
+    """Run a set of ball paths through a counter. Returns (events, counter)."""
+    c = BallCounter(HUB, **kw)
+    last = max(f for p in paths.values() for f, _ in p) if paths else 0
+    events = []
+    for frame in range(last + 30):
+        balls = {tid: box for tid, path in paths.items()
+                 for f, box in path if f == frame}
+        events += c.update(frame, frame / 30.0, balls)
+    events += c.flush(last + 40, (last + 40) / 30.0)
+    return events, c
+
+
+def test_ball_counting():
+    """Counting fuel with no scoreboard, which means refusing the lookalikes.
+
+    A ball going in stops being visible, so the event is a track vanishing
+    inside a hub. Three other things look exactly like that, and almost all of
+    count.py is saying no to them -- so almost all of this is too.
+    """
+    events, c = _play(_fly(1, 50, 150, 348, 150, 20))
+    check("a ball flown into the hub counts",
+          [(e["alliance"], e["total"]) for e in events] == [("blue", 1)])
+    check("and nothing is credited to the other alliance", c.totals["red"] == 0)
+
+    # A false detection that appears and is gone. A ball that was really there
+    # was there for more than a frame.
+    _, c = _play({2: [(5, (340.0, 145.0, 10.0, 10.0))]})
+    check("a one-frame blob in the hub is not a ball",
+          c.totals["blue"] == 0 and c.rejected["too_short"] == 1)
+
+    # THE false positive that matters at a real field: a ball resting by the
+    # hub that a robot drives in front of. It vanishes, and it is in the hub
+    # region. It did not cross in, which is the difference.
+    _, c = _play({3: [(i, (345.0, 150.0, 12.0, 12.0)) for i in range(15)]})
+    check("a ball already in the hub, then occluded, is not a score",
+          c.totals["blue"] == 0 and c.rejected["started_inside"] == 1)
+    # ...and --allow-inside is the documented trade: recall for precision.
+    _, c = _play({3: [(i, (345.0, 150.0, 12.0, 12.0)) for i in range(15)]},
+                 require_entry=False)
+    check("allow_inside counts it, which is what that flag is for",
+          c.totals["blue"] == 1)
+
+    # A ball passing OVER the hub vanishes behind it and comes back with a new
+    # track id. This cannot be settled in the moment, so the score is held and
+    # the reappearance withdraws it.
+    over = _fly(4, 50, 150, 348, 150, 20)
+    over.update(_fly(5, 360, 150, 600, 150, 20, start=24))
+    _, c = _play(over)
+    check("a ball that passes over the hub and reappears does not count",
+          c.totals["blue"] == 0 and c.rejected["reacquired"] == 1)
+    # The same flight with nothing reappearing is a score, so the rule above is
+    # discriminating between two cases rather than just refusing both.
+    _, c = _play(_fly(4, 50, 150, 348, 150, 20))
+    check("...but the same flight with nothing coming back out does",
+          c.totals["blue"] == 1)
+
+    _, c = _play(_fly(8, 50, 400, 200, 400, 15))
+    check("a ball that vanishes away from any hub is not a score",
+          c.totals["blue"] == 0 and c.rejected["not_in_hub"] == 1)
+
+    # Two in a row, and the running total is what a scoreboard would show.
+    two = _fly(6, 50, 150, 348, 150, 15)
+    two.update(_fly(7, 50, 160, 348, 158, 15, start=40))
+    events, c = _play(two)
+    check("consecutive scores carry a running total",
+          [e["total"] for e in events] == [1, 2] and c.totals["blue"] == 2)
+
+    # Each hub scores for its own alliance.
+    events, c = _play(_fly(9, 900, 150, 748, 150, 20))
+    check("the red hub scores for red",
+          [(e["alliance"], e["total"]) for e in events] == [("red", 1)])
+
+    # The shape db.write_live wants, so a count can be filed like any reading.
+    check("the series is cumulative per alliance",
+          c.series(events)["red"] == [[events[0]["t"], 1]])
+
+    # Nothing silently disappears: every refusal is counted and reported,
+    # because a counter that rejects quietly is one nobody can debug.
+    lines = "\n".join(c.report())
+    check("the report says what was counted", "counted 1 ball" in lines)
+    _, c = _play({2: [(5, (340.0, 145.0, 10.0, 10.0))]})
+    check("and why anything was not",
+          any("too few frames" in l for l in c.report()))
+
+
+def test_hub_geometry():
+    """Where the hub is, learned or recorded."""
+    check("a point in the hub names its alliance",
+          hub_of(HUB, (350.0, 150.0)) == "blue"
+          and hub_of(HUB, (750.0, 150.0)) == "red")
+    check("a point outside both names neither", hub_of(HUB, (10.0, 10.0)) is None)
+    check("padding widens the region",
+          hub_of(HUB, (410.0, 150.0)) is None
+          and hub_of(HUB, (410.0, 150.0), pad=20.0) == "blue")
+
+    # The camera is fixed for a whole event, so the true box is constant and
+    # the spread is detector jitter plus the odd frame where a bumper was
+    # called a hub. A median ignores those; a mean is dragged by them.
+    frames = [{"blue": (300.0, 100.0, 100.0, 100.0)} for _ in range(9)]
+    frames.append({"blue": (900.0, 900.0, 40.0, 40.0)})        # one bad frame
+    check("the hub box is the median, so one bad frame does not move it",
+          learn_hubs(frames)["blue"] == (300.0, 100.0, 100.0, 100.0))
+    check("nothing seen means nothing learned", learn_hubs([]) == {})
+
+    with tempfile.TemporaryDirectory() as tmp:
+        con = connect(Path(tmp) / "h.db")
+        from tbavid.db import set_hub
+        set_hub(con, "2026caclv", "blue", [300, 100, 100, 100])
+        got = hubs_from_db(con, "2026caclv")
+        check("a recorded hub box comes back as a box",
+              got == {"blue": (300, 100, 100, 100)})
+        check("an event with no hub recorded reads as none, not a guess",
+              hubs_from_db(con, "2026nope") == {})
+        con.close()
+
+
 def test_api_stays_stdlib():
     """The serving path must import nothing but the standard library.
 
@@ -1243,7 +1371,8 @@ def main() -> int:
                test_ledger_and_picking, test_competitive_filter, test_audit,
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
                test_serving_export, test_live_counter, test_live_rows,
-               test_detect_rows, test_detect_writes, test_api_stays_stdlib):
+               test_detect_rows, test_detect_writes, test_api_stays_stdlib,
+               test_ball_counting, test_hub_geometry):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

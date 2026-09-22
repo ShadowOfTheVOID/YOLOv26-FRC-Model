@@ -281,6 +281,86 @@ def cmd_detect(args, cfg):
     return 0
 
 
+def _hub_arg(raw, what):
+    if not raw:
+        return None
+    try:
+        box = [float(v) for v in raw.split(",")]
+    except ValueError:
+        raise SystemExit(f"--{what} wants x,y,w,h in pixels (got {raw!r})")
+    if len(box) != 4 or box[2] <= 0 or box[3] <= 0:
+        raise SystemExit(f"--{what} wants x,y,w,h with a positive size (got {raw!r})")
+    return tuple(box)
+
+
+def cmd_count(args, cfg):
+    """Count scored fuel from the detector alone -- no scoreboard, no OCR."""
+    from tbavid import count as counting
+    from tbavid import db as dbmod
+    from tbavid import detect as det
+
+    hubs = {}
+    for alliance, raw in (("blue", args.hub_blue), ("red", args.hub_red)):
+        box = _hub_arg(raw, f"hub-{alliance}")
+        if box:
+            hubs[alliance] = box
+    if not hubs and args.event:
+        con = dbmod.connect()
+        hubs = counting.hubs_from_db(con, args.event)
+        con.close()
+        if hubs:
+            print(f"hub geometry from the database for {args.event}: "
+                  + ", ".join(f"{a}={list(map(int, b))}" for a, b in hubs.items()))
+    if not hubs:
+        print(f"no hub geometry given, so it will be learned from the first "
+              f"{args.learn} frames.\n"
+              f"  Nothing is counted while it is being learned -- with no hub "
+              f"there is no\n  'in' for a ball to go. `run.py db hub` records "
+              f"it once per event instead.")
+
+    model = det.load(args.weights)
+    source = int(args.source) if str(args.source).isdigit() else args.source
+    print(f"model: {det.model_source(args.weights)}  source: {source}\n")
+
+    def factory(found):
+        print("hubs: " + ", ".join(f"{a}={list(map(int, b))}"
+                                   for a, b in sorted(found.items())) + "\n")
+        return counting.BallCounter(
+            found, min_track_frames=args.min_frames,
+            reacquire_frames=args.reacquire,
+            require_entry=not args.allow_inside, pad=args.pad)
+
+    def on_event(e):
+        print(f"  {e['t']:>8.2f}s  {e['alliance']:<4} +1  -> {e['total']}")
+
+    out = counting.run_source(
+        model, source, factory, conf=args.conf, tracker=args.tracker,
+        learn_frames=args.learn, hubs=hubs or None, on_event=on_event,
+        max_frames=args.frames)
+
+    if out.get("error"):
+        print(f"\n  ! {out['error']}")
+        return 1
+    counter = out["counter"]
+    print()
+    for line in counter.report():
+        print(line)
+
+    if args.match:
+        mk = args.match if "_" in args.match else f"{args.event or ''}_{args.match}"
+        con = dbmod.connect()
+        wrote = dbmod.write_live(
+            con, args.event or "", mk,
+            counter.series(out["events"]), dict(counter.totals),
+            label=args.match.split("_")[-1],
+            note="counted by the detector; no scoreboard was read")
+        con.close()
+        print(f"\nfiled {mk}: {wrote['score_events']} scoring event(s)")
+    else:
+        print("\nNothing written. Pass --match to file this against a match.")
+    return 0
+
+
 def cmd_live(args, cfg):
     """Scout a live feed: read the scoreboard as it happens, keep no video."""
     import json
@@ -588,6 +668,39 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8781)),
                    help="honours $PORT, which most hosts inject")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("count",
+                       help="count scored fuel from the detector alone -- no "
+                            "scoreboard, no OCR")
+    p.add_argument("--weights", type=Path, required=True, help="the .pt")
+    p.add_argument("--source", default="0",
+                   help="camera index (0), a video file, or a stream URL")
+    p.add_argument("--event", help="event key: for the recorded hub geometry, "
+                                   "and for the match key if --match is short")
+    p.add_argument("--match", help="file the result against this match "
+                                   "(e.g. qm14). Omitted, nothing is written.")
+    p.add_argument("--hub-blue", dest="hub_blue", metavar="X,Y,W,H",
+                   help="blue hub box in pixels, instead of learning it")
+    p.add_argument("--hub-red", dest="hub_red", metavar="X,Y,W,H",
+                   help="red hub box in pixels")
+    p.add_argument("--learn", type=int, default=90,
+                   help="frames spent learning the hubs when none are given")
+    p.add_argument("--conf", type=float, default=0.25, help="confidence floor")
+    p.add_argument("--tracker", default="bytetrack.yaml")
+    p.add_argument("--min-frames", dest="min_frames", type=int, default=3,
+                   help="frames a ball must be seen for to be a ball")
+    p.add_argument("--reacquire", type=int, default=12,
+                   help="frames a score is held before counting, so a ball "
+                        "that passed over the hub can withdraw it")
+    p.add_argument("--allow-inside", dest="allow_inside", action="store_true",
+                   help="also count a ball first seen already over the hub. "
+                        "More recall, and it will count balls a robot merely "
+                        "drove in front of.")
+    p.add_argument("--pad", type=float, default=0.0,
+                   help="grow the hub region by this many pixels")
+    p.add_argument("--frames", type=int, default=0,
+                   help="stop after N frames (0 = until the source ends)")
+    p.set_defaults(func=cmd_count)
 
     p = sub.add_parser("detect",
                        help="run a trained .pt over harvested frames and "

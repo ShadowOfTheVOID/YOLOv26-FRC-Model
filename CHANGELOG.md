@@ -29,6 +29,25 @@ harvest's output as a source of its own.
   `assign_tracks` still needs a scorer, `identify.py` still measures a bumper
   number at ~5 px tall, and with no scorer it records nothing rather than
   naming whichever team sorts first. `--assign` reports that as the answer.
+- **`run.py count` — scored fuel from the detector alone, no scoreboard and no
+  OCR** (`tbavid/count.py`, plus `deploy/frc-counter.service`). Everything else
+  that produces a fuel number reads the broadcast's burned-in counter, which is
+  right when there is one and no answer at all on a field that renders none — a
+  practice field, an offseason event, a demo, somebody's own game system. The
+  same `.pt` already has a `fuel` class and a hub per alliance, so this counts
+  the event itself: a fuel track vanishing inside a hub region.
+  Almost all of it is refusing the three things that look identical to that — a
+  one-frame false detection, a ball a robot drove in front of (it never crossed
+  *into* the hub), and a ball that passed *over* it and comes back the other
+  side. The last cannot be settled in the moment, so a score is held for a few
+  frames and a reappearance withdraws it, which is the same shape as
+  `clean_series` wanting two reads before believing a large jump. Every refusal
+  is counted and reported, because a counter that rejects silently is one
+  nobody can debug.
+  Note the deliberate opposite of `detect`: that one discards fuel track ids
+  because it runs at 3 fps where a ball moves further between samples than its
+  own width; this runs at a camera's native rate where tracking the ball is the
+  whole method.
 - **Deployment is documented end to end** in [DEPLOY.md](DEPLOY.md): three
   roles with three different dependency sets, in the order to do them, with
   the `.pt` as the only step left. `requirements-detect.txt` keeps torch and
