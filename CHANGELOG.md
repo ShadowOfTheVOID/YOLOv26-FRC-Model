@@ -53,9 +53,10 @@ harvest's output as a source of its own.
   real score, it *is* the score, and a number on a laptop nobody can see, with
   no clock and no way to correct it, is not a scoreboard. So: a match clock, so
   fuel thrown about between matches does not score and the detector stops at
-  the buzzer; a display served over stdlib HTTP for a projector and a phone,
-  both the same document so they cannot disagree; and a referee's ±1, which
-  works after the buzzer because that is when corrections happen. `detected`
+  the buzzer; the score handed out as JSON over stdlib HTTP and as one line
+  per change on stdout, with no display of its own because whatever shows the
+  score at a field already exists; and a referee's correction, which works
+  after the buzzer because that is when corrections happen. `detected`
   and `adjusted` are kept apart in the record and on screen, because "the
   camera missed two" and "the camera saw two that never happened" are different
   facts about a setup. Points per ball are configurable and default to 1, since

@@ -47,8 +47,7 @@ can support.
 At a scrimmage there is no Field Management System, so nothing else is
 counting and there is no better number to defer to. That is the case this was
 built for, and it is why `field.py` exists: a count is not a scoreboard until
-it has a match clock, a display people can see, and a referee who can correct
-it. `run.py count --scoreboard` is the whole thing.
+it has a match clock and a referee who can correct it. `run.py count --scoreboard` is the whole thing.
 
 Where a real scoreboard does exist -- a broadcast with a burned-in counter --
 read that instead. It is the field's own arithmetic and this is not.

@@ -120,25 +120,32 @@ score — it *is* the score, and it has to behave like one.
     --scoreboard --auto-points 4 --teleop-points 2
 ```
 
-It prints two addresses on the field wifi:
+**There is no display here**, deliberately. Whatever is showing the score at
+the field already exists; this is the thing that knows what the score *is*, and
+it hands it over two ways:
 
-| | |
-| --- | --- |
-| `http://<host>:8780/` | the display — a projector, or a spare laptop |
-| `http://<host>:8780/?ref=1` | the same page plus START / STOP / RESET and ±1 per alliance |
+```bash
+curl -s localhost:8780/state          # the whole match, as JSON
+run.py count ... --scoreboard --feed  # one JSON line per change, on stdout
+```
 
-Both are the same document, so the scoring table and the projector cannot
-disagree about what the score is.
+`--port 0` turns the HTTP side off entirely if the pipe is all you want.
 
-**Three things a counter needs before it is a scoreboard**, each because of
-something counting alone cannot do:
+The clock and a referee's correction are the other half of the interface:
+
+```bash
+curl -X POST localhost:8780/start     # /stop  /reset
+curl -X POST localhost:8780/adjust -d '{"alliance":"red","delta":1}'
+```
+
+**Two things a counter needs before it is the scoring authority**, each because
+of something counting alone cannot do:
 
 - **A match clock.** Fuel gets thrown around between matches and robots get
-  tested on the field. Nothing scores until START and the detector stops at the
-  buzzer; a counter running continuously would add all of it to the score.
-- **A display.** Two big numbers and a clock, over stdlib HTTP, so there is
-  nothing to install at a gym.
-- **A referee's override.** The one that matters. The counter is careful and
+  tested on the field. Nothing scores until the match is started and the
+  detector stops at the buzzer; a counter running continuously would add all of
+  it to the score.
+- **A referee's correction.** The one that matters. The counter is careful and
   still fallible — it cannot see a ball occluded for its whole flight.
   Everywhere else this repo answers uncertainty by recording nothing, which is
   right for a scouting number that can simply be absent and useless when a
@@ -147,11 +154,12 @@ something counting alone cannot do:
   that is when most corrections happen. The record keeps **both** halves:
   `detected` and `adjusted` are never folded together, because "the camera
   missed two" and "the camera saw two that never happened" are different facts
-  about your setup and both are worth knowing afterwards. The display says so
-  too — *"14 balls · 12 seen +2 by ref"*.
+  about your setup and both are worth knowing afterwards. `/state` carries
+  `detected` and `adjusted` beside the total so whatever draws the score can
+  show that distinction if it wants to.
 
 **Points are yours to set.** `--auto-points` / `--teleop-points` default to 1,
-so with nothing configured the display shows the ball count. `db.py` already
+so with nothing configured the score IS the ball count. `db.py` already
 refuses to convert fuel to points — "the 2026 fuel-to-points rule is not pinned
 down here" — and a scrimmage runs whatever rules you chose. Nothing here
 invents them.

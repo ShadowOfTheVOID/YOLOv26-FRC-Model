@@ -349,11 +349,15 @@ def cmd_count(args, cfg):
                       teleop_s=args.teleop_s,
                       points_per_ball={"auto": args.auto_points,
                                        "teleop": args.teleop_points})
-        serve_board(board, host=args.bind, port=args.port)
-        where = args.bind if args.bind != "0.0.0.0" else _lan_address()
-        print(f"scoreboard : http://{where}:{args.port}/")
-        print(f"referee    : http://{where}:{args.port}/?ref=1")
-        print("Nothing scores until START is pressed.\n")
+        if args.port:
+            serve_board(board, host=args.bind, port=args.port)
+            where = args.bind if args.bind != "0.0.0.0" else _lan_address()
+            print(f"score (JSON): http://{where}:{args.port}/state")
+            print(f"  clock     : POST /start  /stop  /reset")
+            print(f"  correction: POST /adjust {{\"alliance\":\"red\",\"delta\":1}}")
+        if args.feed:
+            print("feed        : one JSON line per change on stdout")
+        print("Nothing scores until the match is started.\n")
 
     def factory(found):
         print("hubs: " + ", ".join(f"{a}={list(map(int, b))}"
@@ -363,17 +367,35 @@ def cmd_count(args, cfg):
             reacquire_frames=args.reacquire,
             require_entry=not args.allow_inside, pad=args.pad)
 
+    def emit(board):
+        """One JSON line per change, for whatever is showing the score.
+
+        Line-buffered and flushed, because the consumer of this is a pipe and
+        a pipe block-buffers by default -- the score would arrive in bursts a
+        few kilobytes apart, which on a scoreboard is the same as not arriving.
+        """
+        import json as _json
+        sys.stdout.write(_json.dumps(board.state(), separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+
     def on_event(e):
         if board is not None:
             # Refused outside a scoring phase, which is the point of having a
             # clock at all. Say so rather than dropping it silently.
             if not board.ball(e["alliance"]):
-                print(f"  {e['t']:>8.2f}s  {e['alliance']:<4} +1  "
-                      f"(not in a match -- ignored)")
+                if not args.feed:
+                    print(f"  {e['t']:>8.2f}s  {e['alliance']:<4} +1  "
+                          f"(not in a match -- ignored)")
                 return
+            if args.feed:
+                return emit(board)
             st = board.state()["alliances"][e["alliance"]]
             print(f"  {e['t']:>8.2f}s  {e['alliance']:<4} +1  -> "
                   f"{st['total']} ball(s), {st['points']} pt")
+            return
+        if args.feed:
+            sys.stdout.write(__import__("json").dumps(e, separators=(",", ":")) + "\n")
+            sys.stdout.flush()
             return
         print(f"  {e['t']:>8.2f}s  {e['alliance']:<4} +1  -> {e['total']}")
 
@@ -751,13 +773,18 @@ def main(argv=None):
     p.add_argument("--frames", type=int, default=0,
                    help="stop after N frames (0 = until the source ends)")
     p.add_argument("--scoreboard", action="store_true",
-                   help="run a scrimmage scoreboard: a match clock, a display "
-                        "to put on a projector, and a referee who can correct "
-                        "the count. Use this when there is no FMS.")
-    p.add_argument("--port", type=int, default=8780, help="scoreboard port")
+                   help="be the scoring authority at a scrimmage: a match "
+                        "clock, so nothing counts between matches, and a "
+                        "correction route for a referee. No display -- the "
+                        "score comes out as JSON.")
+    p.add_argument("--port", type=int, default=8780,
+                   help="serve the JSON score on this port (0 = don't serve)")
     p.add_argument("--bind", default="0.0.0.0",
-                   help="scoreboard interface (default every one, so a phone "
-                        "on the field wifi can reach it)")
+                   help="interface for the JSON feed (default every one, so "
+                        "the display machine can reach it)")
+    p.add_argument("--feed", action="store_true",
+                   help="write one JSON line per change to stdout, for piping "
+                        "into whatever shows the score")
     p.add_argument("--auto-s", dest="auto_s", type=float, default=15.0,
                    help="seconds of autonomous (default 15)")
     p.add_argument("--teleop-s", dest="teleop_s", type=float, default=135.0,

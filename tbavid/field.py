@@ -13,9 +13,10 @@ between matches, robots get tested on the field, and a counter running
 continuously would add all of it to the score. `Match` will not accept a ball
 unless it is in a scoring phase.
 
-**A display.** Two big numbers and a clock, served to anything with a browser
--- a projector, a laptop on the scoring table, a phone. Stdlib HTTP, the same
-as `review.py`, so there is nothing to install at a gym.
+**A way out.** Whatever is showing the score at the field already exists, so
+there is deliberately no display here -- `serve()` hands the whole match over
+as JSON and `--feed` writes a line per change to stdout. This is the thing that
+knows what the score is, not the thing that draws it.
 
 **A referee's override.** This is the important one. `count.py` is careful and
 still fallible: it cannot see a ball occluded for its whole flight, and a hub
@@ -220,104 +221,21 @@ class Match:
             return {a: sum(self._balls(a).values()) for a in ALLIANCES}
 
 
-PAGE = """<!doctype html><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Scrimmage scoreboard</title>
-<style>
- :root{--blue:#1d6fe0;--red:#d4332f;--bg:#07080a;--dim:#8a9099}
- *{box-sizing:border-box} html,body{margin:0;height:100%}
- body{background:var(--bg);color:#fff;font:600 16px/1.2 system-ui,sans-serif;
-      display:flex;flex-direction:column;overflow:hidden}
- .clock{text-align:center;padding:2vh 0 0}
- .t{font:800 12vh/1 ui-monospace,monospace;letter-spacing:-.02em}
- .ph{letter-spacing:.35em;color:var(--dim);font-size:2.2vh;text-transform:uppercase}
- .mt{color:var(--dim);font-size:2vh;margin-top:.4vh}
- .scores{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:2vh;padding:2vh}
- .a{border-radius:2vh;display:flex;flex-direction:column;align-items:center;
-    justify-content:center;position:relative}
- .blue{background:linear-gradient(160deg,#1d6fe0,#0d3f86)}
- .red{background:linear-gradient(160deg,#d4332f,#8b1a17)}
- .n{font:800 26vh/.85 ui-monospace,monospace}
- .lbl{letter-spacing:.35em;font-size:2.2vh;opacity:.85;text-transform:uppercase}
- .sub{font-size:2vh;opacity:.72;margin-top:1vh;min-height:2.4vh}
- .idle .n{opacity:.5}
- .ctrl{display:none}
- /* The ref page is the same document with ?ref=1, so a phone at the scoring
-    table and the projector never disagree about what the score is. */
- body.ref .ctrl{display:flex;gap:1vh;margin-top:1.5vh}
- body.ref .n{font-size:16vh}
- button{font:800 2.4vh system-ui,sans-serif;padding:1.4vh 2.4vh;border:0;
-        border-radius:1vh;background:rgba(255,255,255,.18);color:#fff;cursor:pointer}
- button:active{background:rgba(255,255,255,.34)}
- .bar{display:none;gap:1vh;justify-content:center;padding:0 0 2vh}
- body.ref .bar{display:flex}
- .bar button{background:#1b1f26}
- .go{background:#1d7a3a!important} .stop{background:#8b1a17!important}
-</style>
-<div class="clock">
-  <div class="t" id="t">0:00</div>
-  <div class="ph" id="ph">idle</div>
-  <div class="mt" id="mt"></div>
-</div>
-<div class="scores">
-  <div class="a blue" id="cb">
-    <div class="lbl">Blue</div><div class="n" id="nb">0</div>
-    <div class="sub" id="sb"></div>
-    <div class="ctrl"><button onclick="adj('blue',-1)">&minus;1</button>
-      <button onclick="adj('blue',1)">+1</button></div>
-  </div>
-  <div class="a red" id="cr">
-    <div class="lbl">Red</div><div class="n" id="nr">0</div>
-    <div class="sub" id="sr"></div>
-    <div class="ctrl"><button onclick="adj('red',-1)">&minus;1</button>
-      <button onclick="adj('red',1)">+1</button></div>
-  </div>
-</div>
-<div class="bar">
-  <button class="go" onclick="cmd('start')">START</button>
-  <button class="stop" onclick="cmd('stop')">STOP</button>
-  <button onclick="if(confirm('Clear the score?'))cmd('reset')">RESET</button>
-</div>
-<script>
-const REF = new URLSearchParams(location.search).has('ref');
-if (REF) document.body.classList.add('ref');
-const $ = (i) => document.getElementById(i);
-function mmss(s){s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
-async function cmd(what){ await fetch('/'+what,{method:'POST'}); tick(); }
-async function adj(alliance,d){
-  await fetch('/adjust',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({alliance,delta:d})}); tick();
-}
-async function tick(){
-  let s; try { s = await (await fetch('/state')).json(); } catch(e){ return; }
-  $('t').textContent = s.running ? mmss(s.remaining) : mmss(s.elapsed);
-  $('ph').textContent = s.phase;
-  $('mt').textContent = s.label || '';
-  document.body.classList.toggle('idle', !s.running);
-  for (const [a,ids] of [['blue',['nb','sb']],['red',['nr','sr']]]) {
-    const x = s.alliances[a];
-    $(ids[0]).textContent = x.points;
-    // The two numbers are shown apart whenever a person has moved the score,
-    // so nobody has to wonder whether the camera or the ref put it there.
-    $(ids[1]).textContent = x.adjusted
-      ? `${x.total} balls · ${x.detected} seen ${x.adjusted>0?'+':''}${x.adjusted} by ref`
-      : `${x.total} balls`;
-  }
-}
-tick(); setInterval(tick, 250);
-</script>
-"""
-
-
 def serve(match: Match, host: str = "0.0.0.0", port: int = 8780,
           on_change=None) -> ThreadingHTTPServer:
-    """Serve the display and the referee's controls. Returns the running server.
+    """A JSON feed and control surface. No pages, no display, no browser.
 
-    Binds every interface by default, because the point is a projector and a
-    phone on the same gym wifi looking at the same score. There is no
-    authentication: it is a closed field network for an afternoon, and a
-    password on the scoring table is a password somebody has to type while a
-    match is waiting. Do not put this on the open internet.
+    There is deliberately nothing to look at here. Whatever is showing the
+    score at the field already exists; this is the thing that knows what the
+    score IS, and it hands it over as JSON for that to read.
+
+        GET  /state               the whole match: phase, clock, both alliances
+        POST /start /stop /reset  the match clock
+        POST /adjust  {"alliance": "red", "delta": 1}   a correction
+
+    Binds every interface by default, because the display is on another machine
+    on the field wifi. There is no authentication: it is a closed field network
+    for an afternoon. Do not put it on the open internet.
     """
     class Handler(BaseHTTPRequestHandler):
         server_version = "FieldScore/1.0"
@@ -336,11 +254,11 @@ def serve(match: Match, host: str = "0.0.0.0", port: int = 8780,
 
         def do_GET(self):
             path = urlparse(self.path).path.rstrip("/") or "/"
-            if path in ("/", "/ref"):
-                return self._send(200, PAGE, "text/html; charset=utf-8")
-            if path == "/state":
+            if path in ("/", "/state"):
                 return self._send(200, json.dumps(match.state()))
-            self._send(404, json.dumps({"error": "no such route"}))
+            self._send(404, json.dumps({"error": "no such route",
+                                        "routes": ["/state", "/start", "/stop",
+                                                   "/reset", "/adjust"]}))
 
         def do_POST(self):
             path = urlparse(self.path).path.rstrip("/") or "/"
