@@ -216,6 +216,71 @@ def cmd_cropcheck(args, cfg):
     return 0
 
 
+def cmd_detect(args, cfg):
+    """Run a trained .pt over harvested frames and record the detections."""
+    from tbavid import db as dbmod
+    from tbavid import detect as det
+    from tbavid import identify
+
+    model = det.load(args.weights)
+    source = det.model_source(args.weights)
+    con = dbmod.connect()
+
+    if args.match:
+        keys = [args.match]
+    else:
+        sql = "SELECT match_key FROM matches"
+        params = ()
+        if args.event:
+            sql += " WHERE event_key=?"
+            params = (args.event,)
+        sql += " ORDER BY match_key"
+        keys = [r[0] for r in con.execute(sql, params)]
+    if not keys:
+        print("no matches in the database -- run `db sync` first")
+        return 1
+    if args.limit:
+        keys = keys[:args.limit]
+
+    print(f"model: {source}  conf={args.conf}  tracker={args.tracker}")
+    print(f"{len(keys)} match(es)\n")
+    totals = {"frames": 0, "detections": 0, "missing": 0}
+    for mk in keys:
+        def progress(n, of, found):
+            print(f"\r  {mk}: {n}/{of} frames, {found} detections", end="")
+
+        got = det.detect_match(con, model, mk, source, conf=args.conf,
+                               tracker=args.tracker, progress=progress)
+        print(f"\r  {mk}: {got['frames']} frames, {got['detections']} detections, "
+              f"{got['tracks']} track(s)"
+              + (f", {got['missing']} frame file(s) missing" if got["missing"] else ""))
+        for k in totals:
+            totals[k] += got[k]
+
+        if args.assign:
+            # No scorer exists yet, so this reports nothing rather than
+            # guessing -- see identify.py. Run anyway, because "the tracks are
+            # there and unnamed" is the honest state and worth saying.
+            named = 0
+            for alliance in ("blue", "red"):
+                for track, team in identify.assign_tracks(
+                        con, mk, alliance).items():
+                    named += 1 if team is not None else 0
+            print(f"      identity: {named} track(s) named"
+                  + ("" if named else " -- no scorer, so nothing was guessed"))
+
+    print(f"\ntotal: {totals['detections']} detections over "
+          f"{totals['frames']} frame(s)")
+    if totals["missing"]:
+        print(f"  {totals['missing']} frame(s) in the database had no file on "
+              f"disk -- `prune` removes videos, not frames; re-run `export`.")
+    print(f"\nThese are boxes and tracks, not team numbers. Naming a track "
+          f"needs a\nscorer in identify.py, which does not exist yet -- see "
+          f"SCOUTING.md.")
+    con.close()
+    return 0
+
+
 def cmd_live(args, cfg):
     """Scout a live feed: read the scoreboard as it happens, keep no video."""
     import json
@@ -523,6 +588,24 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8781)),
                    help="honours $PORT, which most hosts inject")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("detect",
+                       help="run a trained .pt over harvested frames and "
+                            "record what it found")
+    p.add_argument("--weights", type=Path, required=True,
+                   help="the .pt, e.g. runs/<name>/weights/best.pt")
+    p.add_argument("--match", help="one match key, instead of all of them")
+    p.add_argument("--event", help="limit to one event")
+    p.add_argument("--limit", type=int, default=0, help="first N matches only")
+    p.add_argument("--conf", type=float, default=0.25,
+                   help="confidence floor (default 0.25)")
+    p.add_argument("--tracker", default="bytetrack.yaml",
+                   help="ultralytics tracker config (default bytetrack.yaml)")
+    p.add_argument("--assign", action="store_true",
+                   help="also try to name each track's team. Reports nothing "
+                        "until identify.py has a scorer, which is the honest "
+                        "answer rather than a guess.")
+    p.set_defaults(func=cmd_detect)
 
     p = sub.add_parser("live",
                        help="scout a live feed: read the scoreboard as it "

@@ -15,6 +15,27 @@ harvest's output as a source of its own.
 
 ### Added
 
+- **`run.py detect` — a trained `.pt` finally has somewhere to go.** Until now
+  `ultralytics` appeared in exactly one file, on the training side: a finished
+  model loaded nowhere, the `detections` table was written by nothing, and
+  `identify.py` waited on "a tracker upstream" that did not exist. Everything
+  downstream of the detector was designed and unreachable. This runs the model
+  over the exported frames in play order with tracking persisted between them,
+  and records boxes, classes, confidences and tracks — each tagged with the
+  weights that produced it, so two models' opinions can never be read as one.
+  Idempotent per match, so better weights replace a match rather than
+  accumulating beside it.
+  It does **not** close the per-robot gap and does not pretend to:
+  `assign_tracks` still needs a scorer, `identify.py` still measures a bumper
+  number at ~5 px tall, and with no scorer it records nothing rather than
+  naming whichever team sorts first. `--assign` reports that as the answer.
+- **Deployment is documented end to end** in [DEPLOY.md](DEPLOY.md): three
+  roles with three different dependency sets, in the order to do them, with
+  the `.pt` as the only step left. `requirements-detect.txt` keeps torch and
+  ultralytics out of `requirements.txt` on purpose — the API host runs
+  `serve.py` with python3 and nothing else, and a test now asserts that the
+  whole serving path imports no third-party package, because breaking that
+  promise would only show up on a machine nobody is sitting at.
 - **`run.py live` — scout a live feed and keep no video.** Everything else
   here builds a training set, which is no use to somebody who wants to know how
   an alliance is scoring this afternoon. This reads the burned-in fuel counter

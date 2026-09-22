@@ -38,6 +38,8 @@ crop away half its field — see
 | running it on Colab / Kaggle / Debian | [deploy/SETUP.md](deploy/SETUP.md) |
 | running it on Windows | [deploy/WINDOWS.md](deploy/WINDOWS.md) |
 | hosting the API so nobody starts it by hand | [deploy/HOSTING.md](deploy/HOSTING.md) |
+| deploying the whole thing, in order | [DEPLOY.md](DEPLOY.md) |
+| running a trained `.pt` over the frames | [DEPLOY.md](DEPLOY.md#4-run-it) |
 
 ## Why
 
@@ -91,6 +93,7 @@ Output lands in these folders:
 | `formats` | broadcast layout profiles: list, explain, calibrate |
 | `stream` | read a whole event-day stream, cutting each match out by its audio cues |
 | `live` | scout a live feed: read the scoreboard as it happens, keep no video |
+| `detect` | run a trained `.pt` over harvested frames and record what it found |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |
 | `reprocess` | re-run crop/render/scoreboard on already-downloaded sources |

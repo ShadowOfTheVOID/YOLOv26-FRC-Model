@@ -1,0 +1,16 @@
+# Running a trained detector. NOT needed to harvest, and not needed to serve.
+#
+# Deliberately a second file. `requirements.txt` is requests and numpy, which
+# is what `run.py pull` needs; torch and ultralytics are hundreds of megabytes
+# and are only wanted by whoever is actually running a model. `serve.py` and
+# the scouting API import nothing but the standard library and must keep
+# working on a host that has none of this.
+#
+#   python3 -m venv .venv-detect
+#   .venv-detect/bin/pip install -r requirements-detect.txt
+#   .venv-detect/bin/python run.py detect --weights runs/<name>/weights/best.pt
+#
+# On a CPU-only box install torch from the CPU index first, or pip pulls the
+# CUDA build and several gigabytes with it:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+ultralytics>=8.3

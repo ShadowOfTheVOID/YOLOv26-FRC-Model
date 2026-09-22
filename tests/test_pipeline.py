@@ -22,11 +22,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tbavid import audio as A
 from tbavid import formats as F
+from tbavid import identify
 from tbavid import ledger as L
 from tbavid import stream as S
 from tbavid.crop import Profile, detect_bottom, detect_top
 from tbavid.db import build, connect, export_for_serving, summary, write_live
 from tbavid.live import Counter as LiveCounter
+from tbavid.detect import (CLASSES, alliance_of, frame_path, model_source,
+                           rows_from_boxes, write_rows)
 from tbavid.identify import best_assignment, vote
 from tbavid.labels import Timeline, source_time
 from tbavid.ledger import Ledger
@@ -1038,6 +1041,153 @@ def test_live_rows():
         con.close()
 
 
+def test_api_stays_stdlib():
+    """The serving path must import nothing but the standard library.
+
+    This is load-bearing rather than tidy. `deploy/frc-harvest.service` runs
+    serve.py on a host with python3 and nothing else -- no pip install, no
+    wheels, no build step -- and `deploy/HOSTING.md` promises exactly that. One
+    `import numpy` added to api.py or db.py for convenience would break every
+    such host, and only on deployment, where the symptom is a service that will
+    not start on a machine nobody is sitting at.
+
+    It matters more now that requirements-detect.txt exists: torch and
+    ultralytics are in this repo's orbit, and the one place they must never
+    reach is the box that answers the scouting app.
+    """
+    import ast
+    third = {"numpy", "requests", "ultralytics", "torch", "cv2", "PIL", "scipy",
+             "pandas", "yaml"}
+    root = Path(__file__).resolve().parent.parent
+    for rel in ("serve.py", "tbavid/api.py", "tbavid/db.py", "tbavid/config.py",
+                "tbavid/identify.py"):
+        found = set()
+        for node in ast.walk(ast.parse((root / rel).read_text())):
+            if isinstance(node, ast.Import):
+                found |= {a.name.split(".")[0] for a in node.names} & third
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.split(".")[0] in third:
+                    found.add(node.module.split(".")[0])
+        check(f"{rel} imports no third-party package", not found)
+
+    # And the detector must NOT be importable without them, i.e. the lazy
+    # import has to stay lazy -- `from tbavid import detect` is reached by
+    # run.py's arg parsing on a box that may have no torch at all.
+    import tbavid.detect as d
+    check("detect.py itself imports torch only when a model is loaded",
+          "ultralytics" not in {n.names[0].name.split(".")[0]
+                                for n in ast.walk(ast.parse(
+                                    (root / "tbavid" / "detect.py").read_text()))
+                                if isinstance(n, ast.Import) and n.names}
+          and d.CLASSES[0] == "fuel")
+
+
+def test_detect_rows():
+    """Turning a model's boxes into detection rows.
+
+    Every decision here is one that would mislabel data rather than crash, so
+    each is pinned: the class index lookup, the alliance, and which classes are
+    allowed to carry a track.
+    """
+    # THE important one. train/prepare_dataset.py writes the dataset's
+    # data.yaml, so its CLASSES list is what each index MEANS to the trained
+    # weights. If detect.py's copy drifts, nothing fails -- every detection is
+    # silently relabelled, and blue robots are recorded as red.
+    src = (Path(__file__).resolve().parent.parent
+           / "train" / "prepare_dataset.py").read_text()
+    line = next(l for l in src.splitlines() if l.startswith("CLASSES"))
+    trained = eval(line.split("=", 1)[1].strip())
+    check("detect's class order matches the dataset's data.yaml",
+          list(CLASSES) == list(trained))
+
+    check("alliance comes off the class name",
+          [alliance_of(c) for c in CLASSES]
+          == [None, "blue", "red", "blue", "red"])
+
+    names = {i: n for i, n in enumerate(CLASSES)}
+    boxes = [
+        (10.2, 20.8, 50.4, 60.1, 0.91, 1, 7),      # robot_blue, tracked
+        (11.0, 21.0, 12.0, 22.0, 0.40, 0, 9),      # fuel, with a track id
+        (5.0, 5.0, 25.0, 25.0, 0.70, 4, None),     # hub_red, untracked
+    ]
+    rows = rows_from_boxes(boxes, names, source="runs/x/weights/best.pt")
+    check("a box becomes x/y/w/h in frame pixels",
+          (rows[0]["x"], rows[0]["y"], rows[0]["w"], rows[0]["h"]) == (10, 21, 40, 39))
+    check("the robot keeps its track", rows[0]["track_id"] == 7)
+    # A ball at 3 fps moves further between samples than its own width, so a
+    # track id on one means nothing -- and would reach identify.assign_tracks,
+    # which is looking for robots.
+    check("a ball's track id is dropped", rows[1]["track_id"] is None)
+    check("fuel belongs to no alliance", rows[1]["alliance"] is None)
+    check("an untracked hub still records", rows[2]["cls"] == "hub_red"
+          and rows[2]["alliance"] == "red" and rows[2]["track_id"] is None)
+    check("every row says which model produced it",
+          all(r["source"] == "runs/x/weights/best.pt" for r in rows))
+
+    # A model trained against a different data.yaml would otherwise be stored
+    # under a class name invented here.
+    check("an unknown class index is dropped, not renamed",
+          rows_from_boxes([(0, 0, 10, 10, 0.9, 99, None)], names) == [])
+    check("a zero-area box is dropped",
+          rows_from_boxes([(10, 10, 10, 10, 0.9, 1, 1)], names) == [])
+    # Coordinates can arrive either way round.
+    flipped = rows_from_boxes([(50, 60, 10, 20, 0.9, 1, 1)], names)
+    check("a box given corner-reversed still has positive extent",
+          (flipped[0]["x"], flipped[0]["y"], flipped[0]["w"], flipped[0]["h"])
+          == (10, 20, 40, 40))
+
+    check("weights are identified by their run, not an absolute path",
+          model_source(Path("/a/b/YOLOv26-FRC-Model/runs/h/weights/best.pt"))
+          == "runs/h/weights/best.pt"
+          and model_source(Path("best.pt")) == "best.pt")
+    check("a bare frame name resolves into the frame directory",
+          frame_path("a_b_c_000001.jpg").parent.name == "frames")
+    check("and a path is left alone",
+          frame_path("/tmp/x/y.jpg") == Path("/tmp/x/y.jpg"))
+
+
+def test_detect_writes():
+    """Detections land against a real frame and are replaceable per match."""
+    with tempfile.TemporaryDirectory() as tmp:
+        con = connect(Path(tmp) / "d.db")
+        write_live(con, "2026caclv", "2026caclv_qm14", {"blue": [[1.0, 5]]},
+                   {"blue": 5, "red": 0},
+                   teams={"blue": ["254", "1678", "8033"],
+                          "red": ["971", "604", "1323"]}, label="qm14")
+        con.execute("INSERT INTO frames(match_key,file,t_clean,t_source)"
+                    " VALUES (?,?,?,?)", ("2026caclv_qm14", "f_000001.jpg", 1.0, 1.0))
+        fid = con.execute("SELECT id FROM frames").fetchone()[0]
+
+        names = {i: n for i, n in enumerate(CLASSES)}
+        rows = rows_from_boxes([(0, 0, 40, 40, 0.9, 1, 3),
+                                (5, 5, 45, 45, 0.8, 2, 4)], names, source="m1")
+        write_rows(con, fid, rows)
+        con.commit()
+        check("detections attach to a frame",
+              con.execute("SELECT COUNT(*) FROM detections").fetchone()[0] == 2)
+        check("and the API's join finds them",
+              con.execute("SELECT COUNT(*) FROM detections d JOIN frames f"
+                          " ON f.id=d.frame_id WHERE f.match_key=?",
+                          ("2026caclv_qm14",)).fetchone()[0] == 2)
+
+        # No scorer exists, so identity must record nothing rather than
+        # assigning the one blue track to whichever team sorts first.
+        assigned = identify.assign_tracks(con, "2026caclv_qm14", "blue")
+        check("with no scorer, a track is left unnamed",
+              assigned == {3: None})
+        check("and no team is written to the detection",
+              con.execute("SELECT COUNT(*) FROM detections WHERE team IS NOT NULL")
+              .fetchone()[0] == 0)
+
+        # Deleting a match's frames must take its detections with them, or a
+        # re-export would leave detections pointing at frames that are gone.
+        con.execute("DELETE FROM frames WHERE match_key=?", ("2026caclv_qm14",))
+        con.commit()
+        check("detections go when their frames do",
+              con.execute("SELECT COUNT(*) FROM detections").fetchone()[0] == 0)
+        con.close()
+
+
 def test_serving_export():
     """A copy that a read-only host can actually read.
 
@@ -1092,7 +1242,8 @@ def main() -> int:
                test_download_options, test_labels, test_render, test_identify,
                test_ledger_and_picking, test_competitive_filter, test_audit,
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
-               test_serving_export, test_live_counter, test_live_rows):
+               test_serving_export, test_live_counter, test_live_rows,
+               test_detect_rows, test_detect_writes, test_api_stays_stdlib):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
