@@ -149,7 +149,8 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
     fmt, why = formats.select(district=cand.get("district", ""),
                               event_key=cand.get("event_key", ""),
                               title=meta.get("title", ""),
-                              cfg=cfg)
+                              cfg=cfg,
+                              event_type=cand.get("event_type"))
     print(f"  format: {fmt.name} ({why})")
 
     try:
@@ -192,6 +193,7 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
         **{k: cand[k] for k in ("yt_key", "match_key", "event_key", "label")},
         "teams": cand.get("teams") or {},
         "district": cand.get("district", ""),
+        "event_type": cand.get("event_type"),
         "format": {"name": fmt.name, "why": why, "provenance": fmt.provenance},
         "shard": shard_label,
         "worker": cfg.get("worker") or None,
@@ -342,6 +344,10 @@ def reprocess(cfg: dict, only: Optional[List[str]] = None) -> int:
             continue
         cand = {k: entry.get(k, "")
                 for k in ("yt_key", "match_key", "event_key", "label", "district")}
+        # None, not "": an entry harvested before the type was recorded has no
+        # type, and a profile gated on one must fail that gate rather than be
+        # waived -- see formats.Format.matches.
+        cand["event_type"] = entry.get("event_type")
         cand["teams"] = entry.get("teams") or {}
         meta = {"title": entry.get("title", ""),
                 "duration": entry.get("source_duration") or 0.0}

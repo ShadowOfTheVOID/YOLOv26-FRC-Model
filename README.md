@@ -165,9 +165,34 @@ event. A profile does three things and no more:
 
 | profile | layout | provenance |
 | --- | --- | --- |
-| `ca_district` | California district field feed: one field camera, banner on top, no permanent side panel | declared |
+| `ca_district` | FIRST California **weekend district events**: one field camera, banner on top, no permanent side panel | declared |
 | `champs_split` | 2026 Championship: field camera over a low side camera, static divider between | measured |
 | `generic` | unknown feed — detect and take the answer, as before profiles existed | measured |
+
+### Two things about the California district in particular
+
+**It is not one production.** The 2026 FIRST California district runs its
+weekend events as `2026caclv` (Central Valley), `2026casnf` (San Francisco),
+`2026calas` (Los Angeles), `2026caven` (Ventura County), `2026caoec` (Orange
+County) and Aerospace Valley. Most of those are YouTube webcasts carried by the
+FIRST Webcast Unit; Central Valley goes out on Twitch instead. Different rigs,
+so `ca_district`'s banner range is wide and per-event calibration is worth
+doing — `crop.formats` takes one event key at a time for exactly that.
+
+**The state championships are excluded.** `2026cancmp` (FIRST California
+Northern State Championship) and its southern counterpart carry district `ca`
+and are a different, larger production. `ca_district` is gated to TBA
+`event_type` 1 — a weekend district event — so a state championship falls
+through to `generic` instead. That matters in the direction people forget: the
+profile's job is to *veto* a split-screen divider, and vetoing one that is
+genuinely there keeps a whole side-camera panel in the training set. A veto is
+only safe on a layout somebody has established. An event whose type could not
+be read fails the gate for the same reason, rather than having it waived.
+
+```bash
+./run.py formats --district ca --event-type 1    # -> ca_district
+./run.py formats --district ca --event-type 2    # -> generic, deliberately
+```
 
 **`provenance` is load-bearing, not a comment.** `measured` means the numbers
 came out of this pipeline reading that feed's footage. `declared` means they
@@ -179,10 +204,14 @@ California district match already in the manifest, and it prints the profile
 its measurements imply rather than writing anything:
 
 ```bash
-./run.py pull -n 4                            # any 2026ca* event
-./run.py formats --calibrate --event 2026casj
+./run.py pull -n 4                            # any weekend CA district event
+./run.py formats --calibrate --event 2026casnf
 ./run.py cropcheck --video <id>               # then look at the frames
 ```
+
+Worth calibrating the Twitch-carried event separately from a Webcast Unit one:
+`2026caclv` against `2026casnf` is the comparison that says whether one profile
+can cover both.
 
 Nothing promotes itself from `declared` to `measured`; that edit is a person's,
 after they have looked at the frames.
@@ -199,7 +228,8 @@ Order of precedence, first match winning:
 
 1. `crop.formats[<event key>]` in config.json — one event
 2. `crop.format` — the whole run
-3. the event's TBA district abbreviation (`ca` → `ca_district`)
+3. the event's TBA district abbreviation (`ca` → `ca_district`), subject to
+   the profile's `event_type` gate
 4. the event key, then the video title
 
 ```json
@@ -429,8 +459,10 @@ theoretical:
   its thresholds are in force, and those are what it is mainly for — but its
   banner range is the layout as specified rather than a reading off California
   district footage, because none has been through this pipeline yet. One
-  `formats --calibrate` run against any `2026ca*` match replaces it with
-  measurements. See [Which broadcast is this](#which-broadcast-is-this).
+  `formats --calibrate` run against a weekend district event replaces it with
+  measurements, and it is worth doing twice: the district's events do not all
+  come off the same rig. See
+  [Which broadcast is this](#which-broadcast-is-this).
 - **Robot and hub labels are proposals**, not ground truth. Colour-plus-motion
   still boxes people wearing alliance colours near the field.
 - **Per-robot attribution is not live.** `alliance_fuel` is alliance-level; the

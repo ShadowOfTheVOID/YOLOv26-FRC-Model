@@ -23,11 +23,25 @@ scouting app can read this harvest's output as a source of its own.
   checked against it. The measurement still wins — a profile only tunes the
   thresholds, supplies the fallback when detection is inconclusive, and vetoes
   a band its layout does not have.
-- **`ca_district`, for the California district field feed.** One field camera,
-  a banner across the top, no permanent side panel — so its main job is that
-  veto. Marked `declared` rather than `measured`: the veto and thresholds are
-  in force, but the banner range describes the layout as specified, because no
-  California district footage has been through this pipeline yet.
+- **`ca_district`, for FIRST California's weekend district events** —
+  `2026caclv`, `2026casnf`, `2026calas`, `2026caven`, `2026caoec` and
+  Aerospace Valley. One field camera, a banner across the top, no permanent
+  side panel, so its main job is that veto. Marked `declared` rather than
+  `measured`: the veto and thresholds are in force, but the banner range
+  describes the layout as specified, because no California district footage has
+  been through this pipeline yet — and those events are not one production
+  (most are FIRST Webcast Unit on YouTube; Central Valley is on Twitch), so
+  the range is wide and per-event calibration is worth doing.
+- **A profile can be gated to a TBA `event_type`,** and `ca_district` is gated
+  to a weekend district event. FIRST California's state championships
+  (`2026cancmp` and its southern counterpart) carry district `ca` and are a
+  different, larger production: selecting them into a profile whose whole
+  contribution is a no-split-screen veto would keep an entire side-camera
+  panel in the training set if they do run one, which is the failure the
+  profiles exist to prevent with the sign flipped. They fall through to
+  `generic`, which has no opinion. An event whose type could not be read fails
+  the gate rather than having it waived, and config still outranks it — that
+  gate stops the pipeline guessing, not a person who has measured one.
 - **`run.py formats`** — list the profiles, ask which one an event would get
   and why, or measure a real download with `--calibrate`. Calibration prints
   the profile its measurements imply and writes nothing; promoting a profile

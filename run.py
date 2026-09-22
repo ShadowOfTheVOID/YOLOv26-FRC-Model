@@ -215,12 +215,24 @@ def cmd_formats(args, cfg):
     if args.event or args.district or args.title:
         fmt, why = formats.select(district=args.district or "",
                                   event_key=args.event or "",
-                                  title=args.title or "", cfg=cfg)
+                                  title=args.title or "", cfg=cfg,
+                                  event_type=args.event_type)
         print(f"{args.event or '(no event key)'}"
               f"{', district ' + args.district if args.district else ''}"
+              f"{', type ' + str(args.event_type) if args.event_type is not None else ''}"
               f" -> {fmt.name}  ({why})\n")
         print(fmt.describe())
-        print(f"  {fmt.notes}")
+        print(f"  {fmt.notes}\n")
+        # Without a type, a type-gated profile cannot match, and the answer
+        # above is then "generic" for a reason that has nothing to do with the
+        # district asked about. Say so rather than letting it read as a miss.
+        if args.event_type is None and any(f.event_types for f in formats.FORMATS):
+            gated = ", ".join(f.name for f in formats.FORMATS if f.event_types)
+            print(f"  No --event-type given, so {gated} could not be considered:\n"
+                  f"  a district's weekend events and that district's own state\n"
+                  f"  championship share a district and are not the same broadcast.\n"
+                  f"  TBA's event_type is what separates them "
+                  f"(1 = district event, 2 = district championship).")
         return 0
 
     print("Broadcast layout profiles. The first whose selectors match wins;\n"
@@ -390,6 +402,10 @@ def main(argv=None):
     p.add_argument("--event", help="event key, to show the profile it selects")
     p.add_argument("--district", help="TBA district abbreviation, e.g. ca")
     p.add_argument("--title", help="video title, for the title selectors")
+    p.add_argument("--event-type", type=int, default=None, dest="event_type",
+                   help="TBA event_type (1 = district event, 2 = district "
+                        "championship). Some profiles only apply to one kind "
+                        "of event and cannot match without it.")
     p.add_argument("--calibrate", action="store_true",
                    help="measure a real download instead of listing profiles; "
                         "needs --video or --event")

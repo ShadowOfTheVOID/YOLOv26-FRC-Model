@@ -125,21 +125,41 @@ def test_crop_bands():
 
 def test_formats():
     # A single-camera layout is selected by the district TBA already told us
-    # about, not by a list of event keys somebody has to maintain.
-    fmt, why = F.select(district="ca", event_key="2026casj")
+    # about, not by a list of event keys somebody has to maintain. 2026casnf is
+    # a real one: CA District San Francisco Event.
+    fmt, why = F.select(district="ca", event_key="2026casnf", event_type=1)
     check("the California district feed selects its own profile",
           fmt.name == "ca_district" and "district ca" in why)
+
+    # FIRST California's own state championship (2026cancmp) carries district
+    # "ca" and is a different, larger production. Applying the weekend events'
+    # no-split veto to it would keep a whole side-camera panel in the training
+    # set if it does run one - the failure this file exists to prevent, pointed
+    # the other way. It falls through to the profile with no opinion.
+    check("a district's state championship is not its weekend feed",
+          F.select(district="ca", event_key="2026cancmp", event_type=2)[0].name
+          == "generic")
+    # And a type we could not read is not a type that passed: an entry
+    # harvested before the type was recorded must not inherit a veto.
+    check("an unknown event type fails the gate rather than waiving it",
+          F.select(district="ca", event_key="2026casnf")[0].name == "generic")
     check("a regional with no district falls through to generic",
           F.select(district="", event_key="2026roebling")[0].name == "generic")
     check("a Championship division is still the split-screen profile",
           F.select(district="", event_key="2026gal")[0].name == "champs_split")
     # Config outranks TBA: both routes are a human saying they have looked at
     # the footage. Per-event beats the whole run.
-    cfg = {"crop": {"format": "champs_split", "formats": {"2026casj": "generic"}}}
+    cfg = {"crop": {"format": "champs_split", "formats": {"2026casnf": "generic"}}}
     check("crop.format forces a profile", F.select(district="ca", cfg=cfg)[0].name
           == "champs_split")
     check("crop.formats[event] beats crop.format",
-          F.select(district="ca", event_key="2026casj", cfg=cfg)[0].name == "generic")
+          F.select(district="ca", event_key="2026casnf", cfg=cfg)[0].name == "generic")
+    # Config is a human saying they looked at the footage, so it is not subject
+    # to the type gate - that gate exists to stop the pipeline guessing, not to
+    # overrule somebody who has measured a state championship.
+    check("config outranks the event-type gate too",
+          F.select(district="ca", event_key="2026cancmp", event_type=2,
+                   cfg={"crop": {"format": "ca_district"}})[0].name == "ca_district")
 
     # TBA writes `district: null` for a regional, so the same read is also the
     # regional test. A string where an object belongs must not become a name.
@@ -184,9 +204,9 @@ def test_formats():
     # A typo in config.json must stop the run rather than silently harvest a
     # whole batch against the wrong layout.
     for bad in ({"crop": {"format": "ca-district"}},
-                {"crop": {"formats": {"2026casj": "nope"}}}):
+                {"crop": {"formats": {"2026casnf": "nope"}}}):
         try:
-            F.select(district="ca", event_key="2026casj", cfg=bad)
+            F.select(district="ca", event_key="2026casnf", cfg=bad)
             check("an unknown format name is refused", False)
         except SystemExit:
             check("an unknown format name is refused", True)
@@ -232,29 +252,65 @@ def test_district_catalogue():
     # The district has to reach the crop stage, and the only place it is free
     # is the event list we already fetch to pick videos: /events/{year}/simple
     # carries `district`, so this costs no extra request.
-    events = [{"key": "2026casj", "event_type": 1,
+    events = [{"key": "2026casnf", "event_type": 1,
+               "district": {"abbreviation": "ca"}},
+              {"key": "2026cancmp", "event_type": 2,
                "district": {"abbreviation": "ca"}},
               {"key": "2026roebling", "event_type": 0, "district": None}]
     c = TBAClient.__new__(TBAClient)
     c.get = lambda path: events
-    check("the catalogue carries each event's district",
-          event_catalogue(c, 2026, True) == [("2026casj", "ca"), ("2026roebling", "")])
+    # The type travels with the district, because on its own the district
+    # cannot tell a weekend event from that district's state championship.
+    check("the catalogue carries each event's district and type",
+          event_catalogue(c, 2026, True) == [
+              {"key": "2026casnf", "district": "ca", "event_type": 1},
+              {"key": "2026cancmp", "district": "ca", "event_type": 2},
+              {"key": "2026roebling", "district": "", "event_type": 0}])
 
     # A client that only has event_keys() -- anything written before the
     # district mattered -- must still walk the same catalogue.
     class KeysOnly:
         def event_keys(self, year, competitive_only=True):
-            return ["2026casj"]
-    check("a keys-only client still walks, without a district",
-          event_catalogue(KeysOnly(), 2026, True) == [("2026casj", "")])
+            return ["2026casnf"]
+    check("a keys-only client still walks, with nothing to select on",
+          event_catalogue(KeysOnly(), 2026, True) ==
+          [{"key": "2026casnf", "district": "", "event_type": None}])
 
-    matches = [{"key": "2026casj_qm1", "event_key": "2026casj", "comp_level": "qm",
+    matches = [{"key": "2026casnf_qm1", "event_key": "2026casnf", "comp_level": "qm",
                 "match_number": 1, "set_number": 0,
                 "videos": [{"type": "youtube", "key": "V"}]}]
-    got = list(youtube_candidates(matches, district="ca"))
-    check("and it rides along on the candidate", got[0]["district"] == "ca")
-    check("a candidate with no district says so, rather than guessing",
-          list(youtube_candidates(matches))[0]["district"] == "")
+    got = list(youtube_candidates(matches, district="ca", event_type=1))
+    check("and both ride along on the candidate",
+          got[0]["district"] == "ca" and got[0]["event_type"] == 1)
+    bare = list(youtube_candidates(matches))[0]
+    check("a candidate with neither says so, rather than guessing",
+          bare["district"] == "" and bare["event_type"] is None)
+
+    # The whole chain in one go, because each link was added separately and the
+    # profile is worth nothing if any one of them drops the type on the floor -
+    # a silent fall back to `generic` is exactly the failure this is guarding.
+    class Season:
+        """events() and event_matches() as separate answers, unlike `c` above."""
+
+        def events(self, year, competitive_only=True):
+            return events
+
+        def event_matches(self, ek):
+            return [{"key": f"{ek}_qm1", "event_key": ek, "comp_level": "qm",
+                     "match_number": 1, "set_number": 0,
+                     "videos": [{"type": "youtube", "key": f"V{ek}"}]}]
+
+    picked = pick_unseen(Season(), 2026, 9,
+                         L.Ledger(Path(tempfile.mkdtemp()) / "l.json"),
+                         rng=random.Random(0))
+    check("the walk reaches every event in the catalogue", len(picked) == 3)
+    got = {p["event_key"]: F.select(district=p["district"],
+                                    event_key=p["event_key"],
+                                    event_type=p["event_type"])[0].name
+           for p in picked}
+    check("and each one arrives at the crop stage with the right profile",
+          got == {"2026casnf": "ca_district", "2026cancmp": "generic",
+                  "2026roebling": "generic"})
 
 
 def test_scoreboard():

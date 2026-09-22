@@ -162,13 +162,17 @@ def match_label(match: dict) -> str:
 
 
 def youtube_candidates(matches: List[dict], competitive_only: bool = True,
-                       district: str = "") -> Iterator[Dict[str, str]]:
+                       district: str = "", event_type: Optional[int] = None
+                       ) -> Iterator[Dict[str, str]]:
     """Yield one candidate per distinct YouTube video ID in this event.
 
     `district` is the event's TBA district abbreviation ("ca", "fim", ...) or
-    "" for a regional. It rides along on the candidate because the crop stage
-    picks a broadcast layout profile from it, and by then the event record it
-    came from is several steps out of scope.
+    "" for a regional, and `event_type` is TBA's code for what kind of event it
+    is. Both ride along on the candidate because the crop stage picks a
+    broadcast layout profile from them, and by then the event record they came
+    from is several steps out of scope. The type matters as much as the
+    district: a district's weekend events and that district's own state
+    championship share a district and are not the same broadcast.
     """
     seen_here = set()
     for match in matches:
@@ -188,6 +192,7 @@ def youtube_candidates(matches: List[dict], competitive_only: bool = True,
                 "event_key": match.get("event_key", ""),
                 "label": match_label(match),
                 "district": district,
+                "event_type": event_type,
                 # The six teams on the field. This is what turns bumper-number
                 # reading from open-ended OCR into a six-way choice.
                 "teams": {
@@ -208,20 +213,25 @@ def shard_of(yt_key: str, shards: int) -> int:
     return zlib.crc32(yt_key.encode()) % shards
 
 
-def event_catalogue(client, year: int, competitive_only: bool
-                    ) -> List[Tuple[str, str]]:
-    """(event_key, district) for a season's catalogue.
+def event_catalogue(client, year: int, competitive_only: bool) -> List[dict]:
+    """`{key, district, event_type}` per event in a season's catalogue.
 
-    `events()` carries the district; `event_keys()` does not. Both are accepted
-    so that a caller holding a narrower client -- a test fake, or anything that
-    only ever needed keys -- still walks the same catalogue, just without a
-    district to pick a profile from.
+    `events()` carries the district and the type; `event_keys()` carries
+    neither. Both are accepted so that a caller holding a narrower client -- a
+    test fake, or anything that only ever needed keys -- still walks the same
+    catalogue, just with nothing to pick a profile from, which reads as the
+    generic layout rather than as a guess.
+
+    A dict rather than a tuple because these three travel together from here to
+    the crop stage, and two of them are only ever read by name.
     """
     getter = getattr(client, "events", None)
     if callable(getter):
         events = getter(year, competitive_only=competitive_only) or []
-        return [(e["key"], formats.district_of(e)) for e in events if e.get("key")]
-    return [(k, "") for k in
+        return [{"key": e["key"], "district": formats.district_of(e),
+                 "event_type": e.get("event_type")}
+                for e in events if e.get("key")]
+    return [{"key": k, "district": "", "event_type": None} for k in
             (client.event_keys(year, competitive_only=competitive_only) or [])]
 
 
@@ -263,9 +273,10 @@ def pick_unseen(
     not_mine = 0
     events_walked = 0
 
-    for event_key, district in catalogue:
+    for event in catalogue:
         if len(picked) >= count:
             break
+        event_key = event["key"]
         events_walked += 1
         matches = client.event_matches(event_key)
         if not matches:
@@ -273,7 +284,8 @@ def pick_unseen(
 
         candidates = list(youtube_candidates(matches,
                                              competitive_only=competitive_only,
-                                             district=district))
+                                             district=event["district"],
+                                             event_type=event["event_type"]))
         rng.shuffle(candidates)
 
         from_this_event = 0

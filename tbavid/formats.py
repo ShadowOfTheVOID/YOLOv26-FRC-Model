@@ -61,6 +61,22 @@ from typing import Dict, List, Optional, Tuple
 # note here means a real disagreement and not a rounding difference.
 BAND_TOLERANCE = 0.03
 
+# TBA's event_type codes, in the same order `tba.COMPETITIVE_EVENT_TYPES`
+# lists them. Only needed here for the labels in `describe`, and to name the
+# distinction CA_DISTRICT's gate rests on: a district's weekend events (1) and
+# that district's own state championship (2) are the same district and not the
+# same broadcast.
+EVENT_TYPE_NAMES = {
+    0: "regional",
+    1: "district event",
+    2: "district championship",
+    3: "championship division",
+    4: "championship final",
+    5: "district championship division",
+    6: "Festival of Champions",
+}
+DISTRICT_EVENT = 1
+
 
 class Format:
     """One broadcast layout.
@@ -75,6 +91,7 @@ class Format:
                  banner: Tuple[float, float, float],
                  split: Optional[Tuple[float, float, float]] = None,
                  districts: Tuple[str, ...] = (),
+                 event_types: Tuple[int, ...] = (),
                  event_re: str = "", title_re: str = "",
                  tune: Optional[Dict[str, float]] = None):
         self.name = name
@@ -84,6 +101,11 @@ class Format:
         self.banner = banner
         self.split = split
         self.districts = tuple(d.lower() for d in districts)
+        # A gate, not a selector: a profile with this set can only ever match
+        # an event of one of these TBA event_types. A district's own state
+        # championship belongs to the same district as its weekend events and
+        # is not the same broadcast -- see CA_DISTRICT.
+        self.event_types = tuple(event_types)
         self.event_re = re.compile(event_re, re.I) if event_re else None
         self.title_re = re.compile(title_re, re.I) if title_re else None
         self.tune = dict(tune or {})
@@ -93,12 +115,21 @@ class Format:
         """Does this layout carry a permanent second-camera panel?"""
         return self.split is not None
 
-    def matches(self, district: str = "", event_key: str = "", title: str = "") -> str:
+    def matches(self, district: str = "", event_key: str = "", title: str = "",
+                event_type: Optional[int] = None) -> str:
         """Why this profile fits, or "" if it does not.
 
         The string is the reason, so a note in the manifest says what decided
         the profile rather than only which one won.
+
+        An `event_types` gate that cannot be checked -- `event_type` unknown,
+        as it is for a manifest entry harvested before it was recorded -- fails
+        the gate rather than being waived. A profile's whole purpose is to
+        veto, and a veto applied to a broadcast nobody has established it
+        describes is the same mistake in the other direction.
         """
+        if self.event_types and event_type not in self.event_types:
+            return ""
         if district and district.lower() in self.districts:
             return f"TBA district {district.lower()}"
         if self.event_re and event_key and self.event_re.search(event_key):
@@ -125,6 +156,11 @@ class Format:
             line += f"{'':<14} split  none expected\n"
         if self.districts:
             line += f"{'':<14} districts: {', '.join(self.districts)}\n"
+        if self.event_types:
+            line += (f"{'':<14} event types: "
+                     f"{', '.join(str(t) for t in self.event_types)}"
+                     f" ({EVENT_TYPE_NAMES.get(self.event_types[0], '?')}"
+                     f"{', ...' if len(self.event_types) > 1 else ''})\n")
         return line
 
 
@@ -135,26 +171,42 @@ class Format:
 
 CA_DISTRICT = Format(
     name="ca_district",
-    label="California district field feed",
+    label="California district weekend event feed",
     provenance="declared",
     notes=(
-        "One elevated field camera, a score banner across the top, and no "
-        "permanent second-camera panel: the director cuts away to a replay or "
-        "a pit shot rather than showing both at once, which the shot "
+        "FIRST California's district weekend events -- Central Valley, San "
+        "Francisco, Los Angeles, Ventura County, Orange County, Aerospace "
+        "Valley. One elevated field camera, a score banner across the top, "
+        "and no permanent second-camera panel: the director cuts away to a "
+        "replay or a pit shot rather than showing both at once, which the shot "
         "classifier already handles by dropping those shots. So the thing this "
         "profile is really for is the veto: without it, the strongest static "
         "horizontal edge in the lower half of a single-camera frame is the "
         "guardrail or the front row of the bleachers, and a feed with a clean "
         "one loses the bottom of its own field to a divider that was never "
-        "there."
+        "there. "
+        "NOT one production, though: most of these events are YouTube webcasts "
+        "carried by the FIRST Webcast Unit, and at least one (Central Valley) "
+        "goes out on Twitch instead. Those are different rigs, so the banner "
+        "range here is wide and calibrating per event key is worth doing -- "
+        "`crop.formats` takes one event at a time for exactly this."
     ),
     # Declared, not measured. Wide on purpose: a range this size still catches
     # a banner walk that ran away or stopped in the gap above the digits, which
     # is what the range is for, without pretending to a precision no footage
-    # has been read for yet.
+    # has been read for yet -- and it has to cover two different productions.
     banner=(0.10, 0.22, 0.16),
     split=None,
     districts=("ca",),
+    # Weekend district events only. A district's own state championship
+    # (2026cancmp, and its southern counterpart) carries district "ca" and is a
+    # different and larger production, on which this profile's no-split veto
+    # would be an assertion nobody has checked -- and vetoing a divider that IS
+    # there keeps a whole side-camera panel in the training set, which is the
+    # failure this file exists to prevent, pointed the other way. Those events
+    # fall through to `generic`, which has no opinion, until somebody measures
+    # one.
+    event_types=(DISTRICT_EVENT,),
     tune={
         # A divider this layout does not have needs more than one strong row to
         # be believed -- see `split_mode: unlikely` in crop.detect_bottom.
@@ -201,7 +253,8 @@ BY_NAME: Dict[str, Format] = {f.name: f for f in FORMATS}
 
 
 def select(district: str = "", event_key: str = "", title: str = "",
-           cfg: Optional[dict] = None) -> Tuple[Format, str]:
+           cfg: Optional[dict] = None,
+           event_type: Optional[int] = None) -> Tuple[Format, str]:
     """Pick a profile for one video. Returns (format, why).
 
     Config beats TBA beats nothing, because the two config routes are a human
@@ -233,7 +286,8 @@ def select(district: str = "", event_key: str = "", title: str = "",
         return fmt, "crop.format"
 
     for fmt in FORMATS:
-        why = fmt.matches(district=district, event_key=event_key, title=title)
+        why = fmt.matches(district=district, event_key=event_key, title=title,
+                          event_type=event_type)
         if why:
             return fmt, why
     return GENERIC, "no profile matched"
