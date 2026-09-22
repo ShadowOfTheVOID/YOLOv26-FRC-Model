@@ -25,7 +25,8 @@ from tbavid import formats as F
 from tbavid import ledger as L
 from tbavid import stream as S
 from tbavid.crop import Profile, detect_bottom, detect_top
-from tbavid.db import build, connect, export_for_serving, summary
+from tbavid.db import build, connect, export_for_serving, summary, write_live
+from tbavid.live import Counter as LiveCounter
 from tbavid.identify import best_assignment, vote
 from tbavid.labels import Timeline, source_time
 from tbavid.ledger import Ledger
@@ -917,6 +918,126 @@ def test_db():
           con.execute("SELECT COUNT(*) FROM team_summary").fetchone()[0] == 6)
 
 
+def test_live_counter():
+    """The live counter must agree with the batch one, read for read.
+
+    `scoreboard.clean_series` is the tested rule and it builds a series from
+    one call's worth of reads, seeding from the minimum of the first few. A
+    live read arrives in chunks, so the state has to survive a boundary -
+    called once per chunk it would re-seed every few seconds, losing the step
+    across the join and letting one bad chunk re-anchor the match.
+
+    So `Counter` is that rule made stateful, and two implementations of one
+    rule drift unless something says they may not. This is that something.
+    """
+    rng = random.Random(11)
+    mismatches = 0
+    for _ in range(300):
+        truth, v = [], 0
+        for _ in range(rng.randint(5, 60)):
+            v += rng.choice([0, 0, 1, 2, 3, 5, 8, 12])
+            truth.append(v)
+        vals = []
+        for x in truth:
+            r = rng.random()
+            if r < 0.10:
+                vals.append(None)                      # unreadable frame
+            elif r < 0.18:
+                vals.append(x * 10 + 1)                # a stray leading digit
+            elif r < 0.22:
+                vals.append(max(0, x - rng.randint(1, 30)))   # reads backwards
+            else:
+                vals.append(x)
+        times = [i * 0.2 for i in range(len(vals))]
+        if clean_series(vals, times) != LiveCounter().feed(vals, times):
+            mismatches += 1
+    check("the live counter agrees with clean_series on noisy reads",
+          mismatches == 0)
+
+    # And the thing clean_series cannot do. Split anywhere and the stitched
+    # result must equal the one-pass read of the whole thing.
+    vals = [100, 100, 103, 103, 108, None, 108, 112, 112, 118]
+    times = [i * 0.2 for i in range(len(vals))]
+    whole = clean_series(vals, times)
+    for cut in range(1, len(vals)):
+        c = LiveCounter()
+        c.feed(vals[:cut], times[:cut])
+        c.feed(vals[cut:], times[cut:])
+        if c.points != whole:
+            check(f"stitching at {cut} matches a single pass", False)
+            break
+    else:
+        check("stitching at every boundary matches a single pass", True)
+
+    # The failure this exists to prevent, stated as a fact: cleaning each chunk
+    # on its own re-seeds mid-match.
+    half = len(vals) // 2
+    per_chunk = (clean_series(vals[:half], times[:half])
+                 + clean_series(vals[half:], times[half:]))
+    check("per-chunk cleaning would re-seed, which is why it is not used",
+          per_chunk != whole)
+
+    check("a chunk of nothing readable changes nothing",
+          LiveCounter().feed([None, None], [0.0, 0.2]) == [])
+
+
+def test_live_rows():
+    """A live read files a timeline and a roster, and no dataset rows."""
+    with tempfile.TemporaryDirectory() as tmp:
+        con = connect(Path(tmp) / "live.db")
+        series = {"blue": [[1.0, 10], [3.0, 14], [9.0, 30]],
+                  "red": [[2.0, 4], [8.0, 9]]}
+        got = write_live(con, "2026caclv", "2026caclv_qm14", series,
+                         {"blue": 30, "red": 9},
+                         teams={"blue": ["254", "frc1678", "8033"],
+                                "red": ["971", "604", "1323"]},
+                         label="qm14")
+        check("the timeline is written as scoring events", got["score_events"] == 3)
+        check("and the alliance totals land on the match",
+              tuple(con.execute("SELECT blue_fuel, red_fuel FROM matches"
+                                " WHERE match_key=?",
+                                ("2026caclv_qm14",)).fetchone()) == (30, 9))
+        check("the roster comes off TBA, with frc stripped",
+              [r[0] for r in con.execute(
+                  "SELECT team FROM match_teams WHERE match_key=? AND"
+                  " alliance='blue' ORDER BY station",
+                  ("2026caclv_qm14",))] == [254, 1678, 8033])
+        check("a live row says it is live, so it cannot be confused with a "
+              "re-readable one",
+              con.execute("SELECT status FROM matches WHERE match_key=?",
+                          ("2026caclv_qm14",)).fetchone()[0] == "live")
+        check("nothing entered the dataset",
+              con.execute("SELECT COUNT(*) FROM frames").fetchone()[0] == 0)
+        check("and the match has no video to point at, because none was kept",
+              tuple(con.execute("SELECT video_id, clean_path FROM matches"
+                                " WHERE match_key=?",
+                                ("2026caclv_qm14",)).fetchone()) == (None, None))
+        check("the comp level is read off the label",
+              con.execute("SELECT comp_level FROM matches WHERE match_key=?",
+                          ("2026caclv_qm14",)).fetchone()[0] == "qm")
+
+        # Re-filing the same match replaces its timeline rather than doubling it.
+        write_live(con, "2026caclv", "2026caclv_qm14", series,
+                   {"blue": 30, "red": 9}, label="qm14")
+        check("re-filing a match does not append a second timeline",
+              con.execute("SELECT COUNT(*) FROM score_events").fetchone()[0] == 3)
+
+        # OCR that never read anything must not land as a confident zero.
+        out = write_live(con, "2026caclv", "2026caclv_qm15", {"blue": [], "red": []},
+                         {"blue": None, "red": None}, label="qm15")
+        check("a match whose counters never read is flagged, not zeroed",
+              out["scoreboard_ok"] == 0
+              and con.execute("SELECT blue_fuel FROM matches WHERE match_key=?",
+                              ("2026caclv_qm15",)).fetchone()[0] is None)
+        # The scouting API's team view counts only clean reads, so an unread
+        # match must not drag an average down.
+        check("and it is excluded from the team view rather than averaged in",
+              con.execute("SELECT COUNT(*) FROM team_match_fuel"
+                          " WHERE match_key=?", ("2026caclv_qm15",)).fetchone()[0]
+              == 0)
+        con.close()
+
+
 def test_serving_export():
     """A copy that a read-only host can actually read.
 
@@ -971,7 +1092,7 @@ def main() -> int:
                test_download_options, test_labels, test_render, test_identify,
                test_ledger_and_picking, test_competitive_filter, test_audit,
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
-               test_serving_export):
+               test_serving_export, test_live_counter, test_live_rows):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

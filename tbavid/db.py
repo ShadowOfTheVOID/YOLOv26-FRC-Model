@@ -185,6 +185,84 @@ def _migrate(con: sqlite3.Connection) -> None:
     con.commit()
 
 
+def write_live(con: sqlite3.Connection, event_key: str, match_key: str,
+               series: Dict[str, list], totals: Dict[str, Optional[int]],
+               teams: Optional[Dict[str, list]] = None,
+               label: str = "", note: str = "") -> Dict[str, int]:
+    """Write one live-scouted match: the timeline, the totals and the roster.
+
+    Separate from `build`, which rebuilds everything from the manifest and
+    would erase anything the manifest does not know about -- and the manifest
+    is the DATASET's record, which a live read deliberately never enters. So
+    these rows have no `video_id`, no crop and no frames, and that is the
+    correct shape rather than a gap: nothing was kept to point at.
+
+    `status` is 'live' so the two can always be told apart afterwards. A row
+    read off a broadcast as it happened and a row read off a downloaded video
+    are the same measurement of the same counter, but not the same evidence --
+    the live one cannot be re-read, because the video is gone.
+
+    Idempotent per match: re-running replaces that match's timeline rather than
+    appending a second copy of it.
+    """
+    year = int(event_key[:4]) if event_key[:4].isdigit() else None
+    con.execute("INSERT OR IGNORE INTO events(event_key, year) VALUES (?,?)",
+                (event_key, year))
+
+    # A live read is only as good as the OCR: no readings at all means the
+    # counters were never found or never parsed, and that must not land as a
+    # confident zero.
+    ok = 1 if any(series.get(a) for a in ("blue", "red")) else 0
+    con.execute("""
+        INSERT INTO matches (match_key, event_key, comp_level, label, status,
+                             blue_fuel, red_fuel, scoreboard_ok, scoreboard_note)
+        VALUES (?,?,?,?,'live',?,?,?,?)
+        ON CONFLICT(match_key) DO UPDATE SET
+            event_key=excluded.event_key, status=excluded.status,
+            blue_fuel=excluded.blue_fuel, red_fuel=excluded.red_fuel,
+            scoreboard_ok=excluded.scoreboard_ok,
+            scoreboard_note=excluded.scoreboard_note,
+            label=COALESCE(excluded.label, matches.label)
+        """, (match_key, event_key, _comp_level(label), label or None,
+              totals.get("blue"), totals.get("red"), ok, note or None))
+
+    if teams:
+        con.execute("DELETE FROM match_teams WHERE match_key=?", (match_key,))
+        for alliance in ("blue", "red"):
+            for station, team in enumerate(teams.get(alliance) or [], start=1):
+                try:
+                    number = int(str(team).replace("frc", ""))
+                except (TypeError, ValueError):
+                    continue
+                con.execute("INSERT OR IGNORE INTO match_teams"
+                            "(match_key, alliance, station, team) VALUES (?,?,?,?)",
+                            (match_key, alliance, station, number))
+
+    con.execute("DELETE FROM score_events WHERE match_key=?", (match_key,))
+    rows = 0
+    for alliance, points in (series or {}).items():
+        prev = None
+        for point in points:
+            t, v = point[0], point[1]
+            if prev is not None and v > prev:
+                con.execute("INSERT INTO score_events"
+                            "(match_key,t_source,alliance,balls,total)"
+                            " VALUES (?,?,?,?,?)",
+                            (match_key, float(t), alliance, int(v - prev), int(v)))
+                rows += 1
+            prev = v
+    con.commit()
+    return {"score_events": rows, "scoreboard_ok": ok}
+
+
+def _comp_level(label: str) -> Optional[str]:
+    """'qm14' -> 'qm'. Advisory only; an unrecognised label stays NULL."""
+    for level in ("qm", "sf", "qf", "ef", "f"):
+        if label.startswith(level):
+            return level
+    return None
+
+
 def export_for_serving(dest: Path, src: Path = None) -> Path:
     """Write a copy of the database that can be served from a read-only disk.
 

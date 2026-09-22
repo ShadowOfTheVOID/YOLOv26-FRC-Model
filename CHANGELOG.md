@@ -15,6 +15,21 @@ harvest's output as a source of its own.
 
 ### Added
 
+- **`run.py live` — scout a live feed and keep no video.** Everything else
+  here builds a training set, which is no use to somebody who wants to know how
+  an alliance is scoring this afternoon. This reads the burned-in fuel counter
+  off a live stream and deletes every frame the moment it has been read: peak
+  disk is one chunk, nothing enters the manifest or the dataset, and the clip
+  is unlinked on the failure paths too. What it gives is the per-alliance
+  scoring timeline for the match on the field — when fuel went in, to the
+  second — which nothing else in either repo produces live. What it cannot give
+  is which robot: the counter says an alliance scored and never which of its
+  three did, and being live does not move that ceiling.
+  It refuses to guess the match: `--match` names it or `--hub` asks a running
+  scouting hub what is on the field, and one is required, because a timeline
+  filed against the wrong key credits an alliance's scoring to six robots that
+  were not on it. Rows are marked `status='live'`, since a reading that cannot
+  be re-read is not the same evidence as one that can.
 - **`run.py stream` — one broadcast in, one clip per match out.** Events that
   publish a single multi-hour stream per day rather than per-match uploads were
   simply unreachable: the picker looks for `match.videos[]` and finds nothing,

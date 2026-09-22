@@ -216,6 +216,106 @@ def cmd_cropcheck(args, cfg):
     return 0
 
 
+def cmd_live(args, cfg):
+    """Scout a live feed: read the scoreboard as it happens, keep no video."""
+    import json
+    import urllib.request
+    from tbavid import db as dbmod
+    from tbavid import live
+    from tbavid.config import OCR_WORK, ensure_dirs, tba_key
+    from tbavid.ffm import require_tools
+    from tbavid.tba import TBAClient, match_label
+
+    require_tools()
+    ensure_dirs()
+
+    if not args.match and not args.hub:
+        raise SystemExit(
+            "live needs to know which match it is watching.\n"
+            "  --match qm14                 name it yourself, or\n"
+            "  --hub http://localhost:6059  ask the scouting hub what is on the "
+            "field\n"
+            "The counter cannot say which match it is, and a timeline filed "
+            "against the\nwrong match key is worse than no timeline at all.")
+
+    print(f"[1/3] resolving {args.url}")
+    media = live.resolve(args.url, cfg)
+    if not media:
+        raise SystemExit("yt-dlp could not resolve that to a playable stream.\n"
+                         "  Is it live right now, and is the URL the one you "
+                         "would watch in a browser?")
+
+    # The roster, so the timeline can be attributed to an alliance's three
+    # robots. From TBA, like everywhere else -- the counter knows nothing.
+    teams, label = None, args.match or ""
+    if args.event:
+        client = TBAClient(tba_key(), cfg["tba_min_interval_s"])
+        for m in client.event_matches(args.event):
+            if match_label(m) == label:
+                teams = {side: [t.replace("frc", "") for t in
+                                ((m.get("alliances") or {})
+                                 .get(side, {}).get("team_keys") or [])]
+                         for side in ("blue", "red")}
+                break
+
+    def current_match():
+        """What the scouting hub says is on the field, if we are asking it."""
+        if not args.hub:
+            return label
+        try:
+            with urllib.request.urlopen(
+                    args.hub.rstrip("/") + "/api/state", timeout=5) as res:
+                state = json.loads(res.read().decode())
+        except Exception:
+            return None
+        live_now = (state or {}).get("nexusLive") or {}
+        return live_now.get("matchKey") or live_now.get("label") or None
+
+    print(f"[2/3] finding the fuel counters ({args.bootstrap:.0f}s of footage)")
+    print("      This needs the digits to actually move, so it has to run while")
+    print("      a match is being played -- between matches it will find nothing.")
+
+    seen = {"n": 0}
+
+    def on_step(result, w):
+        if result.get("error"):
+            print(f"  ! {result['error']}")
+            return True
+        for e in result["events"]:
+            print(f"  {e['t']:>7.1f}s  {e['alliance']:<4} +{e['balls']:<3} "
+                  f"-> {e['total']}")
+        seen["n"] += len(result["events"])
+        t = result["totals"]
+        print(f"  [{result['elapsed']:.0f}s] blue={t.get('blue')} red={t.get('red')}"
+              f"  ({seen['n']} scoring event(s))")
+        return True
+
+    out = live.watch(media, cfg, OCR_WORK, on_step, chunk_s=args.chunk,
+                     max_s=args.for_s, bootstrap_s=args.bootstrap)
+    if out.get("error"):
+        print(f"\n  ! {out['error']}")
+        if not out.get("series"):
+            return 1
+
+    mk = args.match_key or (f"{args.event}_{label}" if args.event and label else label)
+    if not mk:
+        print("\nnothing to file this against, so nothing was written")
+        return 1
+
+    print(f"\n[3/3] filing {mk}")
+    con = dbmod.connect()
+    wrote = dbmod.write_live(con, args.event or "", mk,
+                             out.get("series") or {}, out.get("totals") or {},
+                             teams=teams, label=label,
+                             note="read live off the broadcast; no video kept")
+    con.close()
+    print(f"  {wrote['score_events']} scoring event(s) written"
+          f"{'' if wrote['scoreboard_ok'] else ' -- scoreboard_ok=0, the counters never read'}")
+    print(f"  totals: {out.get('totals')}")
+    print("\nNo video was kept. Nothing entered the dataset.")
+    return 0
+
+
 def cmd_stream(args, cfg):
     """Read a whole event-day stream instead of one upload per match."""
     if not (args.url or args.file):
@@ -423,6 +523,26 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8781)),
                    help="honours $PORT, which most hosts inject")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("live",
+                       help="scout a live feed: read the scoreboard as it "
+                            "happens and keep no video")
+    p.add_argument("--url", required=True,
+                   help="the live stream, as you would watch it (Twitch or YouTube)")
+    p.add_argument("--event", help="TBA event key, for the roster")
+    p.add_argument("--match", help="which match is on the field, e.g. qm14")
+    p.add_argument("--match-key", dest="match_key",
+                   help="the full TBA match key, if it is not <event>_<match>")
+    p.add_argument("--hub", metavar="URL",
+                   help="ask a running scouting hub what is on the field "
+                        "instead of naming the match (e.g. http://localhost:6059)")
+    p.add_argument("--chunk", type=float, default=20.0,
+                   help="seconds read per pass (default 20)")
+    p.add_argument("--bootstrap", type=float, default=90.0,
+                   help="seconds of footage used to find the counters (default 90)")
+    p.add_argument("--for", dest="for_s", type=float, default=0.0,
+                   help="stop after this many seconds (0 = until the stream ends)")
+    p.set_defaults(func=cmd_live)
 
     p = sub.add_parser("stream",
                        help="pull one whole event-day stream and cut every "

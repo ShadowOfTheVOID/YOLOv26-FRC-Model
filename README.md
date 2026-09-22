@@ -90,6 +90,7 @@ Output lands in these folders:
 | `cropcheck [video_id]` | proof frames with the crop box drawn on |
 | `formats` | broadcast layout profiles: list, explain, calibrate |
 | `stream` | read a whole event-day stream, cutting each match out by its audio cues |
+| `live` | scout a live feed: read the scoreboard as it happens, keep no video |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |
 | `reprocess` | re-run crop/render/scoreboard on already-downloaded sources |
@@ -129,6 +130,61 @@ Output lands in these folders:
 
    On the calibration match this turned a 1920x1080 broadcast into a
    1920x504 main-camera strip.
+
+## Scouting a live feed, keeping nothing
+
+Everything above builds a **training set**: it downloads a broadcast, crops it,
+samples frames and fills a disk, all for a detector that does not exist yet.
+That is no use to somebody who wants to know how an alliance is scoring this
+afternoon.
+
+`live` is the other job. It reads the one thing in a broadcast that is already
+ground truth — the burned-in fuel counter — off a live feed, and throws every
+frame away the moment it has been read.
+
+```bash
+./run.py live --url <twitch or youtube live> --event 2026caclv --match qm14
+./run.py live --url <stream> --event 2026caclv --hub http://localhost:6059
+```
+
+**It keeps nothing.** Each pass records a few seconds to a temp file, OCRs the
+two counter boxes, and deletes it. Peak disk is one chunk. No frames, no
+cleaned video, nothing enters the manifest or the dataset — the only thing
+written is the scoring rows, which is what a scouting app reads. Verified: the
+clip is unlinked on the failure paths too, including when the probe raises
+part-way through.
+
+What you get is the **scoring timeline per alliance** — when fuel went in, to
+the second, for the match on the field. Nothing else in either repo produces
+that live, and it answers *is this alliance front-loading or finishing strong*
+rather than just *how much did they get*.
+
+What you do not get is **which robot**. The counter says an alliance scored and
+never which of its three did — the same ceiling [SCOUTING.md](SCOUTING.md)
+describes, and being live does not move it. Per-robot needs a trained detector
+and a tracker, and neither exists yet.
+
+### It will not guess which match it is watching
+
+`--match qm14` names it, or `--hub` asks a running scouting hub what is on the
+field — the hub knows, because that is what arms the six scouting phones. One
+of the two is required. A timeline filed against the wrong match key is worse
+than no timeline: `db.py` joins the roster onto that key, so it would credit an
+alliance's scoring to six robots that were not on the field.
+
+### Two things worth knowing before an event
+
+- **The counters are found by watching the digits move**, so the warm-up has to
+  run *while a match is being played*. Pointed at an idle field it will
+  correctly find nothing and say so rather than locking onto the match clock.
+- **Rows are marked `status='live'`.** A counter read off a broadcast as it
+  happened and one read off a downloaded video are the same measurement, but
+  not the same evidence — the live one cannot be re-read, because the video is
+  gone.
+
+Live rows land in `matches`, `match_teams` and `score_events`, which are what
+`team_match_fuel` and `team_summary` are built from — so they appear in a
+scouting app through the existing API with nothing to change on that side.
 
 ## One stream instead of one upload per match
 

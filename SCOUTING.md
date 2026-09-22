@@ -16,6 +16,15 @@ under systemd on a host instead — one unit, no secrets, nothing to start by
 hand: [deploy/HOSTING.md](deploy/HOSTING.md). Copy the database with `db
 export` and not `cp`; that page says why, and it is not a small difference.
 
+## Two ways rows get here
+
+`db sync` builds everything from the manifest, which is the dataset's record.
+`run.py live` writes straight into these tables instead, from a live broadcast,
+keeping no video — so those rows have no `video_id`, no crop and no frames, and
+carry `status='live'`. That is the right shape rather than a gap: nothing was
+kept to point at, and a reading that cannot be re-read is worth being able to
+tell apart from one that can.
+
 ## Tables
 
 | table | one row per | notes |
