@@ -1324,6 +1324,97 @@ def test_nothing_to_verify_against():
           "health" in m.state())
 
 
+def test_counting_model_dataset():
+    """Deriving the counting model's dataset from the five-class one.
+
+    `count.py` reads fuel and the two hubs and ignores robots on every frame.
+    Two unused classes are work done per frame for an output nothing reads,
+    and at a scrimmage a model that cannot keep up misses balls silently - so
+    dropping them is not cosmetic.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    from subset_classes import CLASSES as SRC_CLASSES
+    from subset_classes import COUNTING, index_map, remap_labels
+
+    check("the subset tool shares the canonical class order",
+          list(SRC_CLASSES) == list(CLASSES))
+    check("and counting wants fuel plus both hubs",
+          COUNTING == ["fuel", "hub_blue", "hub_red"])
+
+    # THE thing that fails silently. Drop robot_blue (1) and hub_blue stops
+    # being 3 and becomes 1. Get it wrong and the model trains happily on fuel
+    # labelled as hubs, and the first sign is a scrimmage scoreboard counting
+    # nonsense with nothing to check it against.
+    m = index_map(COUNTING)
+    check("indices are remapped to the new order", m == {0: 0, 3: 1, 4: 2})
+    text, n = remap_labels(
+        "0 .5 .5 .1 .1\n1 .2 .2 .1 .1\n3 .7 .7 .2 .2\n4 .9 .9 .2 .2\n", m)
+    check("fuel stays 0, the hubs become 1 and 2, the robot goes",
+          text == "0 .5 .5 .1 .1\n1 .7 .7 .2 .2\n2 .9 .9 .2 .2\n" and n == 3)
+    check("the box geometry is carried through untouched",
+          all(line.split()[1:] == orig.split()[1:] for line, orig in
+              zip(text.splitlines(),
+                  ["x .5 .5 .1 .1", "x .7 .7 .2 .2", "x .9 .9 .2 .2"])))
+
+    # A label file is machine-written, so a line that does not parse is
+    # corruption; carrying it into a second dataset would hide where it began.
+    junk, n = remap_labels("not a label\n\n2\nx .1 .1 .1 .1\n", m)
+    check("malformed rows are dropped, not passed through", junk == "" and n == 0)
+    check("a frame with only robots loses every box",
+          remap_labels("1 .2 .2 .1 .1\n2 .3 .3 .1 .1\n", m) == ("", 0))
+
+    # A different order is a different model, and must be honoured as given.
+    flipped = index_map(["hub_red", "fuel"])
+    check("class order follows what was asked for, not the source order",
+          flipped == {4: 0, 0: 1})
+    try:
+        index_map(["fuel", "banana"])
+        check("a class that does not exist is refused", False)
+    except SystemExit:
+        check("a class that does not exist is refused", True)
+
+
+def test_model_must_name_its_classes():
+    """Two class orders now exist, so a model must say which it has.
+
+    Five for the scouting detector, three for the counting one. Assuming the
+    wrong one relabels every detection without failing anything - hub_blue
+    read as robot_blue - and at a scrimmage nothing downstream would catch it.
+    """
+    from tbavid import count as C
+
+    class NoNames:
+        names = {}
+
+    class RobotsOnly:
+        names = {0: "robot_blue", 1: "robot_red"}
+
+    out = C.run_source(NoNames(), "src", None)
+    check("a model with no class names is refused, not guessed at",
+          "no class names" in out.get("error", ""))
+    out = C.run_source(RobotsOnly(), "src", None)
+    check("and so is one with nothing it could count",
+          "cannot count balls" in out.get("error", ""))
+    check("the refusal names what is missing",
+          "fuel" in out["error"] and "hub_blue" in out["error"])
+
+    # Benchmark summary: the median is the speed, the p95 is where balls go.
+    from benchmark import summarise
+    stally = summarise([0.02] * 95 + [0.5] * 5, 30.0)
+    check("a model that stalls still reports a healthy median",
+          stally["fps"] == 50.0)
+    check("but the p95 shows where the balls go",
+          stally["worstFps"] == 2.0)
+    slow = summarise([1 / 12.0] * 50, 30.0)
+    check("a model too slow for the camera says so",
+          slow["keepingUp"] is False and abs(slow["missedFrac"] - 0.6) < 0.05)
+    check("and a fast enough one says that",
+          summarise([1 / 45.0] * 50, 30.0)["keepingUp"] is True)
+    check("with no target rate it makes no claim",
+          "keepingUp" not in summarise([1 / 45.0] * 50))
+    check("no timings at all is not a speed", summarise([]) == {})
+
+
 def test_api_stays_stdlib():
     """The serving path must import nothing but the standard library.
 
@@ -1528,7 +1619,8 @@ def main() -> int:
                test_serving_export, test_live_counter, test_live_rows,
                test_detect_rows, test_detect_writes, test_api_stays_stdlib,
                test_ball_counting, test_hub_geometry, test_scrimmage_scoreboard,
-               test_nothing_to_verify_against):
+               test_nothing_to_verify_against, test_counting_model_dataset,
+               test_model_must_name_its_classes):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

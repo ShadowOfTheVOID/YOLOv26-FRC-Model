@@ -3,6 +3,22 @@
 
 Defaults are tuned for this dataset's problem, which is small objects on a
 wide strip: fuel is ~17x12 px on a 1920x504 frame.
+
+There are two models worth training from one labelling effort, and they want
+different settings:
+
+  * **the scouting detector** -- all five classes, over harvested broadcast
+    frames. Accuracy is what matters; it runs offline through `run.py detect`
+    and can take as long as it likes.
+  * **the counting model** -- fuel and the two hubs only, built by
+    `train/subset_classes.py`, for `run.py count` at a scrimmage. There,
+    SPEED is a correctness property: a model too slow for the camera misses
+    balls between the frames it sees, the score comes out low, and with no FMS
+    nothing else will ever notice. Train it smaller, and measure it with
+    `train/benchmark.py` before the event rather than discovering it there.
+
+`--data` points at either. `--export` writes an ONNX beside the weights, which
+`run.py detect` and `run.py count` both load in place of a `.pt`.
 """
 from __future__ import annotations
 
@@ -11,6 +27,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_YAML = ROOT / "dataset" / "dataset.yaml"
+
+
+def dataset_root(data_yaml: Path) -> Path:
+    """The dataset directory a data.yaml describes.
+
+    Derived from the yaml's own location rather than assumed to be
+    `ROOT/dataset`, so a derived set -- `dataset-fuel/`, from
+    subset_classes.py -- has its labels counted instead of the five-class
+    one's. That check is the only thing standing between a typo and a hundred
+    epochs against an empty label set.
+    """
+    return Path(data_yaml).resolve().parent
 
 
 def pick_device() -> str:
@@ -54,13 +82,27 @@ def main() -> int:
     ap.add_argument("--device", default=None)
     ap.add_argument("--name", default="fuel26")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--data", type=Path, default=DATA_YAML,
+                    help="dataset.yaml to train against (default the "
+                         "five-class one; train/subset_classes.py writes the "
+                         "counting one)")
+    ap.add_argument("--export", default="",
+                    help="also export the finished weights, e.g. onnx. "
+                         "`run.py count` loads the result in place of a .pt, "
+                         "and on a CPU box ONNX is usually the difference "
+                         "between keeping up with the camera and not.")
     args = ap.parse_args()
 
-    if not DATA_YAML.exists():
-        print(f"{DATA_YAML} missing -- run train/prepare_dataset.py first")
+    if not args.data.exists():
+        print(f"{args.data} missing -- run train/prepare_dataset.py first"
+              + ("" if args.data == DATA_YAML else
+                 ", then train/subset_classes.py"))
         return 1
 
-    labels = list((ROOT / "dataset" / "labels").rglob("*.txt"))
+    # Off the yaml's own directory, not ROOT/dataset: pointed at a derived set
+    # this used to count the five-class one's labels and report a healthy
+    # number while training against nothing.
+    labels = list((dataset_root(args.data) / "labels").rglob("*.txt"))
     non_empty = [p for p in labels if p.stat().st_size > 0]
     if not non_empty:
         print("No non-empty label files under dataset/labels/.\n"
@@ -85,7 +127,7 @@ def main() -> int:
         model = YOLO(args.model)
 
     model.train(
-        data=str(DATA_YAML),
+        data=str(args.data),
         imgsz=args.imgsz,
         epochs=args.epochs,
         batch=args.batch,
@@ -108,7 +150,25 @@ def main() -> int:
         degrees=0.0,
         patience=30,
     )
-    print(f"\nweights: {ROOT}/runs/{args.name}/weights/best.pt")
+    best = ROOT / "runs" / args.name / "weights" / "best.pt"
+    print(f"\nweights: {best}")
+
+    if args.export:
+        # Exported from `best`, not from the in-memory model, which after
+        # training is the LAST epoch rather than the best one -- exporting that
+        # would quietly ship a worse model than the file beside it.
+        print(f"exporting {args.export} ...")
+        out = YOLO(str(best)).export(format=args.export, imgsz=args.imgsz)
+        print(f"exported: {out}")
+        print(f"  run.py count --weights {out}  loads this in place of the .pt")
+
+    names = getattr(model, "names", None)
+    if names and len(names) <= 3:
+        print(f"\n{len(names)} classes ({', '.join(names.values())}) -- this "
+              f"looks like a counting model.\n"
+              f"Measure it before the event, not at it:\n"
+              f"    python3 train/benchmark.py --weights {best} "
+              f"--imgsz {args.imgsz}")
     return 0
 
 

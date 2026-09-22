@@ -360,6 +360,20 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
     from .detect import _boxes_of
 
     names = dict(getattr(model, "names", {}) or {})
+    if not names:
+        return {"error": "the model carries no class names, so nothing it "
+                         "detects can be identified. Every box would be "
+                         "dropped and the score would read zero."}
+    missing = [c for c in (CLS_FUEL, "hub_blue", "hub_red")
+               if c not in names.values()]
+    if missing:
+        # Counting needs fuel and at least one hub. Saying so here beats a
+        # scoreboard that sits at nil all afternoon.
+        return {"error": f"this model has no {', '.join(missing)} class"
+                         f"{'es' if len(missing) > 1 else ''} "
+                         f"({', '.join(names.values())}), so it cannot count "
+                         f"balls into a hub. Train one with "
+                         f"train/subset_classes.py."}
     counter: Optional[BallCounter] = None
     learning: List[Dict[str, Box]] = []
     started = _time.monotonic()

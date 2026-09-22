@@ -94,7 +94,20 @@ def load(weights: Path):
             f"no weights at {weights}\n"
             "  Train some first:  python3 train/train.py\n"
             "  which writes runs/<name>/weights/best.pt")
-    return YOLO(str(weights))
+    model = YOLO(str(weights))
+    # A model must say what its class indices mean, and this refuses rather
+    # than falling back to CLASSES below. Since train/subset_classes.py exists
+    # there are two class orders in play -- five for the scouting detector,
+    # three for the counting one -- and assuming the wrong one relabels every
+    # detection without failing: hub_blue read as robot_blue, and a scrimmage
+    # scoreboard counting robots as fuel.
+    if not getattr(model, "names", None):
+        raise SystemExit(
+            f"{weights} carries no class names, so there is no way to know "
+            f"what its\n  class indices mean. Guessing would relabel every "
+            f"detection silently.\n  Re-export it from a checkpoint that has "
+            f"them.")
+    return model
 
 
 def frame_path(file: str) -> Path:
@@ -197,7 +210,10 @@ def detect_match(con, model, match_key: str, source: str,
     con.execute("""DELETE FROM detections WHERE frame_id IN
                    (SELECT id FROM frames WHERE match_key=?)""", (match_key,))
 
-    names = {i: n for i, n in enumerate(CLASSES)}
+    # The model's own names, always -- CLASSES is the canonical five-class
+    # order and only a last resort for a caller that built its own stub.
+    names = dict(getattr(model, "names", None) or
+                 {i: n for i, n in enumerate(CLASSES)})
     total, missing, tracks = 0, 0, set()
     for n, (frame_id, file) in enumerate(frames, 1):
         path = frame_path(file)
@@ -210,8 +226,7 @@ def detect_match(con, model, match_key: str, source: str,
         result = model.track(source=str(path), persist=True, tracker=tracker,
                              conf=conf, verbose=False)
         result = result[0] if isinstance(result, list) else result
-        model_names = getattr(model, "names", None) or names
-        rows = rows_from_boxes(_boxes_of(result), dict(model_names), source=source)
+        rows = rows_from_boxes(_boxes_of(result), names, source=source)
         total += write_rows(con, frame_id, rows)
         tracks.update(r["track_id"] for r in rows if r["track_id"] is not None)
         if progress:

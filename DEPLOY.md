@@ -62,15 +62,32 @@ At this point everything works and nothing has seen a neural network.
 
 ## 3. Label, then train — the one part left to you
 
+**Two models come out of one labelling effort.** The scouting detector uses all
+five classes and runs offline, where accuracy is all that matters. The counting
+model uses `fuel`, `hub_blue`, `hub_red` and runs live at a scrimmage, where
+speed *is* correctness — see [train/README.md](train/README.md).
+
 ```bash
 .venv-train/bin/python train/autolabel_fuel.py --append       # proposals
 .venv-train/bin/python train/autolabel_objects.py --append    # proposals
 # correct a subset by hand -- see train/README.md, "What still needs a human"
 .venv-train/bin/python train/prepare_dataset.py
-.venv-train/bin/python train/train.py --p2
+.venv-train/bin/python train/train.py --p2                    # scouting model
 ```
 
-Out comes `runs/<name>/weights/best.pt`.
+and for the scrimmage counter, from the same labels:
+
+```bash
+.venv-train/bin/python train/subset_classes.py                # fuel + hubs
+.venv-train/bin/python train/train.py --data dataset-fuel/dataset.yaml \
+    --model yolo26n.pt --name count26 --export onnx
+.venv-train/bin/python train/benchmark.py \
+    --weights runs/count26/weights/best.pt --imgsz 960 --fps 30
+```
+
+Out comes `runs/<name>/weights/best.pt`. **Benchmark the counting one before
+the event**, not at it: nothing at a scrimmage will tell you afterwards that it
+was too slow.
 
 ## 4. Run it
 
@@ -254,7 +271,7 @@ scouting app through the same API.
 ## Checklist
 
 ```bash
-python3 tests/test_pipeline.py                    # 240 checks, no network
+python3 tests/test_pipeline.py                    # 258 checks, no network
 python3 run.py status                             # the harvest
 python3 run.py formats                            # layout profiles
 curl -s localhost:8781/health                     # the API host

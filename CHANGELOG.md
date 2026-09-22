@@ -62,6 +62,22 @@ harvest's output as a source of its own.
   facts about a setup. Points per ball are configurable and default to 1, since
   `db.py` already refuses to convert fuel to points and a scrimmage runs
   whatever rules its organiser chose.
+- **The training code produces a model for counting, not just for scouting.**
+  `train/subset_classes.py` derives a `fuel`/`hub_blue`/`hub_red` dataset from
+  the labelled five-class one, remapping the label indices — the step that
+  fails silently if it is wrong, since a model trains perfectly happily on fuel
+  labelled as hubs. `train.py` gained `--data`, so a derived set can actually
+  be trained (it previously hardcoded the five-class path, and counted that
+  one's labels while training against another), and `--export`, because on a
+  CPU box ONNX is often the difference between keeping up with the camera and
+  not. `train/benchmark.py` measures achievable frame rate on the machine you
+  will use, reporting the p95 as well as the median: a model averaging 30 fps
+  that stalls for 200 ms every few seconds drops balls in the stalls while
+  looking fine on the average.
+  With two class orders now in play, a model that does not carry its own class
+  names is refused by both `detect.load` and `count.run_source` rather than
+  assumed to be the five-class one — that assumption would relabel every
+  detection without failing anything.
 - **The counter checks itself, because nothing else can.** With no FMS there
   is no second number anywhere that would disagree with a wrong count, and the
   failure that matters is silent: a box too slow for the camera misses balls

@@ -11,6 +11,34 @@ Separate venv from the harvester, because the harvester only needs
 Verified on this machine: Python 3.14.7, ultralytics 8.4.150, torch 2.14.0,
 MPS available.
 
+## Two models from one labelling effort
+
+Label once; derive twice. The five classes exist for the scouting detector,
+and the counter reads only three of them.
+
+| | classes | runs | what matters |
+| --- | --- | --- | --- |
+| **scouting detector** | all five | `run.py detect`, offline over harvested frames | accuracy; it can take all night |
+| **counting model** | `fuel`, `hub_blue`, `hub_red` | `run.py count`, live at a scrimmage | **speed is correctness** |
+
+That second row is the one to think about. A counting model too slow for the
+camera misses balls between the frames it sees; the score comes out low, with
+no gap and nothing odd about it, and at a scrimmage there is no FMS to
+disagree. Two unused classes are work done on every frame for an output
+nothing reads.
+
+```bash
+python3 train/subset_classes.py                       # -> dataset-fuel/
+python3 train/train.py --data dataset-fuel/dataset.yaml \
+    --model yolo26n.pt --name count26 --export onnx
+python3 train/benchmark.py --weights runs/count26/weights/best.pt \
+    --imgsz 960 --fps 30                              # before the event
+```
+
+`benchmark.py` reports the median and the p95. The p95 is the one that matters:
+a model averaging 30 fps that stalls for 200 ms every few seconds drops balls
+in the stalls while looking fine on the average.
+
 ## The three steps
 
 ```bash
