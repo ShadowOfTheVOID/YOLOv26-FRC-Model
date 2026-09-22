@@ -37,6 +37,7 @@ crop away half its field — see
 | training a detector | [train/README.md](train/README.md) |
 | running it on Colab / Kaggle / Debian | [deploy/SETUP.md](deploy/SETUP.md) |
 | running it on Windows | [deploy/WINDOWS.md](deploy/WINDOWS.md) |
+| hosting the API so nobody starts it by hand | [deploy/HOSTING.md](deploy/HOSTING.md) |
 
 ## Why
 
@@ -93,6 +94,7 @@ Output lands in these folders:
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |
 | `reprocess` | re-run crop/render/scoreboard on already-downloaded sources |
 | `db build` / `db sync` | build the scouting database (`sync` also fetches rosters) |
+| `db export` | a copy of the database that can be served from a read-only disk |
 | `db hub` | record an event's hub geometry |
 | `serve` | read-only JSON API for the scouting app |
 | `prune` | delete downloaded sources to reclaim disk |

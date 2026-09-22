@@ -6,7 +6,15 @@
 ```bash
 .venv/bin/python run.py db sync     # build from manifest + fetch rosters from TBA
 .venv/bin/python run.py serve       # read-only JSON API on 127.0.0.1:8781
+.venv/bin/python run.py db export   # a copy a host can serve read-only
 ```
+
+**Don't run `serve` off a laptop if a scouting app depends on it.** It stops
+when the lid closes, and the app then shows an empty column that looks exactly
+like "no footage of these robots" rather than "nothing is listening". Put it
+under systemd on a host instead — one unit, no secrets, nothing to start by
+hand: [deploy/HOSTING.md](deploy/HOSTING.md). Copy the database with `db
+export` and not `cp`; that page says why, and it is not a small difference.
 
 ## Tables
 

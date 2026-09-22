@@ -128,6 +128,18 @@ def cmd_export_share(args, cfg):
 
 def cmd_db(args, cfg):
     from tbavid import db as dbmod
+
+    # Before connect(), which would put the file back into WAL mode on the way
+    # past and undo the one thing this command is for.
+    if args.db_action == "export":
+        dest = dbmod.export_for_serving(args.to)
+        print(f"wrote {dest}\n"
+              f"  Serveable from a read-only disk: no WAL, no sidecar files.\n"
+              f"  Copy it to the host that runs the API:\n"
+              f"    scp {dest} host:/var/lib/frc-harvest/scouting.db\n"
+              f"  and see deploy/HOSTING.md.")
+        return 0
+
     con = dbmod.connect()
     if args.db_action in ("build", "sync"):
         print("counts written:", dbmod.build(con))
@@ -393,13 +405,16 @@ def main(argv=None):
     p.set_defaults(func=cmd_merge)
 
     p = sub.add_parser("db", help="build / sync the scouting database")
-    p.add_argument("db_action", choices=["build", "sync", "hub"], nargs="?",
+    p.add_argument("db_action", choices=["build", "sync", "hub", "export"], nargs="?",
                    default="build",
                    help="build: from manifest; sync: also fetch rosters from TBA; "
-                        "hub: record an event's hub box")
+                        "hub: record an event's hub box; export: a copy that can "
+                        "be served from a read-only disk")
     p.add_argument("--event", help="event key, for `hub`")
     p.add_argument("--alliance", choices=["blue", "red"], help="for `hub`")
     p.add_argument("--box", help="x,y,w,h in cleaned-frame pixels, for `hub`")
+    p.add_argument("--to", type=Path, default=Path("data/serve/scouting.db"),
+                   help="where `export` writes (default data/serve/scouting.db)")
     p.set_defaults(func=cmd_db)
 
     p = sub.add_parser("serve", help="read-only JSON API for the scouting app")

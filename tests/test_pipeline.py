@@ -25,7 +25,7 @@ from tbavid import formats as F
 from tbavid import ledger as L
 from tbavid import stream as S
 from tbavid.crop import Profile, detect_bottom, detect_top
-from tbavid.db import build, connect, summary
+from tbavid.db import build, connect, export_for_serving, summary
 from tbavid.identify import best_assignment, vote
 from tbavid.labels import Timeline, source_time
 from tbavid.ledger import Ledger
@@ -917,6 +917,52 @@ def test_db():
           con.execute("SELECT COUNT(*) FROM team_summary").fetchone()[0] == 6)
 
 
+def test_serving_export():
+    """A copy that a read-only host can actually read.
+
+    The working database is WAL, and a WAL database has to create its `-shm`
+    companion before anything can read it -- a strictly read-only connection
+    included. `cp` one onto a host that mounts its data directory read-only,
+    which deploy/frc-harvest.service does on purpose, and the API starts
+    cleanly and then answers every request with "attempt to write a readonly
+    database". Confirmed as an unprivileged user against a 0555 directory,
+    which is what systemd's ReadOnlyPaths= produces.
+
+    So what is asserted here is the property that makes read-only serving
+    work: no WAL, and nothing beside the file.
+    """
+    import sqlite3
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "work.db"
+        con = connect(src)
+        build(con, {"videos": {}})
+        con.close()
+        check("the working database is WAL, which is why this is needed",
+              sqlite3.connect(src).execute("PRAGMA journal_mode").fetchone()[0]
+              == "wal")
+
+        dest = export_for_serving(Path(tmp) / "serve" / "scouting.db", src=src)
+        mode = sqlite3.connect(dest).execute("PRAGMA journal_mode").fetchone()[0]
+        check("the exported copy is not WAL", mode == "delete")
+        check("and has no sidecar files for a reader to have to create",
+              sorted(p.name for p in dest.parent.iterdir()) == ["scouting.db"])
+        check("it opens read-only", sqlite3.connect(
+            f"file:{dest}?mode=ro", uri=True).execute(
+            "SELECT count(*) FROM matches").fetchone()[0] == 0)
+
+        # Exporting twice must not leave the first attempt's WAL behind, which
+        # would put a -wal file next to the copy and defeat the whole point.
+        export_for_serving(dest, src=src)
+        check("re-exporting leaves nothing stale beside it",
+              sorted(p.name for p in dest.parent.iterdir()) == ["scouting.db"])
+
+    try:
+        export_for_serving(Path(tmp) / "x.db", src=Path(tmp) / "missing.db")
+        check("exporting a database that is not there is refused", False)
+    except SystemExit:
+        check("exporting a database that is not there is refused", True)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -924,7 +970,8 @@ def main() -> int:
                test_stream_alignment, test_scoreboard,
                test_download_options, test_labels, test_render, test_identify,
                test_ledger_and_picking, test_competitive_filter, test_audit,
-               test_packaging, test_no_unbound_globals, test_sharding, test_db):
+               test_packaging, test_no_unbound_globals, test_sharding, test_db,
+               test_serving_export):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

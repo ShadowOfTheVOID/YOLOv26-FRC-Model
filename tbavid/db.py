@@ -185,6 +185,46 @@ def _migrate(con: sqlite3.Connection) -> None:
     con.commit()
 
 
+def export_for_serving(dest: Path, src: Path = None) -> Path:
+    """Write a copy of the database that can be served from a read-only disk.
+
+    Not `cp`. The working database runs in WAL mode, and a WAL database needs
+    to create its `-shm` companion before anything -- including a strictly
+    read-only connection -- can read it. Copy one onto a host that mounts its
+    data directory read-only, which is what `deploy/frc-harvest.service` does
+    on purpose, and the API starts cleanly and then fails every request with
+    "attempt to write a readonly database". Verified as an unprivileged user
+    against a 0555 directory, which is exactly what systemd's ReadOnlyPaths
+    produces.
+
+    So the copy is taken through SQLite's own backup API -- which waits for a
+    consistent snapshot rather than catching the file mid-write, the other way
+    `cp` gets this wrong -- and then switched out of WAL. A DELETE-journal
+    database needs no sidecar files at all and reads fine with nothing but the
+    read bit.
+    """
+    src = src or DB_PATH
+    if not src.exists():
+        raise SystemExit(f"{src} does not exist -- run `run.py db sync` first")
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    for stale in (dest, Path(f"{dest}-wal"), Path(f"{dest}-shm")):
+        stale.unlink(missing_ok=True)
+
+    source = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    target = sqlite3.connect(dest)
+    try:
+        source.backup(target)
+        # Collapses any WAL the snapshot carried into the main file and leaves
+        # nothing beside it for a reader to have to create.
+        target.execute("PRAGMA journal_mode=DELETE")
+        target.execute("VACUUM")
+    finally:
+        target.close()
+        source.close()
+    return dest
+
+
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)

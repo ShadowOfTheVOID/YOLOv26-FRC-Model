@@ -33,6 +33,21 @@ harvest's output as a source of its own.
   is collected and the spacing that repeats most consistently is the match, so
   it works on the Webcast Unit's YouTube feed, a Twitch re-encode or a phone in
   the stands alike.
+- **`deploy/frc-harvest.service` and `run.py db export`, so the API is not
+  something somebody has to start.** `python3 serve.py` on a laptop dies with
+  the lid, and the scouting app then shows an empty column that looks exactly
+  like "no footage of these robots" rather than "nothing is listening" -- two
+  states it goes out of its way to distinguish. Under systemd it survives a
+  crash, a reboot and a host rebuild, and it carries no secrets because a
+  GET-only API over a rebuildable database has nothing to authenticate to.
+  `db export` exists because `cp` is not good enough and fails confusingly: the
+  working database is WAL, a WAL database must create its `-shm` companion
+  before even a read-only connection can read it, and the unit mounts its data
+  directory read-only on purpose -- so a copied database starts fine and then
+  answers every request with "attempt to write a readonly database". Confirmed
+  as an unprivileged user against a 0555 directory. The export goes through
+  SQLite's backup API, which also avoids catching the file mid-write, and
+  leaves one file with no sidecars. See [deploy/HOSTING.md](deploy/HOSTING.md).
 - **Identity comes from TBA or not at all.** Audio says where a match is, never
   which one it is, and `db.py` joins a roster onto the match key — so one
   mislabelled clip credits an alliance's fuel to six robots that were not on
