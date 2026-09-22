@@ -399,10 +399,32 @@ def cmd_count(args, cfg):
             return
         print(f"  {e['t']:>8.2f}s  {e['alliance']:<4} +1  -> {e['total']}")
 
+    warned = {"at": False}
+
+    def on_health(h):
+        if board is not None:
+            board.set_health(h)
+        if args.feed:
+            return
+        # Said once, loudly, and not repeated every second. With no FMS there
+        # is nothing else that will ever notice this: a box that cannot keep up
+        # with the camera misses balls between the frames it does see, and the
+        # score comes out low with no gap and nothing that looks wrong.
+        if h.get("keepingUp") is False and not warned["at"]:
+            warned["at"] = True
+            print(f"\n  !! {h['fps']:.0f} fps against a camera at "
+                  f"{h['expectFps']:.0f} -- roughly "
+                  f"{h['missedFrac'] * 100:.0f}% of frames are going past "
+                  f"unseen.\n     Balls crossing the hub in those frames are "
+                  f"not counted, and nothing\n     else here will notice. Lower "
+                  f"the resolution, use a smaller model, or\n     accept that "
+                  f"this score is a floor.\n")
+
     out = counting.run_source(
         model, source, factory, conf=args.conf, tracker=args.tracker,
         learn_frames=args.learn, hubs=hubs or None, on_event=on_event,
-        max_frames=args.frames)
+        max_frames=args.frames, expect_fps=args.expect_fps,
+        on_health=on_health)
 
     if out.get("error"):
         print(f"\n  ! {out['error']}")
@@ -411,6 +433,14 @@ def cmd_count(args, cfg):
     print()
     for line in counter.report():
         print(line)
+    h = out.get("health") or {}
+    if h.get("keepingUp") is False:
+        print(f"  !! ran at {h['fps']:.0f} fps against a camera at "
+              f"{h['expectFps']:.0f}: this count is a floor, not a total")
+    elif h.get("keepingUp") is None:
+        print(f"  ran at {h.get('fps', 0):.0f} fps. Pass --expect-fps <camera "
+              f"rate> and it will say whether that was fast enough -- nothing "
+              f"else will.")
 
     if args.match:
         mk = args.match if "_" in args.match else f"{args.event or ''}_{args.match}"
@@ -785,6 +815,11 @@ def main(argv=None):
     p.add_argument("--feed", action="store_true",
                    help="write one JSON line per change to stdout, for piping "
                         "into whatever shows the score")
+    p.add_argument("--expect-fps", dest="expect_fps", type=float, default=0.0,
+                   help="the camera's real frame rate. Given it, the counter "
+                        "says whether it is keeping up -- and at a scrimmage "
+                        "nothing else will, because a box that falls behind "
+                        "misses balls and the score just comes out low.")
     p.add_argument("--auto-s", dest="auto_s", type=float, default=15.0,
                    help="seconds of autonomous (default 15)")
     p.add_argument("--teleop-s", dest="teleop_s", type=float, default=135.0,

@@ -54,8 +54,12 @@ read that instead. It is the field's own arithmetic and this is not.
 
 Either way the limits are the same and worth saying plainly, because at a
 scrimmage nothing else will catch them: it cannot see a ball occluded for its
-whole flight, and a hub region that is slightly wrong costs real balls. The
-answer to both is the referee, not a better threshold.
+whole flight, and a hub region that is slightly wrong costs real balls.
+
+Which is why `run_source` times itself. The failure that matters is the silent
+one -- a box too slow for the camera misses balls between the frames it does
+see, and the score is simply low, with no gap and nothing odd about it. There
+is no second number anywhere to disagree with it, so it has to say so itself.
 """
 from __future__ import annotations
 
@@ -325,7 +329,8 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
                tracker: str = "bytetrack.yaml",
                learn_frames: int = LEARN_FRAMES,
                hubs: Optional[Dict[str, Box]] = None,
-               on_event=None, on_frame=None, max_frames: int = 0) -> Dict:
+               on_event=None, on_frame=None, max_frames: int = 0,
+               expect_fps: float = 0.0, on_health=None) -> Dict:
     """Run the detector over a live source and count what goes in.
 
     `counter_factory(hubs) -> BallCounter` is called once the hub geometry is
@@ -336,6 +341,19 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
 
     `stream=True` so ultralytics yields per frame instead of buffering the
     whole source, which is the difference between a counter and a batch job.
+
+    ## Why it measures itself
+
+    At a scrimmage there is no FMS, so nothing anywhere will notice that this
+    is wrong. The failure that matters is silent: if the box cannot process
+    frames as fast as the camera produces them, balls go through between the
+    frames it does see, and the score is simply low -- with no gap, no error
+    and nothing that looks unusual about it.
+
+    So the loop times itself. `expect_fps` is the camera's real rate, which it
+    cannot discover on its own, and `on_health` is called with what it
+    measured. Nothing here decides what to do about a shortfall; it only makes
+    sure the number cannot be believed by accident.
     """
     import time as _time
 
@@ -347,6 +365,11 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
     started = _time.monotonic()
     frame = 0
     events: List[Dict] = []
+    # A short window rather than an average over the whole session: a board
+    # that was keeping up for the first minute and is not now is exactly the
+    # case worth catching, and a running mean hides it.
+    recent = deque(maxlen=60)
+    last_tick = started
 
     for result in model.track(source=source, stream=True, persist=True,
                               tracker=tracker, conf=conf, verbose=False):
@@ -386,7 +409,12 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
                 if on_event:
                     on_event(e)
 
+        now = _time.monotonic()
+        recent.append(now - last_tick)
+        last_tick = now
         frame += 1
+        if on_health and frame % 30 == 0:
+            on_health(health(recent, expect_fps, frame, counter))
         if on_frame:
             on_frame(frame, t, counter)
         if max_frames and frame >= max_frames:
@@ -400,4 +428,32 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
         if on_event:
             on_event(e)
     return {"events": events, "counter": counter, "frames": frame,
+            "health": health(recent, expect_fps, frame, counter),
             "hubs": {a: list(b) for a, b in (hubs or {}).items()}}
+
+
+def health(recent, expect_fps: float, frames: int,
+           counter: Optional["BallCounter"]) -> Dict:
+    """How much of what happened this counter actually saw.
+
+    `keepingUp` is the whole point and it is None, not True, when `expect_fps`
+    was not given -- without knowing the camera's rate there is no way to tell
+    a slow processor from a slow camera, and guessing which would be worse than
+    saying nothing.
+
+    `missedFrac` is an estimate of the fraction of the camera's frames that
+    went past unseen. A ball crosses the hub in a handful of frames, so this
+    is roughly the fraction of scores at risk, not a cosmetic number.
+    """
+    per = (sum(recent) / len(recent)) if recent else 0.0
+    fps = (1.0 / per) if per > 0 else 0.0
+    out = {"fps": round(fps, 1), "frames": frames,
+           "expectFps": round(expect_fps, 1) if expect_fps else None,
+           "keepingUp": None, "missedFrac": None}
+    if expect_fps and fps > 0:
+        out["keepingUp"] = fps >= expect_fps * 0.9
+        out["missedFrac"] = round(max(0.0, 1.0 - fps / expect_fps), 3)
+    if counter is not None:
+        out["rejected"] = dict(counter.rejected)
+        out["held"] = len(counter.pending)
+    return out

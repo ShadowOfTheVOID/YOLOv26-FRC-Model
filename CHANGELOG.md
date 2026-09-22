@@ -62,6 +62,17 @@ harvest's output as a source of its own.
   facts about a setup. Points per ball are configurable and default to 1, since
   `db.py` already refuses to convert fuel to points and a scrimmage runs
   whatever rules its organiser chose.
+- **The counter checks itself, because nothing else can.** With no FMS there
+  is no second number anywhere that would disagree with a wrong count, and the
+  failure that matters is silent: a box too slow for the camera misses balls
+  between the frames it does see, and the score comes out low with no gap and
+  nothing odd about it. `--expect-fps` gives it the camera's rate and it
+  reports whether it is keeping up, what fraction of frames went past unseen,
+  and every reason it refused a ball — in the same payload as the score.
+  Without that rate it reports `keepingUp: null` rather than guessing, since it
+  cannot tell a slow processor from a slow camera. And `POST /clock` follows an
+  outside clock, which is the only quantity at a scrimmage that can be compared
+  against anything — moving it never moves the score.
 - **Deployment is documented end to end** in [DEPLOY.md](DEPLOY.md): three
   roles with three different dependency sets, in the order to do them, with
   the `.pt` as the only step left. `requirements-detect.txt` keeps torch and

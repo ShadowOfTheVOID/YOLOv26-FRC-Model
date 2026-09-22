@@ -28,7 +28,8 @@ from tbavid import stream as S
 from tbavid.crop import Profile, detect_bottom, detect_top
 from tbavid.db import build, connect, export_for_serving, summary, write_live
 from tbavid.live import Counter as LiveCounter
-from tbavid.count import BallCounter, hub_of, hubs_from_db, learn_hubs
+from tbavid.count import (BallCounter, health, hub_of, hubs_from_db,
+                          learn_hubs)
 from tbavid.detect import (CLASSES, alliance_of, frame_path, model_source,
                            rows_from_boxes, write_rows)
 from tbavid.field import AUTO, ENDED, IDLE, TELEOP, Match
@@ -1252,6 +1253,77 @@ def test_scrimmage_scoreboard():
           and st["phase"] == IDLE and st["label"] == "Q3")
 
 
+def test_nothing_to_verify_against():
+    """At a scrimmage nothing else is counting, so this has to check itself.
+
+    The failure that matters is silent. A box that cannot process frames as
+    fast as the camera produces them misses balls between the frames it does
+    see, and the score comes out low with no gap, no error and nothing that
+    looks unusual - and with no FMS there is no second number anywhere that
+    would disagree with it.
+    """
+    slow = health([1 / 15.0] * 30, expect_fps=30.0, frames=450, counter=None)
+    check("a box at half the camera's rate is not keeping up",
+          slow["keepingUp"] is False)
+    check("and says roughly how much went past unseen",
+          abs(slow["missedFrac"] - 0.5) < 0.05)
+
+    fast = health([1 / 31.0] * 30, expect_fps=30.0, frames=900, counter=None)
+    check("a box that is keeping up says so", fast["keepingUp"] is True)
+    check("and reports nothing missed", fast["missedFrac"] == 0.0)
+
+    # Without the camera's rate there is no way to tell a slow processor from
+    # a slow camera. None, not True: claiming health it cannot know is the one
+    # thing worse than saying nothing, because nothing else will correct it.
+    blind = health([1 / 5.0] * 30, expect_fps=0.0, frames=100, counter=None)
+    check("with no expected rate it declines to judge",
+          blind["keepingUp"] is None and blind["missedFrac"] is None)
+    check("but still reports what it measured", blind["fps"] == 5.0)
+
+    check("no timings at all is not a claim of zero",
+          health([], 30.0, 0, None)["keepingUp"] is None)
+
+    # The counter's own refusals ride along, so "the score looks low" has an
+    # answer other than a shrug.
+    c = BallCounter(HUB)
+    _, c = _play({2: [(5, (340.0, 145.0, 10.0, 10.0))]})
+    h = health([1 / 30.0] * 5, 30.0, 150, c)
+    check("rejections are reported beside the rate",
+          h["rejected"]["too_short"] == 1 and h["held"] == 0)
+
+    # The one quantity at a scrimmage that CAN be checked against something
+    # outside: there is a timer on the wall, and the two can be compared by
+    # looking.
+    m = Match("Q1", auto_s=15.0, teleop_s=135.0)
+    m.start()
+    check("the clock can be moved to follow an outside one", m.sync(100.0))
+    st = m.state()
+    check("and lands where it was put",
+          st["phase"] == TELEOP and abs(st["elapsed"] - 100.0) < 0.5)
+    check("a negative clock is refused", m.sync(-5.0) is False)
+
+    # Moving the clock must not move the score. Re-attributing balls to
+    # whatever phase the new clock implies would invent information about when
+    # they went in.
+    m2 = Match("Q2", auto_s=15.0, teleop_s=135.0)
+    m2.start()
+    m2.ball("blue")                      # scored in auto
+    m2.sync(100.0)                       # now teleop
+    check("syncing the clock does not re-attribute balls already counted",
+          m2.state()["alliances"]["blue"]["balls"] == {AUTO: 1, TELEOP: 0})
+
+    # A sync backwards from after the buzzer restarts the clock rather than
+    # leaving a match that says 'ended' at t=40.
+    m3 = Match("Q3", auto_s=1.0, teleop_s=1.0)
+    m3.start(); m3.stop()
+    check("the match had ended", m3.phase() == ENDED)
+    m3.sync(0.5)
+    check("and syncing back into the match un-ends it", m3.phase() == AUTO)
+
+    check("health reaches the consumer in the same payload as the score",
+          "health" in m.state())
+
+
 def test_api_stays_stdlib():
     """The serving path must import nothing but the standard library.
 
@@ -1455,7 +1527,8 @@ def main() -> int:
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
                test_serving_export, test_live_counter, test_live_rows,
                test_detect_rows, test_detect_writes, test_api_stays_stdlib,
-               test_ball_counting, test_hub_geometry, test_scrimmage_scoreboard):
+               test_ball_counting, test_hub_geometry, test_scrimmage_scoreboard,
+               test_nothing_to_verify_against):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

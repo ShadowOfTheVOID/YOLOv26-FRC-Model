@@ -70,6 +70,10 @@ class Match:
                  points_per_ball: Optional[Dict[str, float]] = None):
         self.lock = threading.Lock()
         self.label = label
+        # What the counter last said about itself. Carried here so a consumer
+        # reads the score and how much to trust it in one payload -- at a
+        # scrimmage nothing else is going to tell it.
+        self.health: Dict = {}
         self.auto_s = float(auto_s)
         self.teleop_s = float(teleop_s)
         self.points_per_ball = dict(points_per_ball or {AUTO: 1.0, TELEOP: 1.0})
@@ -119,6 +123,33 @@ class Match:
     def phase(self) -> str:
         with self.lock:
             return self._phase()
+
+    def set_health(self, health: Dict) -> None:
+        with self.lock:
+            self.health = dict(health or {})
+
+    def sync(self, elapsed: float) -> bool:
+        """Put the clock at `elapsed` seconds, following an outside one.
+
+        The only thing at a scrimmage that can be checked against anything is
+        the clock: there is a timer on the wall, or somebody's phone, and the
+        two can be compared by looking. Nothing else here has a reference at
+        all, which is why this is the one quantity that can be corrected
+        towards a known value rather than only adjusted by opinion.
+
+        Moving the clock does not move the score. Balls already counted stay
+        counted, in the phase they were counted in -- re-attributing them to
+        whatever phase the new clock implies would be inventing information
+        about when they went in.
+        """
+        with self.lock:
+            if elapsed < 0:
+                return False
+            now = time.monotonic()
+            self.started_at = now - float(elapsed)
+            if self.ended_at is not None and elapsed < self.auto_s + self.teleop_s:
+                self.ended_at = None
+            return True
 
     # -- scoring ----------------------------------------------------------
     def ball(self, alliance: str, t: Optional[float] = None) -> bool:
@@ -197,6 +228,7 @@ class Match:
                     } for a in ALLIANCES},
                 "log": self.log[-40:],
                 "pointsPerBall": self.points_per_ball,
+                "health": dict(self.health),
             }
 
     def series(self) -> Dict[str, List[List[float]]]:
@@ -231,6 +263,7 @@ def serve(match: Match, host: str = "0.0.0.0", port: int = 8780,
 
         GET  /state               the whole match: phase, clock, both alliances
         POST /start /stop /reset  the match clock
+        POST /clock   {"elapsed": 42}   follow an outside clock
         POST /adjust  {"alliance": "red", "delta": 1}   a correction
 
     Binds every interface by default, because the display is on another machine
@@ -258,7 +291,8 @@ def serve(match: Match, host: str = "0.0.0.0", port: int = 8780,
                 return self._send(200, json.dumps(match.state()))
             self._send(404, json.dumps({"error": "no such route",
                                         "routes": ["/state", "/start", "/stop",
-                                                   "/reset", "/adjust"]}))
+                                                   "/reset", "/clock",
+                                                   "/adjust"]}))
 
         def do_POST(self):
             path = urlparse(self.path).path.rstrip("/") or "/"
@@ -268,6 +302,17 @@ def serve(match: Match, host: str = "0.0.0.0", port: int = 8780,
                 match.stop()
             elif path == "/reset":
                 match.reset()
+            elif path == "/clock":
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(n) or b"{}")
+                    if not isinstance(body, dict):
+                        raise ValueError("body is not an object")
+                    elapsed = float(body.get("elapsed"))
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    return self._send(400, json.dumps(
+                        {"error": "want {\"elapsed\": <seconds>}"}))
+                match.sync(elapsed)
             elif path == "/adjust":
                 # Every coercion inside the guard, not just the parse. `delta`
                 # arriving as "x" raised out of the handler and dropped the

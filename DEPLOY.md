@@ -158,6 +158,22 @@ of something counting alone cannot do:
   `detected` and `adjusted` beside the total so whatever draws the score can
   show that distinction if it wants to.
 
+### The one thing you can check it against
+
+Nothing at a scrimmage knows the real score, so there is nothing to verify the
+count against — but there is a clock on the wall, and that can be compared by
+looking. `POST /clock {"elapsed": 42}` puts the match clock where the outside
+one says it is.
+
+Moving the clock does not move the score: balls already counted stay in the
+phase they were counted in, because re-attributing them to whatever the new
+clock implies would invent information about when they went in.
+
+`/state` also carries a `health` block — measured frame rate, whether it is
+keeping up, the fraction of frames missed, and every reason the counter refused
+a ball. That is the closest thing to verification available: not *is this
+right*, but *could this have been right*.
+
 **Points are yours to set.** `--auto-points` / `--teleop-points` default to 1,
 so with nothing configured the score IS the ball count. `db.py` already
 refuses to convert fuel to points — "the 2026 fuel-to-points rule is not pinned
@@ -210,12 +226,21 @@ counted 2 ball(s): blue=2, red=0
 
 ### Honest limits
 
-- **It needs the frame rate.** `detect` deliberately throws fuel track ids away
-  because it runs at 3 fps, where a ball moves further between samples than its
-  own width. This runs on a live camera at native rate, where tracking a ball
-  is the whole method. On a CPU it will fall behind and drop balls, which is
-  worse than no count because it looks like one. Check with `--frames` on a
-  recording before trusting it at an event.
+- **It needs the frame rate, and it will tell you if it hasn't got it.** On a
+  CPU it falls behind and misses balls between the frames it does see — the
+  score comes out low with no gap and nothing that looks wrong. With no FMS
+  there is no second number anywhere that would disagree, so pass
+  `--expect-fps <camera rate>` and the counter checks itself:
+
+  ```
+  !! 15 fps against a camera at 30 -- roughly 50% of frames are going past
+     unseen. Balls crossing the hub in those frames are not counted, and
+     nothing else here will notice.
+  ```
+
+  Without `--expect-fps` it reports `keepingUp: null` rather than guessing —
+  it cannot tell a slow processor from a slow camera, and claiming health it
+  cannot know is worse than saying nothing when nothing will correct it.
 - **It cannot see a ball it never detects.** One occluded for its whole flight
   is simply missing.
 - **Where a real scoreboard exists, read that instead.** At a scrimmage there
@@ -229,7 +254,7 @@ scouting app through the same API.
 ## Checklist
 
 ```bash
-python3 tests/test_pipeline.py                    # 225 checks, no network
+python3 tests/test_pipeline.py                    # 240 checks, no network
 python3 run.py status                             # the harvest
 python3 run.py formats                            # layout profiles
 curl -s localhost:8781/health                     # the API host
