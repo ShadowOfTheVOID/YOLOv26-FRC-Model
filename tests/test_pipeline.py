@@ -20,8 +20,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tbavid import audio as A
 from tbavid import formats as F
 from tbavid import ledger as L
+from tbavid import stream as S
 from tbavid.crop import Profile, detect_bottom, detect_top
 from tbavid.db import build, connect, summary
 from tbavid.identify import best_assignment, vote
@@ -311,6 +313,230 @@ def test_district_catalogue():
     check("and each one arrives at the crop stage with the right profile",
           got == {"2026casnf": "ca_district", "2026cancmp": "generic",
                   "2026roebling": "generic"})
+
+
+def burst(t, hz=440.0, energy=1.0, sig=None):
+    """A Burst at a time, without needing audio to make one."""
+    v = np.zeros(A.BANDS, dtype=np.float32)
+    v[int(hz) % A.BANDS] = 1.0
+    return A.Burst(t0=t - 0.4, t1=t + 0.4, energy=energy,
+                   signature=(sig if sig is not None else v), peak_hz=hz)
+
+
+def test_audio_frames():
+    # The measure that matters is tonality, not loudness. A cheer is the
+    # loudest thing at an event after the buzzer, and an energy threshold on
+    # its own cannot tell the two apart - which is the whole reason a
+    # peak-to-median ratio is computed per frame.
+    sr = A.SAMPLE_RATE
+    t = np.arange(sr * 2) / sr
+    tone = (0.5 * np.sin(2 * np.pi * 600 * t)).astype(np.float32)
+    rng = np.random.default_rng(3)
+    cheer = rng.normal(0, 0.5, t.size).astype(np.float32)
+    _, tone_ton, _ = A.frame_features(tone)
+    e_cheer, cheer_ton, _ = A.frame_features(cheer)
+    check("a tone reads as tonal", float(np.median(tone_ton)) > 25.0)
+    check("a cheer just as loud does not",
+          float(np.median(cheer_ton)) < 15.0)
+    check("and it is not quieter, so loudness alone could not separate them",
+          float(np.median(e_cheer)) > 0)
+
+    # A four-hour broadcast does not hold one level. Measured: a global median
+    # missed three of eight start cues and found nothing in a quieter mix,
+    # because a horn obvious against its own ten seconds can sit under the
+    # median of a stream that also contains a finals crowd.
+    frame_s = A.HOP / sr
+    quiet = np.full(4000, 0.05); loud = np.full(4000, 1.0)
+    drift = np.concatenate([quiet, loud]).astype(np.float32)
+    drift[2000] = 0.30          # a cue in the quiet half
+    local = A.local_floor(drift, frame_s, 8.0, 3.0)
+    check("a local baseline catches a cue in the quiet half",
+          drift[2000] > local[2000])
+    check("...where one number for the whole stream would not",
+          drift[2000] < A.global_floor(drift, 3.0))
+
+
+def test_audio_cues():
+    # Eight matches 150s long on a 380s cycle, plus decoys: a burst 150s from
+    # nothing in particular, and a run of noise bursts at a DIFFERENT spacing.
+    bursts = []
+    for m in range(8):
+        t0 = 100.0 + m * 380.0
+        bursts.append(burst(t0, hz=880.0))
+        bursts.append(burst(t0 + 150.0, hz=440.0))
+    for k in range(5):
+        bursts.append(burst(40.0 + k * 97.0, hz=1500.0))
+    bursts.sort(key=lambda b: b.mid)
+    labels = A.cluster_bursts(bursts)
+    cue = A.pick_cue_pair(bursts, labels, match_s=150.0, window_s=25.0)
+    check("the repeated interval is found", cue is not None)
+    check("and it is the match length, not the decoys' spacing",
+          abs(cue["interval_s"] - 150.0) < 0.5)
+    check("every match is paired", cue["score"] == 8)
+    check("a fixed interval reads as fixed", cue["spread_s"] < 0.5)
+
+    # Timbre must not gate the decision. Lossy coding scatters one sound across
+    # several clusters - measured on an AAC encode of a planted stream, where
+    # within-sound signature distances ran to 0.70 against across-sound
+    # distances from 0.42, so no threshold separates them. Give every burst a
+    # different signature and the interval must still be found.
+    rng = np.random.default_rng(5)
+    scattered = [A.Burst(b.t0, b.t1, b.energy,
+                         rng.random(A.BANDS).astype(np.float32), b.peak_hz)
+                 for b in bursts]
+    cue2 = A.pick_cue_pair(scattered, A.cluster_bursts(scattered), 150.0, 25.0)
+    check("the interval survives signatures that cluster wrongly",
+          cue2 is not None and cue2["score"] == 8)
+
+    # A stream that is not an event broadcast must come back with nothing
+    # rather than with a plausible-looking answer.
+    random_bursts = [burst(x) for x in
+                     np.cumsum(np.random.default_rng(9).uniform(20, 400, 12))]
+    check("nothing repeating reads as no field",
+          A.pick_cue_pair(random_bursts, A.cluster_bursts(random_bursts),
+                          150.0, 25.0) is None)
+    check("one burst cannot be a match", A.pick_cue_pair([burst(10.0)], [0],
+                                                         150.0, 25.0) is None)
+
+
+def test_audio_recovery():
+    # A start horn under a crowd swell loses its match entirely, and that
+    # matters more than it looks: reading a stream exists so matches are not
+    # fed in one at a time. The interval is measured to a fraction of a second
+    # across the whole broadcast, so one heard cue places the other.
+    bursts = []
+    for m in range(6):
+        t0 = 100.0 + m * 380.0
+        if m != 3:
+            bursts.append(burst(t0, hz=880.0))
+        bursts.append(burst(t0 + 150.0, hz=440.0))
+    bursts.sort(key=lambda b: b.mid)
+    labels = A.cluster_bursts(bursts)
+    cue = A.pick_cue_pair(bursts, labels, 150.0, 25.0)
+    check("the five intact matches pair", cue["score"] == 5)
+    plan = A.plan_matches(bursts, labels, cue)
+    check("and the sixth is recovered from its buzzer alone", len(plan) == 6)
+    got = [m for m in plan if m["basis"] != "both cues"]
+    check("the recovery is labelled, not blended in", len(got) == 1)
+    check("and it lands where the missing match was",
+          abs(got[0]["start"] - (100.0 + 3 * 380.0)) < 1.0)
+
+    # Every match in the plan, recovered or not, is anchored on a cue that was
+    # actually heard -- nothing is placed purely by extrapolating the cadence.
+    heard_at = [b.mid for b in bursts]
+    check("every match is anchored on a burst that was really there",
+          all(any(abs(m["start"] - h) < 1.0 or abs(m["end"] - h) < 1.0
+                  for h in heard_at) for m in plan))
+
+    # An inferred match landing on a confirmed one is the same play heard
+    # twice, and the confirmed reading has to win.
+    doubled = list(bursts) + [burst(100.0 + 150.0 + 0.5, hz=440.0)]
+    doubled.sort(key=lambda b: b.mid)
+    dl = A.cluster_bursts(doubled)
+    dp = A.plan_matches(doubled, dl, A.pick_cue_pair(doubled, dl, 150.0, 25.0))
+    check("a duplicate reading does not become a second match", len(dp) == 6)
+
+    wins = A.match_windows(plan, pre_roll_s=20.0, post_roll_s=15.0,
+                           duration_s=2400.0)
+    check("padding widens each clip", all(w["duration"] > 150.0 for w in wins))
+    check("and never runs past the end of the stream",
+          all(w["end"] <= 2400.0 for w in wins))
+    # A stream that stops partway through the last match yields a fragment, and
+    # the scoreboard reader takes its final count off the end of the video - so
+    # a stub would write a confident wrong final fuel for a real match key.
+    cut_short = A.match_windows(plan, 20.0, 15.0, duration_s=2100.0)
+    check("a match the recording cuts off is dropped, not shipped as a stub",
+          len(cut_short) == len(wins) - 1
+          and all(w["duration"] > 150.0 for w in cut_short))
+    check("windows come out in time order",
+          [w["start"] for w in wins] == sorted(w["start"] for w in wins))
+    check("and never overlap",
+          all(a["end"] <= b["start"] for a, b in zip(wins, wins[1:])))
+
+
+def test_stream_alignment():
+    """Who each clip is, or the refusal to say.
+
+    A wrong match key is the most damaging thing this pipeline can produce: it
+    is what db.py joins a roster onto, so one mislabelled clip credits an
+    alliance's fuel to six robots that were not on the field.
+    """
+    def win(t, basis="both cues"):
+        return {"start": t, "end": t + 180.0, "duration": 180.0, "basis": basis,
+                "cue_start": t + 20.0, "cue_end": t + 170.0}
+
+    def tba_matches(n):
+        return [{"key": f"2026casnf_qm{i}", "event_key": "2026casnf",
+                 "comp_level": "qm", "match_number": i, "set_number": 0,
+                 "actual_time": 1000 + i * 400} for i in range(1, n + 1)]
+
+    four = [win(t) for t in (0.0, 400.0, 800.0, 1200.0)]
+    plan = S.align(four, tba_matches(4))
+    check("a count that matches TBA exactly aligns in order",
+          plan["identified"] == 4
+          and [m["key"] for _, m in plan["pairs"]]
+          == ["2026casnf_qm1", "2026casnf_qm2", "2026casnf_qm3", "2026casnf_qm4"])
+
+    # An unpaired horn can be a field fault rather than a match whose other cue
+    # was drowned out, and on its own nothing tells those apart. When the
+    # confirmed count already equals TBA's, the inferred one is the fault.
+    plan = S.align(four + [win(1600.0, "buzzer inferred from the start cue")],
+                   tba_matches(4))
+    check("an extra inferred match is dropped when the count is already right",
+          plan["identified"] == 4 and plan.get("dropped_inferred") == 1)
+
+    # ...and when it closes the gap to TBA's count exactly, that agreement is
+    # the corroboration that makes naming it safe.
+    plan = S.align([win(0.0), win(400.0), win(800.0),
+                    win(1200.0, "start inferred from the buzzer")],
+                   tba_matches(4))
+    check("an inferred match that closes the gap is named",
+          plan["identified"] == 4 and "closed the gap" in plan["basis"])
+
+    # More intervals than TBA has matches means at least one is not a match,
+    # and there is no way to tell which. Nothing gets a key.
+    plan = S.align(four + [win(1600.0), win(2000.0)], tba_matches(4))
+    check("too many intervals names nothing",
+          plan["identified"] == 0 and all(m is None for _, m in plan["pairs"]))
+    check("and says why", "not a match" in plan["basis"])
+
+    # Short of TBA's count with no inference to close it: the day is partial
+    # and which matches these are is unknown.
+    plan = S.align(four, tba_matches(9))
+    check("a partial day names nothing without being told where it starts",
+          plan["identified"] == 0)
+
+    # The operator saying so is evidence. Anyone who knows the day starts at
+    # qm6 knows something the audio cannot.
+    plan = S.align(four, tba_matches(9), from_match="qm6")
+    check("--from-match aligns from there",
+          [m["key"] for _, m in plan["pairs"]]
+          == [f"2026casnf_qm{i}" for i in (6, 7, 8, 9)])
+    check("and records that a person said so", "operator" in plan["basis"])
+    try:
+        S.align(four, tba_matches(9), from_match="qm99")
+        check("a match label that does not exist is refused", False)
+    except SystemExit:
+        check("a match label that does not exist is refused", True)
+
+    # No event key at all is the --event-less run: clips still harvest, and
+    # they must not acquire keys from nowhere.
+    plan = S.align(four, [])
+    check("with no schedule nothing is identified", plan["identified"] == 0)
+
+    # Chronological order, because actual_time is the only field that puts
+    # quals and playoffs in the order they were really played.
+    ms = [{"comp_level": "f", "match_number": 1, "set_number": 1, "actual_time": 900},
+          {"comp_level": "qm", "match_number": 2, "set_number": 0, "actual_time": 200},
+          {"comp_level": "qm", "match_number": 1, "set_number": 0, "actual_time": 100}]
+    check("matches sort by when they were played",
+          [m["match_number"] for m in sorted(ms, key=S.match_sort_key)] == [1, 2, 1])
+    # An event still in progress has real times for what happened and none for
+    # what has not, and the unplayed must not sort in front of the played.
+    ms2 = [{"comp_level": "qm", "match_number": 9, "set_number": 0},
+           {"comp_level": "qm", "match_number": 1, "set_number": 0, "actual_time": 100}]
+    check("matches with no time yet sort last",
+          [m["match_number"] for m in sorted(ms2, key=S.match_sort_key)] == [1, 9])
 
 
 def test_scoreboard():
@@ -693,7 +919,9 @@ def test_db():
 
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
-               test_format_tuning, test_district_catalogue, test_scoreboard,
+               test_format_tuning, test_district_catalogue,
+               test_audio_frames, test_audio_cues, test_audio_recovery,
+               test_stream_alignment, test_scoreboard,
                test_download_options, test_labels, test_render, test_identify,
                test_ledger_and_picking, test_competitive_filter, test_audit,
                test_packaging, test_no_unbound_globals, test_sharding, test_db):

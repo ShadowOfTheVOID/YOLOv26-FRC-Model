@@ -9,7 +9,8 @@ the scoreboard before discarding it so every frame is labelled with what
 scored and when.
 
 ```bash
-python3 run.py pull -n 20        # harvest
+python3 run.py pull -n 20        # harvest per-match videos TBA links
+python3 run.py stream --url <s> --event 2026casnf   # or a whole event day
 python3 run.py verify            # check the counters against TBA
 python3 run.py serve             # read-only JSON API for a scouting app
 ```
@@ -87,6 +88,7 @@ Output lands in these folders:
 | `export --force` | re-export frames after changing sampling config |
 | `cropcheck [video_id]` | proof frames with the crop box drawn on |
 | `formats` | broadcast layout profiles: list, explain, calibrate |
+| `stream` | read a whole event-day stream, cutting each match out by its audio cues |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |
 | `reprocess` | re-run crop/render/scoreboard on already-downloaded sources |
@@ -125,6 +127,84 @@ Output lands in these folders:
 
    On the calibration match this turned a 1920x1080 broadcast into a
    1920x504 main-camera strip.
+
+## One stream instead of one upload per match
+
+`pull` walks TBA looking for `match.videos[]` — a per-match link somebody
+uploaded. Plenty of events do not have those. A district weekend publishes one
+continuous multi-hour broadcast per day and nothing per match, so the picker
+finds nothing and `download.py` refuses the stream with `TOO_LONG`.
+
+`stream` is the other way in. Point it at the broadcast once and it finds the
+matches inside it, cuts each one out, and hands the clips to the same pipeline
+everything else goes through.
+
+```bash
+./run.py stream --url <stream> --event 2026casnf   # a day, in one command
+./run.py stream --file day1.mp4 --event 2026casnf  # one already on disk
+./run.py stream --url <stream> --listen-only       # what can you hear? no writes
+```
+
+### How it finds the matches
+
+Not from the video. Every stage in `shots.py` works on what the camera is
+looking at, and between matches the camera is looking at the same field from
+the same place — there is no cut to find.
+
+From the **audio**. The field plays a sound to start a match and a sound at the
+buzzer, and in a multi-hour stream those are the only events that are all of:
+loud, *tonal* (a horn puts its energy in a few narrow bands; applause and
+commentary do not), repeated dozens of times, and **separated by a fixed
+interval**, because a match is a fixed length.
+
+That last property is the one that does the work, and it is why there is no
+frequency anywhere in [`tbavid/audio.py`](tbavid/audio.py). A band-pass filter
+at the horn's pitch would need that pitch from somewhere, and a wrong guess
+finds nothing while looking exactly like a stream with no matches in it.
+Instead every loud tonal burst is collected and the *spacing* that repeats most
+consistently is the match. A crowd can be loud twice; it cannot be loud twice
+at the same spacing forty times running.
+
+So it does not care whether the audio is the FIRST Webcast Unit's YouTube feed,
+a Twitch re-encode, or a phone held up in the stands — which matters for the
+California district, where Central Valley is on Twitch and the rest are not.
+
+`--listen-only` prints the measured interval whether or not it agrees with
+`stream.match_s`, so a season with a different match length is one config edit
+rather than a detector that quietly finds nothing.
+
+### What it refuses to do
+
+Audio says *where* the matches are. It cannot say *which* they are, and a match
+key is the most damaging thing here to get wrong: `db.py` joins a roster onto
+it, so one mislabelled clip credits an alliance's fuel to six robots that were
+not on the field.
+
+Identity comes from TBA's schedule, and only when the evidence supports it:
+
+| situation | what happens |
+| --- | --- |
+| confirmed cue pairs == TBA's match count | aligned in order, one to one |
+| short, and cues recovered from a single heard horn close the gap **exactly** | aligned in order — TBA's count is the corroboration |
+| `--from-match qm14` | aligned from there; the operator knows something the audio cannot |
+| more intervals than TBA has matches | **no keys assigned** — at least one is not a match and nothing says which |
+| anything else | **no keys assigned** |
+
+The last two are not failures. **Training frames do not need a match key;
+scouting rows do.** An unidentified clip is still a cropped, main-camera view
+of a real field with real robots on it, so it keeps its frames and enters the
+database under its own video id — never a real match key, so no roster joins
+onto it and no team is credited with anything. What it loses is attribution,
+which is exactly what was not established.
+
+A match whose buzzer is not in the recording is dropped rather than shipped as
+a fragment: the scoreboard reader takes its final count off the end of the
+video, so a 20-second stub under a real match key would write a confident,
+wrong final fuel.
+
+Every clip records what established its identity — a count that agreed, an
+operator's say-so, or nothing — so a row in the scouting database can always be
+traced back to it.
 
 ## Which broadcast is this
 
@@ -397,6 +477,9 @@ All knobs live in `config.json`; see `tbavid/config.py` for defaults.
 | `crop.*` | banner auto-detect toggle and manual fractions |
 | `crop.format` | force one broadcast layout profile for the whole run (`auto` picks per event) |
 | `crop.formats` | `{event_key: profile}`, for one event at a time |
+| `stream.match_s` | how long a match lasts, for the cue-interval search |
+| `stream.match_window_s` | how far the measured interval may sit from it |
+| `stream.pre_roll_s`, `stream.post_roll_s` | padding either side of the cues |
 | `sample_fps` | frames per second of cleaned video to export |
 | `dedupe_hamming` | perceptual-hash distance below which a frame is a duplicate |
 | `score_labels` | read the scoreboard at all |

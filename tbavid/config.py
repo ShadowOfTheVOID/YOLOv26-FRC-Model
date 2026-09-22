@@ -55,6 +55,21 @@ DEFAULTS = {
         "left": 0.0,
         "right": 0.0,
     },
+    # Reading a whole-day stream instead of per-match uploads. See stream.py.
+    "stream": {
+        # How long a match lasts, and how far the measured interval between the
+        # two field cues may sit from it. Not a magic number to trust blindly:
+        # `run.py stream --listen-only` prints what it actually measured, and
+        # says so when the two disagree, so a season with a different match
+        # length is one edit here rather than a detector that finds nothing.
+        "match_s": 150.0,
+        "match_window_s": 25.0,
+        # Padding either side of the cues. The start cue may be "field ready"
+        # or the horn that starts autonomous and nothing in the audio says
+        # which, so the pre-roll has to cover either.
+        "pre_roll_s": 20.0,
+        "post_roll_s": 15.0,
+    },
     "render_crf": 18,
     "sample_fps": 3,
     "jpeg_quality": 2,

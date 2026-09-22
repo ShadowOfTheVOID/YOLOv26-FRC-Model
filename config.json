@@ -22,6 +22,12 @@
     "right": 0.0,
     "overrides": {}
   },
+  "stream": {
+    "match_s": 150.0,
+    "match_window_s": 25.0,
+    "pre_roll_s": 20.0,
+    "post_roll_s": 15.0
+  },
   "render_crf": 18,
   "sample_fps": 3,
   "jpeg_quality": 2,

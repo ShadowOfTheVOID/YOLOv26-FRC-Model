@@ -204,6 +204,18 @@ def cmd_cropcheck(args, cfg):
     return 0
 
 
+def cmd_stream(args, cfg):
+    """Read a whole event-day stream instead of one upload per match."""
+    if not (args.url or args.file):
+        raise SystemExit("stream needs --url <stream> or --file <local video>")
+    if args.url and args.file:
+        raise SystemExit("--url and --file are two ways in; pick one")
+    return pipeline.ingest_stream(
+        cfg, url=args.url or "", local=args.file, event_key=args.event or "",
+        from_match=args.from_match or "", listen_only=args.listen_only,
+        limit=args.limit, force=args.force)
+
+
 def cmd_formats(args, cfg):
     """List the broadcast layout profiles, or measure one against a download."""
     from tbavid import crop as crop_mod
@@ -396,6 +408,28 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8781)),
                    help="honours $PORT, which most hosts inject")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("stream",
+                       help="pull one whole event-day stream and cut every "
+                            "match out of it by listening for the field")
+    p.add_argument("--url", help="the stream: a YouTube or Twitch URL, or a "
+                                 "bare YouTube video id")
+    p.add_argument("--file", type=Path,
+                   help="a stream already on disk, instead of downloading one")
+    p.add_argument("--event", help="TBA event key. Without it the clips are "
+                                   "harvested but carry no match keys, because "
+                                   "there is no schedule to align against.")
+    p.add_argument("--from-match", dest="from_match", metavar="LABEL",
+                   help="which match this stream starts at (e.g. qm14), for a "
+                        "day the cue count cannot line up on its own")
+    p.add_argument("--listen-only", action="store_true", dest="listen_only",
+                   help="report what the audio contains and stop: no cutting, "
+                        "no processing, nothing written")
+    p.add_argument("--limit", type=int, default=0,
+                   help="process only the first N matches found (0 = all)")
+    p.add_argument("--force", action="store_true",
+                   help="reprocess clips already in the manifest")
+    p.set_defaults(func=cmd_stream)
 
     p = sub.add_parser("formats",
                        help="broadcast layout profiles: list, explain, calibrate")

@@ -9,10 +9,39 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
-Two things: the crop now knows which broadcast it is looking at, and the
-scouting app can read this harvest's output as a source of its own.
+Three things: a whole event day can be harvested from one stream, the crop
+knows which broadcast it is looking at, and the scouting app can read this
+harvest's output as a source of its own.
 
 ### Added
+
+- **`run.py stream` — one broadcast in, one clip per match out.** Events that
+  publish a single multi-hour stream per day rather than per-match uploads were
+  simply unreachable: the picker looks for `match.videos[]` and finds nothing,
+  and `download.py` refuses the stream it is handed. Now the matches are found
+  inside it and cut out, and the clips go through the same pipeline as anything
+  else. `--file` reads one already on disk; `--listen-only` reports what the
+  audio contains without writing anything.
+- **Matches are found by listening, not watching** (`tbavid/audio.py`). Between
+  matches the camera is looking at the same field from the same place, so there
+  is no cut for `shots.py` to find. The field's start sound and buzzer are the
+  only events in a broadcast that are loud, tonal, repeated dozens of times and
+  separated by a fixed interval — and the fixed interval is what identifies
+  them. There is no frequency in the file: a band-pass at the horn's pitch
+  would need that pitch from somewhere, and a wrong guess finds nothing while
+  looking exactly like a stream with no matches in it. Every loud tonal burst
+  is collected and the spacing that repeats most consistently is the match, so
+  it works on the Webcast Unit's YouTube feed, a Twitch re-encode or a phone in
+  the stands alike.
+- **Identity comes from TBA or not at all.** Audio says where a match is, never
+  which one it is, and `db.py` joins a roster onto the match key — so one
+  mislabelled clip credits an alliance's fuel to six robots that were not on
+  the field. Keys are assigned when the confirmed cue count equals TBA's match
+  count, when recovered cues close the gap to it exactly, or when
+  `--from-match` says where the day starts. Otherwise none are, and that is not
+  a failure: training frames do not need a match key, scouting rows do, so an
+  unidentified clip keeps its frames and enters the database under its own
+  video id where no roster can join onto it.
 
 - **Broadcast layout profiles** (`tbavid/formats.py`). The crop has always
   measured the overlay from the pixels, which needs no list of events kept up

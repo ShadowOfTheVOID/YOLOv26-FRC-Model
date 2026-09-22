@@ -147,6 +147,15 @@ class TBAClient:
         events = self.get(f"/events/{year}/simple") or []
         return [e["key"] for e in events if e.get("key") and is_competitive_event(e)]
 
+    def event(self, event_key: str) -> dict:
+        """One event record, for its district and type.
+
+        `pick_unseen` gets both off the season list it already fetches, so this
+        is only for the stream path, which is handed one event key and never
+        walks the catalogue at all.
+        """
+        return self.get(f"/event/{event_key}") or {}
+
     def event_matches(self, event_key: str) -> List[dict]:
         return self.get(f"/event/{event_key}/matches") or []
 
