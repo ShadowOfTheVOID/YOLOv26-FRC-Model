@@ -7,6 +7,41 @@ reads it with `python3 deploy/package.py notes vX.Y.Z` when the tag is pushed,
 so the notes and this file cannot drift apart. A tag with no section here fails
 the build rather than publishing an empty release.
 
+## Unreleased
+
+Two things: the crop now knows which broadcast it is looking at, and the
+scouting app can read this harvest's output as a source of its own.
+
+### Added
+
+- **Broadcast layout profiles** (`tbavid/formats.py`). The crop has always
+  measured the overlay from the pixels, which needs no list of events kept up
+  to date. What it could not do is know when it was wrong, and it failed
+  silently both ways: a divider found on a single-camera feed crops away the
+  bottom of the field, and frames that lost half a field still look plausible.
+  A profile says what a layout is supposed to be, so a measurement can be
+  checked against it. The measurement still wins — a profile only tunes the
+  thresholds, supplies the fallback when detection is inconclusive, and vetoes
+  a band its layout does not have.
+- **`ca_district`, for the California district field feed.** One field camera,
+  a banner across the top, no permanent side panel — so its main job is that
+  veto. Marked `declared` rather than `measured`: the veto and thresholds are
+  in force, but the banner range describes the layout as specified, because no
+  California district footage has been through this pipeline yet.
+- **`run.py formats`** — list the profiles, ask which one an event would get
+  and why, or measure a real download with `--calibrate`. Calibration prints
+  the profile its measurements imply and writes nothing; promoting a profile
+  from `declared` to `measured` stays a person's edit, after they have looked
+  at the frames.
+- **The district comes from TBA.** `/events/{year}/simple` — the one request
+  per season the video picker already makes — carries each event's `district`,
+  so the layout is known before the download and costs no extra request. A
+  regional reads as no district, which is also how a regional is recognised.
+  `crop.format` and `crop.formats` override it per run or per event.
+- Every manifest entry records which profile it got and why, and the crop notes
+  carry the reconciliation, so a refused divider is visible afterwards rather
+  than being a number that quietly differs.
+
 ## v0.2.0 — 2026-09-16
 
 Harvesting is now restricted to official competition footage, and an existing

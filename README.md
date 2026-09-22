@@ -23,7 +23,10 @@ hardcoded coordinates — see [How it decides what to keep](#how-it-decides-what
 **Status.** Working end to end on 30+ matches across ~15 events. Fuel
 detection is auto-labelled; robot and hub labels are proposals that need
 review. Per-robot attribution is designed but not live — see
-[SCOUTING.md](SCOUTING.md).
+[SCOUTING.md](SCOUTING.md). The crop is checked against a per-feed layout
+profile, so a divider a single-camera broadcast does not have can no longer
+crop away half its field — see
+[Which broadcast is this](#which-broadcast-is-this).
 
 | | |
 | --- | --- |
@@ -83,6 +86,7 @@ Output lands in these folders:
 | `review` | shot review UI, then export frames |
 | `export --force` | re-export frames after changing sampling config |
 | `cropcheck [video_id]` | proof frames with the crop box drawn on |
+| `formats` | broadcast layout profiles: list, explain, calibrate |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |
 | `reprocess` | re-run crop/render/scoreboard on already-downloaded sources |
@@ -121,6 +125,97 @@ Output lands in these folders:
 
    On the calibration match this turned a 1920x1080 broadcast into a
    1920x504 main-camera strip.
+
+## Which broadcast is this
+
+Step 4 above measures the overlay from the pixels, which needs no list of
+events kept up to date and was already right on feeds nobody had looked at.
+What a measurement cannot do is know when it is wrong, and it fails silently
+both ways:
+
+- **A band that isn't there.** The divider hunt looks for the strongest static
+  horizontal edge in the lower half of the frame. On a single-camera feed that
+  edge is the guardrail, the scoring table or the front row of the bleachers,
+  and if it clears the threshold the bottom of the field is cropped away — and
+  the frames still look perfectly plausible.
+- **A band that is and reads shallow.** The banner walk stops at the first row
+  that moves, so a layout with a gap between the banner and the field stops it
+  early and leaves a strip of scoreboard in the training set, which is the one
+  thing a detector must never get to see.
+
+A **format profile** is the missing opinion: what this feed's layout is
+supposed to look like, so the measurement can be checked against something.
+Profiles live in [`tbavid/formats.py`](tbavid/formats.py).
+
+```bash
+./run.py formats                        # the profiles, and what selects each
+./run.py formats --district ca          # which one an event would get, and why
+./run.py formats --calibrate --video <id>   # what a real download measures
+```
+
+**The measurement still wins.** A profile is not a set of coordinates — that is
+`crop.overrides`, and it needs a human to read numbers off a frame for every
+event. A profile does three things and no more:
+
+1. tunes the detector's thresholds for this layout before it runs;
+2. supplies the fallback when detection is inconclusive, per layout, instead of
+   the single global `crop.top` that otherwise has to serve every feed at once;
+3. vetoes a band its layout does not have — the one case where the pixels
+   genuinely mislead.
+
+| profile | layout | provenance |
+| --- | --- | --- |
+| `ca_district` | California district field feed: one field camera, banner on top, no permanent side panel | declared |
+| `champs_split` | 2026 Championship: field camera over a low side camera, static divider between | measured |
+| `generic` | unknown feed — detect and take the answer, as before profiles existed | measured |
+
+**`provenance` is load-bearing, not a comment.** `measured` means the numbers
+came out of this pipeline reading that feed's footage. `declared` means they
+describe the layout as specified and no footage has been through
+`formats --calibrate` yet — so the profile's *veto and tuning* are in force,
+but its fallback fractions are a starting point rather than a reading.
+`ca_district` is `declared`. Calibrating it is one command against any
+California district match already in the manifest, and it prints the profile
+its measurements imply rather than writing anything:
+
+```bash
+./run.py pull -n 4                            # any 2026ca* event
+./run.py formats --calibrate --event 2026casj
+./run.py cropcheck --video <id>               # then look at the frames
+```
+
+Nothing promotes itself from `declared` to `measured`; that edit is a person's,
+after they have looked at the frames.
+
+### What picks the profile
+
+The event's district, from TBA. `/events/{year}/simple` — the one request per
+season the video picker already makes — carries each event's `district` object,
+so the district is known before the video is downloaded and costs nothing
+extra. A regional has `district: null`, which is also how a regional is
+recognised.
+
+Order of precedence, first match winning:
+
+1. `crop.formats[<event key>]` in config.json — one event
+2. `crop.format` — the whole run
+3. the event's TBA district abbreviation (`ca` → `ca_district`)
+4. the event key, then the video title
+
+```json
+"crop": {
+  "format": "auto",
+  "formats": {"2026casj": "generic"}
+}
+```
+
+Both config routes mean the same thing: a person has looked at the footage. An
+unknown profile name there stops the run rather than harvesting a batch against
+the wrong layout.
+
+Every entry in the manifest records which profile it got and why, and the crop
+notes carry the reconciliation — including a refused divider, so a veto is
+visible afterwards instead of being a number that quietly differs.
 
 ## Scoreboard labels
 
@@ -270,6 +365,8 @@ All knobs live in `config.json`; see `tbavid/config.py` for defaults.
 | `shot_absorb_dist` | looser distance for folding clusters into the winner |
 | `reject_threshold` | minimum main-camera coverage before quarantine |
 | `crop.*` | banner auto-detect toggle and manual fractions |
+| `crop.format` | force one broadcast layout profile for the whole run (`auto` picks per event) |
+| `crop.formats` | `{event_key: profile}`, for one event at a time |
 | `sample_fps` | frames per second of cleaned video to export |
 | `dedupe_hamming` | perceptual-hash distance below which a frame is a duplicate |
 | `score_labels` | read the scoreboard at all |
@@ -328,6 +425,12 @@ theoretical:
   `prepare_dataset.py --scoreboard-ok-only` to train on verified matches only,
   or set a per-event `crop.overrides` entry after checking with
   `run.py cropcheck`.
+- **`ca_district` is a `declared` profile, not a measured one.** Its veto and
+  its thresholds are in force, and those are what it is mainly for — but its
+  banner range is the layout as specified rather than a reading off California
+  district footage, because none has been through this pipeline yet. One
+  `formats --calibrate` run against any `2026ca*` match replaces it with
+  measurements. See [Which broadcast is this](#which-broadcast-is-this).
 - **Robot and hub labels are proposals**, not ground truth. Colour-plus-motion
   still boxes people wearing alliance colours near the field.
 - **Per-robot attribution is not live.** `alliance_fuel` is alliance-level; the

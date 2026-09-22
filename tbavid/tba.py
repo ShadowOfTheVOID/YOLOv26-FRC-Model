@@ -12,10 +12,11 @@ import json
 import random
 import time
 import zlib
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import requests
 
+from . import formats
 from .config import CACHE_DIR
 
 BASE = "https://www.thebluealliance.com/api/v3"
@@ -120,6 +121,20 @@ class TBAClient:
         return None
 
     # -- endpoints ---------------------------------------------------------
+    def events(self, year: int, competitive_only: bool = True) -> List[dict]:
+        """Simple event records for a season, official competition by default.
+
+        The whole record rather than the key, because two other decisions are
+        made from fields it already carries and would otherwise cost a request
+        per event: `event_type` filters the catalogue, and `district` picks the
+        broadcast layout profile (see `formats.py`). `/events/{year}/simple`
+        is one request for the season either way.
+        """
+        events = self.get(f"/events/{year}/simple") or []
+        if not competitive_only:
+            return [e for e in events if e.get("key")]
+        return [e for e in events if e.get("key") and is_competitive_event(e)]
+
     def event_keys(self, year: int, competitive_only: bool = True) -> List[str]:
         """Event keys for a season, official competition only by default.
 
@@ -146,9 +161,15 @@ def match_label(match: dict) -> str:
     return f"{level}{setn}m{num}"
 
 
-def youtube_candidates(matches: List[dict],
-                       competitive_only: bool = True) -> Iterator[Dict[str, str]]:
-    """Yield one candidate per distinct YouTube video ID in this event."""
+def youtube_candidates(matches: List[dict], competitive_only: bool = True,
+                       district: str = "") -> Iterator[Dict[str, str]]:
+    """Yield one candidate per distinct YouTube video ID in this event.
+
+    `district` is the event's TBA district abbreviation ("ca", "fim", ...) or
+    "" for a regional. It rides along on the candidate because the crop stage
+    picks a broadcast layout profile from it, and by then the event record it
+    came from is several steps out of scope.
+    """
     seen_here = set()
     for match in matches:
         if competitive_only and not is_competitive_match(match):
@@ -166,6 +187,7 @@ def youtube_candidates(matches: List[dict],
                 "match_key": match.get("key", ""),
                 "event_key": match.get("event_key", ""),
                 "label": match_label(match),
+                "district": district,
                 # The six teams on the field. This is what turns bumper-number
                 # reading from open-ended OCR into a six-way choice.
                 "teams": {
@@ -184,6 +206,23 @@ def shard_of(yt_key: str, shards: int) -> int:
     run and the partition would not hold.
     """
     return zlib.crc32(yt_key.encode()) % shards
+
+
+def event_catalogue(client, year: int, competitive_only: bool
+                    ) -> List[Tuple[str, str]]:
+    """(event_key, district) for a season's catalogue.
+
+    `events()` carries the district; `event_keys()` does not. Both are accepted
+    so that a caller holding a narrower client -- a test fake, or anything that
+    only ever needed keys -- still walks the same catalogue, just without a
+    district to pick a profile from.
+    """
+    getter = getattr(client, "events", None)
+    if callable(getter):
+        events = getter(year, competitive_only=competitive_only) or []
+        return [(e["key"], formats.district_of(e)) for e in events if e.get("key")]
+    return [(k, "") for k in
+            (client.event_keys(year, competitive_only=competitive_only) or [])]
 
 
 def pick_unseen(
@@ -210,11 +249,11 @@ def pick_unseen(
     within an event only real match play is considered.
     """
     rng = rng or random.Random()
-    keys = client.event_keys(year, competitive_only=competitive_only)
-    if not keys:
+    catalogue = event_catalogue(client, year, competitive_only)
+    if not catalogue:
         where = "competitive events" if competitive_only else "events"
         raise SystemExit(f"TBA returned no {where} for {year}.")
-    rng.shuffle(keys)
+    rng.shuffle(catalogue)
 
     if shards < 1 or not (0 <= shard < shards):
         raise SystemExit(f"bad shard {shard}/{shards}: need 0 <= id < count")
@@ -224,7 +263,7 @@ def pick_unseen(
     not_mine = 0
     events_walked = 0
 
-    for event_key in keys:
+    for event_key, district in catalogue:
         if len(picked) >= count:
             break
         events_walked += 1
@@ -233,7 +272,8 @@ def pick_unseen(
             continue
 
         candidates = list(youtube_candidates(matches,
-                                             competitive_only=competitive_only))
+                                             competitive_only=competitive_only,
+                                             district=district))
         rng.shuffle(candidates)
 
         from_this_event = 0

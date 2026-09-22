@@ -204,6 +204,97 @@ def cmd_cropcheck(args, cfg):
     return 0
 
 
+def cmd_formats(args, cfg):
+    """List the broadcast layout profiles, or measure one against a download."""
+    from tbavid import crop as crop_mod
+    from tbavid import formats
+
+    if args.calibrate:
+        return _calibrate_format(args, cfg)
+
+    if args.event or args.district or args.title:
+        fmt, why = formats.select(district=args.district or "",
+                                  event_key=args.event or "",
+                                  title=args.title or "", cfg=cfg)
+        print(f"{args.event or '(no event key)'}"
+              f"{', district ' + args.district if args.district else ''}"
+              f" -> {fmt.name}  ({why})\n")
+        print(fmt.describe())
+        print(f"  {fmt.notes}")
+        return 0
+
+    print("Broadcast layout profiles. The first whose selectors match wins;\n"
+          "`generic` matches nothing and is only ever the fallback.\n")
+    for fmt in formats.FORMATS:
+        print(fmt.describe())
+    print("Which one a video gets is decided by its event's TBA district, then\n"
+          "its event key, then its video title. Override per run or per event:\n"
+          '  "crop": {"format": "ca_district", "formats": {"2026casj": "generic"}}\n')
+    print("To characterise a feed nobody has measured yet:\n"
+          "  ./run.py formats --calibrate --video <id>")
+    return 0
+
+
+def _calibrate_format(args, cfg):
+    """Report what one downloaded video's overlay actually measures."""
+    from tbavid import crop as crop_mod
+    from tbavid import formats
+
+    manifest = pipeline.load_manifest()
+    entries = manifest["videos"]
+    if args.video:
+        entry = entries.get(args.video)
+        if entry is None:
+            print(f"unknown video id {args.video}\n  known ids:")
+            for vid in entries:
+                print(f"    {vid}")
+            return 1
+        targets = [(args.video, entry)]
+    elif args.event:
+        targets = [(v, e) for v, e in entries.items()
+                   if e.get("event_key") == args.event and not e.get("error")]
+        if not targets:
+            print(f"nothing downloaded from {args.event} yet")
+            return 1
+    else:
+        print("--calibrate needs --video <id> or --event <key>: it measures a "
+              "real download,\nnot a profile.")
+        return 1
+
+    for vid, entry in targets:
+        raw = pipeline._ensure_raw(entry, cfg)
+        if raw is None:
+            print(f"{vid}: no source available to measure")
+            continue
+        fmt, why = formats.select(district=entry.get("district", ""),
+                                  event_key=entry.get("event_key", ""),
+                                  title=entry.get("title", ""), cfg=cfg)
+        got = crop_mod.calibrate(raw, entry["analysis"], cfg, tune=fmt.tuning())
+        print(f"\n{vid}")
+        print(f"  profile in force : {fmt.name} ({fmt.provenance}) -- {why}")
+        if got is None:
+            print("  could not sample enough frames to measure")
+            continue
+        for k in ("letterbox", "top_frac", "bottom_frac_edge",
+                  "bottom_frac_static", "static_split_row", "edge_peak",
+                  "edge_peak_row", "edge_typical", "edge_ratio"):
+            print(f"  {k:<18}: {got[k]}")
+        edge_ok = got["edge_ratio"] and got["edge_ratio"] >= 3.0
+        agree = (got["bottom_frac_edge"] or 0) > 0 and got["bottom_frac_static"] > 0
+        if edge_ok and agree:
+            print("  => both routes found a divider: this feed splits "
+                  "(split_mode: expected)")
+        elif edge_ok:
+            print("  => an edge with no static band behind it: field furniture "
+                  "rather than a divider (split_mode: unlikely)")
+        else:
+            print("  => no divider signal at all: single camera "
+                  "(split_mode: unlikely)")
+        print("\n  Look at the frames before writing any of this into a profile:\n"
+              f"    ./run.py cropcheck --video {vid}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -293,6 +384,17 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8781)),
                    help="honours $PORT, which most hosts inject")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("formats",
+                       help="broadcast layout profiles: list, explain, calibrate")
+    p.add_argument("--event", help="event key, to show the profile it selects")
+    p.add_argument("--district", help="TBA district abbreviation, e.g. ca")
+    p.add_argument("--title", help="video title, for the title selectors")
+    p.add_argument("--calibrate", action="store_true",
+                   help="measure a real download instead of listing profiles; "
+                        "needs --video or --event")
+    p.add_argument("--video", help="manifest video id to measure")
+    p.set_defaults(func=cmd_formats)
 
     p = sub.add_parser("status", help="ledger and dataset summary")
     p.set_defaults(func=cmd_status)

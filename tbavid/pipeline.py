@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import crop, download, labels, ledger as L, render, review, scoreboard, shots
+from . import crop, download, formats, labels, ledger as L, render, review, scoreboard, shots
 from .config import (DATA, FRAME_DIR, LABEL_DIR, MANIFEST_PATH, OCR_WORK,
                      RAW_DIR, REVIEW_DIR, THUMB_DIR, VIDEO_DIR, ensure_dirs,
                      tba_key)
@@ -143,10 +143,20 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
         if located.get("error"):
             print(f"  scoreboard: {located['error']}")
 
+    # Which broadcast this is, decided before a pixel is measured: the event's
+    # district came from TBA with the candidate, and the profile it selects
+    # tunes the crop detectors and then checks their answers. See formats.py.
+    fmt, why = formats.select(district=cand.get("district", ""),
+                              event_key=cand.get("event_key", ""),
+                              title=meta.get("title", ""),
+                              cfg=cfg)
+    print(f"  format: {fmt.name} ({why})")
+
     try:
         crop_box = crop.resolve_crop(raw, analysis, cfg,
                                      banner_floor_px=scoreboard.banner_floor_px(located),
-                                     event_key=cand.get("event_key", ""))
+                                     event_key=cand.get("event_key", ""),
+                                     fmt=fmt)
     except ValueError as exc:
         return {"error": str(exc)}
     for note in crop_box["notes"]:
@@ -181,6 +191,8 @@ def _process(raw: Path, vid: str, cand: dict, meta: dict, cfg: dict,
     return {
         **{k: cand[k] for k in ("yt_key", "match_key", "event_key", "label")},
         "teams": cand.get("teams") or {},
+        "district": cand.get("district", ""),
+        "format": {"name": fmt.name, "why": why, "provenance": fmt.provenance},
         "shard": shard_label,
         "worker": cfg.get("worker") or None,
         "title": meta.get("title", ""),
@@ -328,7 +340,8 @@ def reprocess(cfg: dict, only: Optional[List[str]] = None) -> int:
         if raw is None:
             print(f"  ! {vid}: no source available")
             continue
-        cand = {k: entry.get(k, "") for k in ("yt_key", "match_key", "event_key", "label")}
+        cand = {k: entry.get(k, "")
+                for k in ("yt_key", "match_key", "event_key", "label", "district")}
         cand["teams"] = entry.get("teams") or {}
         meta = {"title": entry.get("title", ""),
                 "duration": entry.get("source_duration") or 0.0}

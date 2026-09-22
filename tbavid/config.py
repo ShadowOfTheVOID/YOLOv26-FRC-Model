@@ -44,6 +44,11 @@ DEFAULTS = {
     "crop": {
         "auto_detect_banner": True,
         "auto_detect_split": True,
+        # Which broadcast layout profile to use: "auto" picks one from the
+        # event's TBA district, its key and the video title (see formats.py).
+        # A name here forces it for the whole run; `formats` does it per event.
+        "format": "auto",
+        "formats": {},
         "overrides": {},
         "top": 0.16,
         "bottom": 0.0,

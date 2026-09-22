@@ -20,6 +20,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tbavid import formats as F
 from tbavid import ledger as L
 from tbavid.crop import Profile, detect_bottom, detect_top
 from tbavid.db import build, connect, summary
@@ -31,8 +32,8 @@ from tbavid.scoreboard import (banner_floor_px, clean_series, parse_pair,
                                plausible_step, probe_rows, tighten)
 from tbavid.shots import (_apply_min_shot, build_shots, cluster_shots, find_cuts,
                           merge_ranges)
-from tbavid.tba import (TBAClient, is_competitive_event, match_label, pick_unseen,
-                        youtube_candidates)
+from tbavid.tba import (TBAClient, event_catalogue, is_competitive_event,
+                        match_label, pick_unseen, youtube_candidates)
 
 PASSED = 0
 FAILED: list = []
@@ -120,6 +121,140 @@ def test_crop_bands():
     # Dark, barely-moving bleachers inside the main panel are not a divider.
     quiet = np.full(H, 0.005); quiet[41:52] = 3e-4
     check("dark bleachers are not a divider", detect_bottom(prof(quiet, quiet)) == 0.0)
+
+
+def test_formats():
+    # A single-camera layout is selected by the district TBA already told us
+    # about, not by a list of event keys somebody has to maintain.
+    fmt, why = F.select(district="ca", event_key="2026casj")
+    check("the California district feed selects its own profile",
+          fmt.name == "ca_district" and "district ca" in why)
+    check("a regional with no district falls through to generic",
+          F.select(district="", event_key="2026roebling")[0].name == "generic")
+    check("a Championship division is still the split-screen profile",
+          F.select(district="", event_key="2026gal")[0].name == "champs_split")
+    # Config outranks TBA: both routes are a human saying they have looked at
+    # the footage. Per-event beats the whole run.
+    cfg = {"crop": {"format": "champs_split", "formats": {"2026casj": "generic"}}}
+    check("crop.format forces a profile", F.select(district="ca", cfg=cfg)[0].name
+          == "champs_split")
+    check("crop.formats[event] beats crop.format",
+          F.select(district="ca", event_key="2026casj", cfg=cfg)[0].name == "generic")
+
+    # TBA writes `district: null` for a regional, so the same read is also the
+    # regional test. A string where an object belongs must not become a name.
+    check("district comes off a TBA event record",
+          F.district_of({"district": {"abbreviation": "CA"}}) == "ca")
+    check("a regional reads as no district",
+          F.district_of({"district": None}) == "" and F.district_of({}) == "")
+    check("a district that is not an object is not a district",
+          F.district_of({"district": "ca"}) == "")
+
+    # This is the whole point of the profile. On a feed with no second-camera
+    # panel, the strongest static edge in the lower half is the guardrail or the
+    # front of the bleachers -- and taking it for a divider crops away the
+    # bottom of the field while the frames still look plausible.
+    ca = F.BY_NAME["ca_district"]
+    top, bottom, notes = F.reconcile(ca, 0.16, 0.34)
+    check("a divider on a single-camera layout is refused", bottom == 0.0)
+    check("the refusal says so in the manifest",
+          any("no second-camera panel" in n for n in notes))
+    # ...and the same measurement on the layout that does split is kept.
+    check("the split-screen profile keeps its divider",
+          F.reconcile(F.BY_NAME["champs_split"], 0.16, 0.34)[1] == 0.34)
+
+    # A measurement outside the expected range is still the measurement. The
+    # pixels are what is being cropped; a profile is a description of a layout
+    # that may have been re-cut between events.
+    top, _, notes = F.reconcile(ca, 0.31, None)
+    check("an out-of-range banner is kept, not clamped", top == 0.31)
+    check("but the disagreement is recorded",
+          any("outside the expected" in n for n in notes))
+
+    # Inconclusive detection is where a profile supplies a number, and the
+    # point of having one per layout instead of one global crop.top.
+    check("an inconclusive banner falls back to the profile",
+          F.reconcile(ca, None, None)[0] == ca.banner[2])
+
+    # generic has no opinion, so it cannot veto: it must behave exactly like
+    # the pre-profile pipeline on a feed nobody has characterised.
+    check("generic takes a divider at face value",
+          F.reconcile(F.BY_NAME["generic"], 0.16, 0.34)[1] == 0.34)
+
+    # A typo in config.json must stop the run rather than silently harvest a
+    # whole batch against the wrong layout.
+    for bad in ({"crop": {"format": "ca-district"}},
+                {"crop": {"formats": {"2026casj": "nope"}}}):
+        try:
+            F.select(district="ca", event_key="2026casj", cfg=bad)
+            check("an unknown format name is refused", False)
+        except SystemExit:
+            check("an unknown format name is refused", True)
+
+
+def test_format_tuning():
+    # `split_mode: unlikely` is what a single-camera profile asks the detector
+    # for: an edge on its own is not enough, because on a feed with no divider
+    # there is always an edge down there. Either the static route agrees on the
+    # row, or the edge is far past the threshold rather than just over it.
+    noisy = np.full(H, 0.002)
+    edge = np.full(H, 8.0); edge[117] = 120.0
+    unlikely = F.BY_NAME["ca_district"].tuning()
+    check("the profile asks for corroboration",
+          unlikely["split_mode"] == "unlikely")
+    check("a lone edge is not a divider under the veto",
+          detect_bottom(prof(noisy, noisy, edge), tune=unlikely) == 0.0)
+    check("...and is one without it",
+          abs(detect_bottom(prof(noisy, noisy, edge)) - (180 - 114) / 180) < 1e-9)
+
+    # A real divider is static as well as sharp, so both routes see it and the
+    # veto lets it through -- a profile must not be able to crop a feed wrong
+    # in the other direction either.
+    static = np.full(H, 0.002); static[117:] = 1e-6
+    check("two agreeing routes survive the veto",
+          detect_bottom(prof(static, static, edge), tune=unlikely) > 0)
+
+    # An overwhelming edge is believed on its own. 120 against a threshold of
+    # 90 is not; 300 is.
+    huge = np.full(H, 8.0); huge[117] = 300.0
+    check("an overwhelming edge needs no corroboration",
+          detect_bottom(prof(noisy, noisy, huge), tune=unlikely) > 0)
+
+    # The banner walk reads the same thresholds out of the profile.
+    med = np.full(H, 0.005); med[:28] = 1e-5
+    check("banner detection is unchanged by a profile that does not retune it",
+          detect_top(prof(med), tune=unlikely) == detect_top(prof(med)))
+    check("a profile can lower the banner ceiling",
+          detect_top(prof(med), tune={"max_banner_frac": 0.10}) is None)
+
+
+def test_district_catalogue():
+    # The district has to reach the crop stage, and the only place it is free
+    # is the event list we already fetch to pick videos: /events/{year}/simple
+    # carries `district`, so this costs no extra request.
+    events = [{"key": "2026casj", "event_type": 1,
+               "district": {"abbreviation": "ca"}},
+              {"key": "2026roebling", "event_type": 0, "district": None}]
+    c = TBAClient.__new__(TBAClient)
+    c.get = lambda path: events
+    check("the catalogue carries each event's district",
+          event_catalogue(c, 2026, True) == [("2026casj", "ca"), ("2026roebling", "")])
+
+    # A client that only has event_keys() -- anything written before the
+    # district mattered -- must still walk the same catalogue.
+    class KeysOnly:
+        def event_keys(self, year, competitive_only=True):
+            return ["2026casj"]
+    check("a keys-only client still walks, without a district",
+          event_catalogue(KeysOnly(), 2026, True) == [("2026casj", "")])
+
+    matches = [{"key": "2026casj_qm1", "event_key": "2026casj", "comp_level": "qm",
+                "match_number": 1, "set_number": 0,
+                "videos": [{"type": "youtube", "key": "V"}]}]
+    got = list(youtube_candidates(matches, district="ca"))
+    check("and it rides along on the candidate", got[0]["district"] == "ca")
+    check("a candidate with no district says so, rather than guessing",
+          list(youtube_candidates(matches))[0]["district"] == "")
 
 
 def test_scoreboard():
@@ -501,7 +636,8 @@ def test_db():
 
 
 def main() -> int:
-    for fn in (test_cuts, test_clustering, test_crop_bands, test_scoreboard,
+    for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
+               test_format_tuning, test_district_catalogue, test_scoreboard,
                test_download_options, test_labels, test_render, test_identify,
                test_ledger_and_picking, test_competitive_filter, test_audit,
                test_packaging, test_no_unbound_globals, test_sharding, test_db):
