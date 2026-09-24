@@ -273,6 +273,34 @@ harvest's output as a source of its own.
   than on the highlight itself, which sits off-centre toward the light: box
   centres landed within 1–3 px of the true ball centres instead of half off
   the ball.
+- **The splitter carved the arena into balls.** The back of the pit, the far
+  wall, the sponsor boards and the painted field border are all long yellow
+  shapes, and a cluster splitter turned loose on one proposes a ball every few
+  pixels across it. Saturation cannot help — a sponsor board measures S=177
+  against fuel's S=191 — so two geometric guards were added instead.
+  A **field line**, learned per frame: fuel is on the floor, so nothing above
+  the floor is fuel. A percentile of the accepted boxes was tried first and
+  fails for the obvious reason, that the false positives are themselves above
+  the field and drag the line up with them — on a test frame with 13 round
+  yellow objects in the crowd it landed at row 36 of 440 and excluded nothing.
+  Density works where position does not: bin the balls by row, keep bins
+  holding a quarter of the busiest bin, take the longest unbroken run. That
+  put the line at row 166 and excluded all 13. `--roi-top` overrides it.
+  A **stripe test** for long yellow shapes about a ball thick, since the
+  painted border sits below the line and inside the field. A row of balls is
+  scalloped where paint is flat, but balls overlapping by a third are nearly
+  as smooth (0.119 against paint's 0.100), so the pixels vote too: a sphere
+  casts a seam against its neighbour and paint has no brightness structure at
+  all (0.132 against 0.000, or 0.012 for paint with texture on it). Flat by
+  both measures, and only then, means paint. Tunable with `--flat-v`.
+  On an arena scene carrying a pit band, a painted border, 13 crowd objects
+  and a merged row of 27 real balls along a wall: 0, 0, 0 and the row intact.
+  Split pieces now face the same saturation test as rescued ones.
+- **The preview names which pass proposed each box** — red through the gate,
+  orange split out of a cluster, cyan rescued from shade, green dropped as a
+  reflection, with the learned field line drawn in white. `train/diagnose_labels.py`
+  reports the same counts across a sweep of a setting, which is how you tell a
+  fix that did not work from a fix that never ran.
   The band-local size also catches the merge the fill gate never could: two
   balls side by side fill their bounding box to 0.82 and passed as a single
   ball of twice the local size. New knobs: `--no-split`, `--merge-factor`,

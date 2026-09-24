@@ -376,6 +376,107 @@ def rescue_pass(img: np.ndarray, hsv: np.ndarray, strict: np.ndarray,
     return out
 
 
+def field_top(gated: list, units: list, height: int, margin: float = 2.0) -> int:
+    """The highest row fuel can be on, learned from where the fuel actually is.
+
+    The stands are full of things a colour gate likes -- banners, shirts, the
+    yellow on the rail, the pit behind the field -- and a cluster splitter
+    turned loose on any of them proposes a ball every few pixels. No colour
+    test separates them: a sponsor board measures S=177 against fuel's S=191.
+    What separates them is that fuel is on the floor.
+
+    The line cannot be a percentile of what the gate accepted, which was the
+    first attempt and fails for the obvious reason: the false positives are
+    themselves above the field, so they drag the percentile up into the stands
+    with them. Measured on a synthetic frame with 13 round yellow objects in
+    the crowd, a 2nd-percentile line landed at row 36 of 440 and excluded
+    nothing.
+
+    Density works where position does not. Fuel is a hundred-odd balls packed
+    into a contiguous strip of the frame; the crowd's yellow is sparse and
+    scattered through rows that hold almost nothing. So bin the balls by row,
+    keep bins holding at least a quarter of what the busiest bin holds, take
+    the longest unbroken run of those, and put the line two ball-diameters
+    above where that run starts.
+    """
+    if len(gated) < 10:
+        return 0          # too little evidence to draw a line with
+    centres = [y + h / 2.0 for _, y, _, h in gated]
+    heights = [h for _, _, _, h in gated]
+    binsize = max(int(np.median(heights) * 2), 4)
+    nbins = max(height // binsize, 1)
+    counts = np.zeros(nbins, int)
+    for c in centres:
+        counts[min(int(c) // binsize, nbins - 1)] += 1
+
+    floor = counts.max() * 0.25
+    best_start = best_len = run_start = run_len = 0
+    for i, n in enumerate(counts):
+        if n >= floor:
+            if run_len == 0:
+                run_start = i
+            run_len += 1
+            if run_len > best_len:
+                best_len, best_start = run_len, run_start
+        else:
+            run_len = 0
+    if not best_len:
+        return 0
+    top = best_start * binsize
+    unit = unit_at(units, top, height)
+    radius = math.sqrt(unit / math.pi) if unit else 0.0
+    return max(int(top - margin * 2 * radius), 0)
+
+
+def is_strip(labels: np.ndarray, idx: int, box: tuple, unit_area: float,
+             hsv: np.ndarray, flat_v: float = 0.05) -> bool:
+    """Is this long yellow thing a painted line rather than a row of balls?
+
+    The failure this exists for: the far wall, the field border and the back of
+    the pit are all long yellow shapes about a ball thick, and a splitter will
+    happily carve any of them into ball-sized segments that pass every test
+    applied to a segment in isolation.
+
+    A row of balls along a wall is also long and about a ball thick, so length
+    alone cannot decide. What differs is the thickness along its length: the
+    distance transform of a row of balls rises at each centre and dips at each
+    seam, where a painted stripe is flat.
+
+    That one measure is not quite enough on its own. Balls overlapping by a
+    third leave an outline almost as smooth as a stripe's -- measured at 0.119
+    against a stripe's 0.100, too close to split on. So the pixels get a vote
+    too: balls are spheres, so there is a dark seam between each pair even
+    where the mask runs straight through, and a painted stripe has no
+    brightness structure at all. The same pair measures 0.132 against 0.000,
+    or 0.012 for a stripe with texture on it. A thing is a stripe only if it
+    is flat by BOTH measures.
+    """
+    x, y, w, h = box
+    long_side, short_side = max(w, h), min(w, h)
+    diameter = 2 * math.sqrt(unit_area / math.pi)
+    if long_side < diameter * 3 or short_side > diameter * 1.6:
+        return False                      # not long and thin: not this problem
+
+    sub = component_mask(labels, idx, box)
+    dist = cv2.distanceTransform(sub, cv2.DIST_L2, 5)
+    axis = 0 if w >= h else 1             # measure along the long side
+    ridge = dist.max(axis=axis)
+    ridge = ridge[ridge > 0]
+    if ridge.size < 6:
+        return False
+    variation = float(ridge.std() / ridge.mean()) if ridge.mean() else 0.0
+    if variation >= 0.12:
+        return False                      # visibly scalloped: a row of balls
+
+    value = hsv[y:y + h, x:x + w, 2].astype(float)
+    value[labels[y:y + h, x:x + w] != idx] = np.nan
+    profile = np.nanmax(value, axis=axis)
+    profile = profile[~np.isnan(profile)]
+    if profile.size < 6 or not profile.mean():
+        return False
+    return float(profile.std() / profile.mean()) < flat_v
+
+
 def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            keep_clumps: bool, split: bool = True, max_split: int = 8,
            hsv_lo: tuple = HSV_LO, hsv_hi: tuple = HSV_HI,
@@ -383,6 +484,8 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            rescue: bool = True, reflections: bool = True,
            loose_lo: tuple = LOOSE_LO, loose_hi: tuple = LOOSE_HI,
            min_cover: float = 0.6, close_k: int = 5, sat_ratio: float = 0.7,
+           roi_top: float = -1.0, roi_bottom: float = 1.0,
+           flat_v: float = 0.05,
            v_ratio: float = 0.82, reach: float = 1.6) -> tuple:
     """-> (gated, split out of clusters, rescued from shade, heaps, dropped).
 
@@ -431,6 +534,8 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
     units = unit_areas([(x, y, w, h, a) for x, y, w, h, a, _ in singles], H)
 
     gated, recovered, heaps = [], [], 0
+    ball_sat = float(np.median([box_stats(hsv, (x, y, w, h))[0]
+                                for x, y, w, h, _, _ in singles]))
 
     # Second look at everything that passed: anything well over the local ball
     # size is a merge the fill gate did not notice. A failed split keeps the
@@ -450,6 +555,9 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
         if not unit:
             heaps += 1
             continue
+        if is_strip(labels, i, (x, y, w, h), unit, hsv, flat_v):
+            heaps += 1
+            continue
         pieces = []
         if area <= max_split * unit:
             # A few balls stuck together: the seams are on the outline, and the
@@ -460,6 +568,8 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
             # them by their shading instead.
             pieces = hough_split(img, component_mask(labels, i, (x, y, w, h)),
                                  (x, y, w, h), PAD, unit)
+        pieces = [b for b in pieces
+                  if box_stats(hsv, b)[0] >= ball_sat * sat_ratio]
         if pieces:
             recovered.extend(pieces)
         else:
@@ -471,10 +581,18 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
         # looks where the strict mask is blind -- shade, and behind bars. What
         # a ball looks like on THIS frame is measured from the ones already
         # found rather than assumed from a constant.
-        found = gated + recovered
-        ball_sat = float(np.median([box_stats(hsv, b)[0] for b in found])) if found else 0.0
-        rescued = rescue_pass(img, hsv, mask, found, units, loose_lo, loose_hi,
-                              min_cover, close_k, ball_sat, sat_ratio)
+        rescued = rescue_pass(img, hsv, mask, gated + recovered, units,
+                              loose_lo, loose_hi, min_cover, close_k,
+                              ball_sat, sat_ratio)
+
+    # Nothing above the field is fuel, whichever pass proposed it.
+    top = int(roi_top * H) if roi_top >= 0 else field_top(gated, units, H)
+    bottom = int(roi_bottom * H)
+
+    def on_field(boxes):
+        return [b for b in boxes if top <= b[1] + b[3] / 2 <= bottom]
+
+    gated, recovered, rescued = on_field(gated), on_field(recovered), on_field(rescued)
 
     dropped = []
     if reflections:
@@ -491,6 +609,27 @@ def to_yolo(boxes, W: int, H: int) -> str:
         lines.append(f"{FUEL_CLASS} {(x + w / 2) / W:.6f} {(y + h / 2) / H:.6f} "
                      f"{w / W:.6f} {h / H:.6f}")
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def af_field_top(img: np.ndarray, args) -> int:
+    """The learned field line, recomputed for the preview's white rule."""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = cv2.morphologyEx(
+        cv2.inRange(hsv, np.array(args.hsv_lo, np.uint8),
+                    np.array(args.hsv_hi, np.uint8)),
+        cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    singles = []
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if area < args.min_area or w < 5 or h < 4:
+            continue
+        if area <= args.max_area and area / float(w * h) >= args.min_fill:
+            singles.append((int(x), int(y), int(w), int(h), int(area)))
+    if not singles:
+        return 0
+    return field_top([(x, y, w, h) for x, y, w, h, _ in singles],
+                     unit_areas(singles, img.shape[0]), img.shape[0])
 
 
 def main() -> int:
@@ -530,6 +669,18 @@ def main() -> int:
                     help="kernel that bridges an occluder in the rescue pass. "
                          "A hopper bar is thinner than a ball; this is what "
                          "stops it reading as two half balls")
+    ap.add_argument("--flat-v", type=float, default=0.05,
+                    help="how little brightness a long yellow shape can vary "
+                         "along its length before it is a painted line rather "
+                         "than a row of balls (balls measure ~0.13, paint "
+                         "~0.01)")
+    ap.add_argument("--roi-top", type=float, default=-1.0,
+                    help="fraction of frame height above which nothing is "
+                         "fuel. Default -1 learns it per frame from the balls "
+                         "the colour gate found, which is what keeps the "
+                         "splitter off the sponsor boards")
+    ap.add_argument("--roi-bottom", type=float, default=1.0,
+                    help="and below which nothing is fuel")
     ap.add_argument("--sat-ratio", type=float, default=0.7,
                     help="how saturated a rescued ball must be, as a fraction "
                          "of the balls already found on that frame. Shade "
@@ -581,6 +732,7 @@ def main() -> int:
                       args.hsv_lo, args.hsv_hi, args.merge_factor, args.hough,
                       args.rescue, args.reflections, args.loose_lo,
                       args.loose_hi, args.min_cover, args.close_k, args.sat_ratio,
+                      args.roi_top, args.roi_bottom, args.flat_v,
                       args.v_ratio, args.reach)
 
     if args.preview:
@@ -599,6 +751,13 @@ def main() -> int:
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 140, 255), 1)
         for x, y, w, h in rescued:
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 200, 0), 1)
+        H_img = img.shape[0]
+        line = (int(args.roi_top * H_img) if args.roi_top >= 0
+                else af_field_top(img, args))
+        if line > 0:
+            cv2.line(img, (0, line), (img.shape[1], line), (255, 255, 255), 1)
+            cv2.putText(img, "field line", (12, max(line - 6, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         if args.show_dropped:
             # Green is what was thrown away. Look at this before believing the
             # count: a reflection filter that is eating real balls looks
