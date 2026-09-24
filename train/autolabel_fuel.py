@@ -17,14 +17,22 @@ frame most fuel is in loose groups of two to five, so gating alone proposes a
 small fraction of what is there -- 92 of several hundred on the frame this was
 tuned against.
 
-So a component that fails the gate is not discarded outright. If it is small
-enough to be a few balls rather than a heap, it is split: a distance transform
-peaks once per ball centre, and a watershed from those peaks cuts the group
-along the seams. Each piece is then sized against the frame's own median
-single ball, so a split that produced nonsense is dropped rather than labelled.
-Genuine heaps -- the mid-field pile, anything over `--max-split` balls' worth
-of area -- are still skipped, because a box round a heap teaches the detector
-that fuel is a big amorphous blob.
+So a component that fails the gate is not discarded outright, and which tool
+recovers it depends on how big it is.
+
+A few balls stuck together are cut apart on their outline: a distance
+transform peaks once per ball centre, and a watershed from those peaks follows
+the seams. Each piece is sized against the frame's own median ball, so a cut
+that produced nonsense is dropped rather than labelled.
+
+A cluster is a different problem, and the one that costs the most. A ball in
+the middle of a cluster is surrounded by yellow, so the mask has no seam there
+and no amount of cutting finds it -- which is why the heaps stayed bare while
+the pairs came back. What is still visible is each ball's own shading, the
+dark crescent where the next one meets it, so those are found with a Hough
+circle search over the gradient, with the radius range pinned to the band's
+measured ball. On a hex-packed cluster of 30, that is the difference between
+0 proposals and 30.
 
 These are PROPOSALS. Preview them before you commit to 200k of them:
 
@@ -56,6 +64,18 @@ HSV_HI = (38, 255, 255)
 # centres into one seed; too high finds no seed in a ball that is half hidden.
 PEAK_FRAC = 0.55
 
+# Border left around a component so watershed has somewhere to flood from and
+# Hough has gradient on both sides of a rim ball's edge.
+PAD = 3
+
+
+def component_mask(labels: np.ndarray, idx: int, box: tuple) -> np.ndarray:
+    """One component, padded, as a 0/1 mask."""
+    x, y, w, h = box
+    sub = np.zeros((h + 2 * PAD, w + 2 * PAD), np.uint8)
+    sub[PAD:PAD + h, PAD:PAD + w] = (labels[y:y + h, x:x + w] == idx).astype(np.uint8)
+    return sub
+
 
 def hsv_arg(text: str) -> tuple:
     """'18,90,90' -> (18, 90, 90)."""
@@ -81,9 +101,8 @@ def split_clump(labels: np.ndarray, idx: int, box: tuple, img: np.ndarray,
     missing proposal costs recall, a wrong one costs the model.
     """
     x, y, w, h = box
-    pad = 3
-    sub = np.zeros((h + 2 * pad, w + 2 * pad), np.uint8)
-    sub[pad:pad + h, pad:pad + w] = (labels[y:y + h, x:x + w] == idx).astype(np.uint8)
+    pad = PAD
+    sub = component_mask(labels, idx, box)
 
     radius = math.sqrt(unit_area / math.pi)
     dist = cv2.distanceTransform(sub, cv2.DIST_L2, 5)
@@ -145,10 +164,57 @@ def unit_at(units: list, y: int, height: int) -> float:
     return units[min(int(y) // step, len(units) - 1)]
 
 
+def hough_split(img: np.ndarray, sub: np.ndarray, box: tuple, pad: int,
+                unit_area: float) -> list:
+    """Find balls inside a clump by their circular shading, not by its outline.
+
+    The distance transform cuts a blob where it is narrow, which finds the
+    seams on the rim of a group and nothing at all in the middle of one: a ball
+    surrounded by other balls has no edge, so no distance minimum, so no seam
+    to cut. That is why a heap stayed unlabelled however the gate was tuned,
+    and it is most of the fuel on a real frame -- the field's clusters hold
+    more balls than its open floor.
+
+    What is still visible in the middle of a cluster is each ball's own
+    shading: a dark crescent where the next ball meets it. Hough sees that,
+    because it works on gradients rather than on the mask. The radius range is
+    taken from the band's measured ball, so the accumulator is not free to
+    invent a circle the size of a hub.
+    """
+    x, y, w, h = box
+    crop = img[y:y + h, x:x + w]
+    if crop.size == 0:
+        return []
+    grey = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    grey = cv2.copyMakeBorder(grey, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+    grey = cv2.medianBlur(grey, 3)
+
+    radius = math.sqrt(unit_area / math.pi)
+    circles = cv2.HoughCircles(
+        grey, cv2.HOUGH_GRADIENT, dp=1,
+        minDist=max(radius * 1.2, 4.0),
+        param1=90, param2=max(int(radius * 0.9), 9),
+        minRadius=max(int(radius * 0.55), 3),
+        maxRadius=max(int(radius * 1.6), 6))
+    if circles is None:
+        return []
+
+    out = []
+    for cx, cy, r in np.round(circles[0]).astype(int):
+        if not (0 <= cy < sub.shape[0] and 0 <= cx < sub.shape[1]) or not sub[cy, cx]:
+            continue          # a circle centred off the yellow is not a ball
+        bx, by = cx - r, cy - r
+        bw = bh = 2 * r
+        if bw < 5 or bh < 4:
+            continue
+        out.append((x + bx - pad, y + by - pad, bw, bh))
+    return out
+
+
 def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            keep_clumps: bool, split: bool = True, max_split: int = 8,
            hsv_lo: tuple = HSV_LO, hsv_hi: tuple = HSV_HI,
-           merge_factor: float = 1.6) -> tuple:
+           merge_factor: float = 1.6, hough: bool = True) -> tuple:
     """-> (gated boxes, boxes recovered by splitting, heaps skipped).
 
     Three return values rather than one list because the preview needs to
@@ -207,10 +273,19 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
 
     for i, x, y, w, h, area in clumps:
         unit = unit_at(units, y + h // 2, H)
-        if not unit or area > max_split * unit:
+        if not unit:
             heaps += 1
             continue
-        pieces = split_clump(labels, i, (x, y, w, h), img, unit, min_area)
+        pieces = []
+        if area <= max_split * unit:
+            # A few balls stuck together: the seams are on the outline, and the
+            # watershed cut is tighter than a circle fit.
+            pieces = split_clump(labels, i, (x, y, w, h), img, unit, min_area)
+        if not pieces and hough:
+            # A cluster. Its interior balls have no outline to cut, so find
+            # them by their shading instead.
+            pieces = hough_split(img, component_mask(labels, i, (x, y, w, h)),
+                                 (x, y, w, h), PAD, unit)
         if pieces:
             recovered.extend(pieces)
         else:
@@ -242,8 +317,13 @@ def main() -> int:
                          "is treated as a merge and split, even if it passed "
                          "the fill gate -- which a side-by-side pair does")
     ap.add_argument("--max-split", type=int, default=8,
-                    help="biggest blob worth splitting, in ball-areas. Above "
-                         "this it is a heap and gets skipped")
+                    help="biggest blob the watershed cut is used on, in "
+                         "ball-areas. Bigger clusters go to the circle finder, "
+                         "which is what --no-hough turns off")
+    ap.add_argument("--no-hough", dest="hough", action="store_false",
+                    help="don't look for balls inside a cluster by their "
+                         "shading. Leaves every heap unlabelled, which is most "
+                         "of the fuel on a busy frame")
     ap.add_argument("--keep-clumps", action="store_true",
                     help="box merged heaps whole (usually makes the dataset worse)")
     ap.add_argument("--hsv-lo", type=hsv_arg, default=HSV_LO,
@@ -272,7 +352,7 @@ def main() -> int:
     def run(img):
         return detect(img, args.min_area, args.max_area, args.min_fill,
                       args.keep_clumps, args.split, args.max_split,
-                      args.hsv_lo, args.hsv_hi, args.merge_factor)
+                      args.hsv_lo, args.hsv_hi, args.merge_factor, args.hough)
 
     if args.preview:
         src = images[len(images) // 2]

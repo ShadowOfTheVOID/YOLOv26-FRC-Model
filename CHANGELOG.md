@@ -234,7 +234,15 @@ harvest's output as a source of its own.
   per ball centre, and each piece is sized against the median ball in its own
   band of the frame before being kept. On a synthetic frame of 18 balls in
   groups plus a 20-ball heap, proposals went from 12 (three of them merged
-  pairs) to 18 with the heap still skipped.
+  pairs) to 18.
+  Cutting only fixed the pairs, though, and the clusters hold more fuel than
+  the open floor does. A ball inside a cluster is surrounded by yellow, so the
+  mask has no seam to cut there at all; what is still visible is its shading.
+  Those are now found with a Hough circle search over the gradient, radius
+  range pinned to the band's measured ball — 30 of 30 on a hex-packed cluster
+  where the watershed found none, and no box pair overlapping by more than 0.5
+  IoU. It costs ~60 ms a frame, about 2 minutes over a 2,200-frame set.
+  `--no-hough` turns it off.
   The band-local size also catches the merge the fill gate never could: two
   balls side by side fill their bounding box to 0.82 and passed as a single
   ball of twice the local size. New knobs: `--no-split`, `--merge-factor`,
