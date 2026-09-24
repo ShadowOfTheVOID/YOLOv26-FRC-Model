@@ -259,7 +259,20 @@ harvest's output as a source of its own.
   reflections and a yellow banner: 13 kept, 9 dropped, nothing on the banner.
   `--no-rescue` and `--no-reflections` turn each off, `--show-dropped` draws
   the removals in green, and `--close`, `--min-cover`, `--v-ratio`, `--reach`
-  and `--loose-lo/--loose-hi` tune them. ~33 ms a frame all told.
+  and `--loose-lo/--loose-hi` tune them. ~70 ms a frame all told.
+- **The rescue pass boxed the arena wall.** Its saturation floor was absolute,
+  and any floor low enough to admit a ball in shade also admits the tan wall,
+  the rail and every washed-out surface behind them. Shading turns out to
+  scale a pixel's value and leave its saturation alone — fuel reads S=191 in
+  arena light and S=191 in a hopper, while the wall reads S=68 at any
+  brightness — so the test is now relative to the balls that frame has already
+  found (`--sat-ratio`, default 0.7). On a synthetic frame carrying a tan
+  wall, a blown-out highlight and a yellow banner, the wall's box is gone and
+  all 13 real balls stay.
+  Rescued boxes are also re-centred on the yellow around the highlight rather
+  than on the highlight itself, which sits off-centre toward the light: box
+  centres landed within 1–3 px of the true ball centres instead of half off
+  the ball.
   The band-local size also catches the merge the fill gate never could: two
   balls side by side fill their bounding box to 0.82 and passed as a single
   ball of twice the local size. New knobs: `--no-split`, `--merge-factor`,

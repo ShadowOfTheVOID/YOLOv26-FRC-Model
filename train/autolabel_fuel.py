@@ -292,7 +292,8 @@ def drop_reflections(hsv: np.ndarray, boxes: list, v_ratio: float,
 
 def rescue_pass(img: np.ndarray, hsv: np.ndarray, strict: np.ndarray,
                 taken: list, units: list, loose_lo: tuple, loose_hi: tuple,
-                min_cover: float, close_k: int) -> list:
+                min_cover: float, close_k: int, ball_sat: float,
+                sat_ratio: float) -> list:
     """Find the balls a robot is carrying, which the colour gate cannot see.
 
     Measure a ball in a hopper and the reason is obvious: its bright side
@@ -313,6 +314,16 @@ def rescue_pass(img: np.ndarray, hsv: np.ndarray, strict: np.ndarray,
     It does not cut the highlight. Measured on a synthetic hopper -- four balls
     at 45% brightness behind 2 px bars -- Hough found one of four at its
     loosest setting and none at a usable one.
+
+    ## Saturation, not brightness, is what says "fuel"
+
+    Shading scales a pixel's VALUE and leaves its SATURATION alone: fuel
+    measures S=191 in arena light and S=191 in a hopper, while the tan of the
+    arena wall measures S=68 at any brightness. An absolute floor low enough
+    for a shaded ball is therefore also low enough for the wall, the rail and
+    every washed-out surface in the frame -- which is exactly what it proposed
+    boxes on. So the test is relative: a rescued box has to be about as
+    saturated as the balls this frame has already found, at any brightness.
     """
     H, W = strict.shape
     loose = cv2.inRange(hsv, np.array(loose_lo, np.uint8), np.array(loose_hi, np.uint8))
@@ -341,6 +352,15 @@ def rescue_pass(img: np.ndarray, hsv: np.ndarray, strict: np.ndarray,
         radius = math.sqrt(unit / math.pi)
         if stats[i, cv2.CC_STAT_AREA] > unit * 1.2:
             continue              # big enough to be a ball in its own right
+        # A highlight sits off-centre, toward the light, so a box centred on it
+        # is a box half off the ball. Re-centre on the yellow around it.
+        win = int(radius * 1.5)
+        wx0, wy0 = max(cx - win, 0), max(cy - win, 0)
+        wx1, wy1 = min(cx + win, W), min(cy + win, H)
+        ys, xs = np.nonzero(loose[wy0:wy1, wx0:wx1])
+        if xs.size:
+            cx, cy = int(xs.mean()) + wx0, int(ys.mean()) + wy0
+
         x0, y0 = max(int(cx - radius), 0), max(int(cy - radius), 0)
         x1, y1 = min(int(cx + radius), W), min(int(cy + radius), H)
         if x1 - x0 < 5 or y1 - y0 < 4:
@@ -348,6 +368,9 @@ def rescue_pass(img: np.ndarray, hsv: np.ndarray, strict: np.ndarray,
         patch = loose[y0:y1, x0:x1]
         if patch.size == 0 or (patch > 0).mean() < min_cover:
             continue              # a highlight on something that is not a ball
+        sat, _ = box_stats(hsv, (x0, y0, x1 - x0, y1 - y0))
+        if ball_sat and sat < ball_sat * sat_ratio:
+            continue              # the wall, the rail, a washed-out reflection
         claimed[y0:y1, x0:x1] = 1
         out.append((x0, y0, x1 - x0, y1 - y0))
     return out
@@ -359,7 +382,7 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            merge_factor: float = 1.6, hough: bool = True,
            rescue: bool = True, reflections: bool = True,
            loose_lo: tuple = LOOSE_LO, loose_hi: tuple = LOOSE_HI,
-           min_cover: float = 0.6, close_k: int = 5,
+           min_cover: float = 0.6, close_k: int = 5, sat_ratio: float = 0.7,
            v_ratio: float = 0.82, reach: float = 1.6) -> tuple:
     """-> (gated, recovered, heaps skipped, dropped as reflections).
 
@@ -440,8 +463,13 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
     if rescue:
         # Everything so far is built on the strict mask. This is the pass that
         # looks where the strict mask is blind -- shade, and behind bars.
-        recovered.extend(rescue_pass(img, hsv, mask, gated + recovered, units,
-                                     loose_lo, loose_hi, min_cover, close_k))
+        # What a ball looks like on THIS frame, measured from the ones already
+        # found rather than assumed from a constant.
+        found = gated + recovered
+        ball_sat = float(np.median([box_stats(hsv, b)[0] for b in found])) if found else 0.0
+        recovered.extend(rescue_pass(img, hsv, mask, found, units,
+                                     loose_lo, loose_hi, min_cover, close_k,
+                                     ball_sat, sat_ratio))
 
     dropped = []
     if reflections:
@@ -496,6 +524,11 @@ def main() -> int:
                     help="kernel that bridges an occluder in the rescue pass. "
                          "A hopper bar is thinner than a ball; this is what "
                          "stops it reading as two half balls")
+    ap.add_argument("--sat-ratio", type=float, default=0.7,
+                    help="how saturated a rescued ball must be, as a fraction "
+                         "of the balls already found on that frame. Shade "
+                         "changes brightness and leaves saturation alone, so "
+                         "this separates a ball in a hopper from the wall")
     ap.add_argument("--min-cover", type=float, default=0.6,
                     help="fraction of a rescued circle that must be yellow. "
                          "The guard against round things in the crowd")
@@ -541,7 +574,7 @@ def main() -> int:
                       args.keep_clumps, args.split, args.max_split,
                       args.hsv_lo, args.hsv_hi, args.merge_factor, args.hough,
                       args.rescue, args.reflections, args.loose_lo,
-                      args.loose_hi, args.min_cover, args.close_k,
+                      args.loose_hi, args.min_cover, args.close_k, args.sat_ratio,
                       args.v_ratio, args.reach)
 
     if args.preview:
