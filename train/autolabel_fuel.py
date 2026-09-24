@@ -384,7 +384,11 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            loose_lo: tuple = LOOSE_LO, loose_hi: tuple = LOOSE_HI,
            min_cover: float = 0.6, close_k: int = 5, sat_ratio: float = 0.7,
            v_ratio: float = 0.82, reach: float = 1.6) -> tuple:
-    """-> (gated, recovered, heaps skipped, dropped as reflections).
+    """-> (gated, split out of clusters, rescued from shade, heaps, dropped).
+
+    Four buckets rather than one list because when a proposal is wrong, the
+    first question is which pass made it -- and a preview that colours them
+    alike cannot answer that.
 
     Three return values rather than one list because the preview needs to
     distinguish them and so do you: a frame where most proposals came out of
@@ -417,10 +421,11 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
         # The old escape hatch: box the heap as one thing. Still usually makes
         # the dataset worse, still here for whoever wants to see it.
         return ([(x, y, w, h) for x, y, w, h, _, _ in singles],
-                [(x, y, w, h) for _, x, y, w, h, _ in clumps], 0, [])
+                [(x, y, w, h) for _, x, y, w, h, _ in clumps], [], 0, [])
 
     if not split or not singles:
-        return [(x, y, w, h) for x, y, w, h, _, _ in singles], [], len(clumps), []
+        return ([(x, y, w, h) for x, y, w, h, _, _ in singles], [], [],
+                len(clumps), [])
 
     H = img.shape[0]
     units = unit_areas([(x, y, w, h, a) for x, y, w, h, a, _ in singles], H)
@@ -460,23 +465,24 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
         else:
             heaps += 1
 
+    rescued = []
     if rescue:
         # Everything so far is built on the strict mask. This is the pass that
-        # looks where the strict mask is blind -- shade, and behind bars.
-        # What a ball looks like on THIS frame, measured from the ones already
+        # looks where the strict mask is blind -- shade, and behind bars. What
+        # a ball looks like on THIS frame is measured from the ones already
         # found rather than assumed from a constant.
         found = gated + recovered
         ball_sat = float(np.median([box_stats(hsv, b)[0] for b in found])) if found else 0.0
-        recovered.extend(rescue_pass(img, hsv, mask, found, units,
-                                     loose_lo, loose_hi, min_cover, close_k,
-                                     ball_sat, sat_ratio))
+        rescued = rescue_pass(img, hsv, mask, found, units, loose_lo, loose_hi,
+                              min_cover, close_k, ball_sat, sat_ratio)
 
     dropped = []
     if reflections:
         gated, drop_a = drop_reflections(hsv, gated, v_ratio, reach)
         recovered, drop_b = drop_reflections(hsv, recovered, v_ratio, reach)
-        dropped = drop_a + drop_b
-    return gated, recovered, heaps, dropped
+        rescued, drop_c = drop_reflections(hsv, rescued, v_ratio, reach)
+        dropped = drop_a + drop_b + drop_c
+    return gated, recovered, rescued, heaps, dropped
 
 
 def to_yolo(boxes, W: int, H: int) -> str:
@@ -586,25 +592,32 @@ def main() -> int:
                 return 1
             src = matches[0]
         img = cv2.imread(str(src))
-        gated, recovered, heaps, dropped = run(img)
+        gated, recovered, rescued, heaps, dropped = run(img)
         for x, y, w, h in gated:
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 1)
         for x, y, w, h in recovered:
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 140, 255), 1)
+        for x, y, w, h in rescued:
+            cv2.rectangle(img, (x, y), (x + w, y + h), (255, 200, 0), 1)
         if args.show_dropped:
             # Green is what was thrown away. Look at this before believing the
             # count: a reflection filter that is eating real balls looks
             # exactly like one that is working, from the count alone.
             for x, y, w, h in dropped:
                 cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 1)
-        cv2.putText(img, f"{len(gated)} gated + {len(recovered)} found = "
-                         f"{len(gated) + len(recovered)}   "
-                         f"({len(dropped)} reflections dropped, {heaps} heaps skipped)",
-                    (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        cv2.putText(img, f"red {len(gated)} gated + orange {len(recovered)} split "
+                         f"+ cyan {len(rescued)} rescued = "
+                         f"{len(gated) + len(recovered) + len(rescued)}   "
+                         f"(green {len(dropped)} reflections, {heaps} heaps skipped)",
+                    (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         args.preview.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(args.preview), img)
-        print(f"{src.name}: {len(gated)} gated, {len(recovered)} recovered, "
-              f"{len(dropped)} dropped as reflections, {heaps} heaps skipped "
+        print(f"{src.name}\n"
+              f"  red    {len(gated):4}  through the colour gate\n"
+              f"  orange {len(recovered):4}  split out of clusters\n"
+              f"  cyan   {len(rescued):4}  rescued from shade (hoppers)\n"
+              f"  green  {len(dropped):4}  dropped as reflections\n"
+              f"         {heaps:4}  heaps left unlabelled\n"
               f"-> {args.preview}")
         return 0
 
@@ -622,14 +635,14 @@ def main() -> int:
         if img is None:
             continue
         H, W = img.shape[:2]
-        gated, recovered, heaps, dropped = run(img)
-        boxes = gated + recovered
+        gated, recovered, rescued, heaps, dropped = run(img)
+        boxes = gated + recovered + rescued
         reflections_total += len(dropped)
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(to_yolo(boxes, W, H))
         written += 1
         total += len(boxes)
-        from_splits += len(recovered)
+        from_splits += len(recovered) + len(rescued)
         heaps_total += heaps
 
     print(f"wrote {written} label files ({skipped} skipped as already present)")
