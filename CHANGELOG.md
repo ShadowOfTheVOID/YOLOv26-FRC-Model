@@ -296,6 +296,19 @@ harvest's output as a source of its own.
   On an arena scene carrying a pit band, a painted border, 13 crowd objects
   and a merged row of 27 real balls along a wall: 0, 0, 0 and the row intact.
   Split pieces now face the same saturation test as rescued ones.
+- **Three faults the guards above introduced or left behind.** Reflections
+  were filtered pass by pass, each list against itself, so a ball that came
+  through the colour gate and a reflection that came out of the splitter were
+  never compared and the reflection survived; they are now filtered across
+  every pass at once. The field line clipped the balls in flight — the fuel
+  actually being shot at a hub — because its margin was two diameters of the
+  far ball; at four it clears an arc and still excludes the crowd (measured
+  both with the crowd well above the flight zone and almost level with it:
+  4 of 4 balls in the air kept, 0 of 13 crowd objects, either way), and
+  `--roi-margin` tunes it. And the stripe test called anything longer than
+  three ball-diameters a candidate, which a clump of four in a row is: raised
+  to six, since the pit band and the painted border run tens of diameters and
+  nothing shorter is worth the risk.
 - **The preview names which pass proposed each box** — red through the gate,
   orange split out of a cluster, cyan rescued from shade, green dropped as a
   reflection, with the learned field line drawn in white. `train/diagnose_labels.py`

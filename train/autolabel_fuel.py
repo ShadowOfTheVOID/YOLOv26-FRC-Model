@@ -376,7 +376,7 @@ def rescue_pass(img: np.ndarray, hsv: np.ndarray, strict: np.ndarray,
     return out
 
 
-def field_top(gated: list, units: list, height: int, margin: float = 2.0) -> int:
+def field_top(gated: list, units: list, height: int, margin: float = 4.0) -> int:
     """The highest row fuel can be on, learned from where the fuel actually is.
 
     The stands are full of things a colour gate likes -- banners, shirts, the
@@ -395,9 +395,28 @@ def field_top(gated: list, units: list, height: int, margin: float = 2.0) -> int
     Density works where position does not. Fuel is a hundred-odd balls packed
     into a contiguous strip of the frame; the crowd's yellow is sparse and
     scattered through rows that hold almost nothing. So bin the balls by row,
-    keep bins holding at least a quarter of what the busiest bin holds, take
-    the longest unbroken run of those, and put the line two ball-diameters
-    above where that run starts.
+    keep bins holding at least a quarter of what the busiest bin holds, and
+    take the longest unbroken run of those.
+
+    The margin above that run decides what a ball in flight costs. At two
+    ball-diameters it cut them off -- and a ball in the air is the one being
+    shot at a hub, the most interesting fuel on the frame. At six diameters of
+    the LARGEST ball it cleared them and took the crowd back in with them: on
+    the test frame the line went to row 54 and all 13 crowd objects returned.
+
+    So the margin is measured at the TOP of the floor run rather than at the
+    near rail -- a shot arcs over the far half of the field, where a ball is
+    small -- and set to four of those diameters, which on a broadcast frame is
+    the gap between the far wall and the rail.
+
+    This is a blunt instrument and worth knowing the limits of. It is one
+    horizontal line, so anything ball-shaped and ball-sized sitting in the
+    stands at about the height a shot reaches cannot be told from the shot.
+    Four diameters keeps the flight zone, which is the side to err on: a
+    missed ball in flight is the fuel being scored, while a stray box on a
+    spectator's shirt is one bad label among thousands. Watch where the
+    preview draws the line and set `--roi-top` directly if a broadcast puts
+    it somewhere silly.
     """
     if len(gated) < 10:
         return 0          # too little evidence to draw a line with
@@ -454,8 +473,12 @@ def is_strip(labels: np.ndarray, idx: int, box: tuple, unit_area: float,
     x, y, w, h = box
     long_side, short_side = max(w, h), min(w, h)
     diameter = 2 * math.sqrt(unit_area / math.pi)
-    if long_side < diameter * 3 or short_side > diameter * 1.6:
-        return False                      # not long and thin: not this problem
+    if long_side < diameter * 6 or short_side > diameter * 1.6:
+        # Six, not three. Four balls in a row are long and thin by any smaller
+        # rule, and lighting flat enough to make them look like paint is
+        # exactly what a broadcast gives you. The pit band and the painted
+        # border run tens of diameters; nothing that short is worth the risk.
+        return False
 
     sub = component_mask(labels, idx, box)
     dist = cv2.distanceTransform(sub, cv2.DIST_L2, 5)
@@ -485,7 +508,7 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            loose_lo: tuple = LOOSE_LO, loose_hi: tuple = LOOSE_HI,
            min_cover: float = 0.6, close_k: int = 5, sat_ratio: float = 0.7,
            roi_top: float = -1.0, roi_bottom: float = 1.0,
-           flat_v: float = 0.05,
+           flat_v: float = 0.05, roi_margin: float = 4.0,
            v_ratio: float = 0.82, reach: float = 1.6) -> tuple:
     """-> (gated, split out of clusters, rescued from shade, heaps, dropped).
 
@@ -586,7 +609,8 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
                               ball_sat, sat_ratio)
 
     # Nothing above the field is fuel, whichever pass proposed it.
-    top = int(roi_top * H) if roi_top >= 0 else field_top(gated, units, H)
+    top = (int(roi_top * H) if roi_top >= 0
+           else field_top(gated, units, H, roi_margin))
     bottom = int(roi_bottom * H)
 
     def on_field(boxes):
@@ -596,10 +620,17 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
 
     dropped = []
     if reflections:
-        gated, drop_a = drop_reflections(hsv, gated, v_ratio, reach)
-        recovered, drop_b = drop_reflections(hsv, recovered, v_ratio, reach)
-        rescued, drop_c = drop_reflections(hsv, rescued, v_ratio, reach)
-        dropped = drop_a + drop_b + drop_c
+        # Across every pass at once. Filtering each list against itself was a
+        # bug with an obvious symptom: a ball comes through the colour gate and
+        # its reflection comes out of the splitter, so the two were never
+        # compared and the reflection survived.
+        tagged = ([(b, 0) for b in gated] + [(b, 1) for b in recovered]
+                  + [(b, 2) for b in rescued])
+        keep, dropped = drop_reflections(hsv, [b for b, _ in tagged], v_ratio, reach)
+        kept = set(keep)
+        gated = [b for b, t in tagged if t == 0 and b in kept]
+        recovered = [b for b, t in tagged if t == 1 and b in kept]
+        rescued = [b for b, t in tagged if t == 2 and b in kept]
     return gated, recovered, rescued, heaps, dropped
 
 
@@ -611,7 +642,7 @@ def to_yolo(boxes, W: int, H: int) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def af_field_top(img: np.ndarray, args) -> int:
+def af_field_top(img: np.ndarray, args, margin: float = 4.0) -> int:
     """The learned field line, recomputed for the preview's white rule."""
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     mask = cv2.morphologyEx(
@@ -629,7 +660,7 @@ def af_field_top(img: np.ndarray, args) -> int:
     if not singles:
         return 0
     return field_top([(x, y, w, h) for x, y, w, h, _ in singles],
-                     unit_areas(singles, img.shape[0]), img.shape[0])
+                     unit_areas(singles, img.shape[0]), img.shape[0], margin)
 
 
 def main() -> int:
@@ -679,6 +710,10 @@ def main() -> int:
                          "fuel. Default -1 learns it per frame from the balls "
                          "the colour gate found, which is what keeps the "
                          "splitter off the sponsor boards")
+    ap.add_argument("--roi-margin", type=float, default=4.0,
+                    help="headroom above the fuel on the floor, in diameters "
+                         "of the largest ball on the frame. This is what "
+                         "leaves room for balls in flight")
     ap.add_argument("--roi-bottom", type=float, default=1.0,
                     help="and below which nothing is fuel")
     ap.add_argument("--sat-ratio", type=float, default=0.7,
@@ -733,6 +768,7 @@ def main() -> int:
                       args.rescue, args.reflections, args.loose_lo,
                       args.loose_hi, args.min_cover, args.close_k, args.sat_ratio,
                       args.roi_top, args.roi_bottom, args.flat_v,
+                      args.roi_margin,
                       args.v_ratio, args.reach)
 
     if args.preview:
@@ -753,7 +789,7 @@ def main() -> int:
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 200, 0), 1)
         H_img = img.shape[0]
         line = (int(args.roi_top * H_img) if args.roi_top >= 0
-                else af_field_top(img, args))
+                else af_field_top(img, args, args.roi_margin))
         if line > 0:
             cv2.line(img, (0, line), (img.shape[1], line), (255, 255, 255), 1)
             cv2.putText(img, "field line", (12, max(line - 6, 12)),
