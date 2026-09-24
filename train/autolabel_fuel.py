@@ -34,12 +34,32 @@ circle search over the gradient, with the radius range pinned to the band's
 measured ball. On a hex-packed cluster of 30, that is the difference between
 0 proposals and 30.
 
+## The two the mask cannot see at all
+
+A ball a robot is carrying reads V=103 at its highlight and V=58 at its rim,
+against a gate whose floor is 90 -- so it survives as a 7x7 dot, below
+`--min-area`, and a robot holding four balls contributes nothing. Lowering the
+gate to reach it takes in every yellow banner in the stands. Instead the
+highlight is used as a seed and grown to the band's ball size, kept only if
+what it covers is mostly yellow under a much looser gate. Hough does not work
+here: a hopper bar cuts the circular gradient, and on a synthetic hopper it
+found one ball of four at its loosest setting.
+
+Reflections are the same problem inverted. The floor is glossy, so most balls
+near it come with a mirrored copy below -- same hue, same size, and no colour
+gate can tell them apart. Left in they roughly double the count in exactly the
+places where counting matters. A reflection is dimmer than what casts it and
+sits almost directly beneath it, so a proposal with a brighter one above it,
+within `--reach` ball-heights and aligned to half a width, is dropped.
+
 These are PROPOSALS. Preview them before you commit to 200k of them:
 
     python3 train/autolabel_fuel.py --preview /tmp/check.jpg
 
-Red boxes came through the gate, orange ones came out of a split, and the
-caption counts both plus the heaps that were skipped.
+Red boxes came through the gate, orange ones were recovered from a cluster or
+out of shade, and `--show-dropped` adds in green what the reflection filter
+removed -- worth looking at, because a filter eating real balls and one working
+correctly produce the same count.
 """
 from __future__ import annotations
 
@@ -58,6 +78,13 @@ FUEL_CLASS = 0
 # lighting and broadcast colour grading move this more than you would like.
 HSV_LO = (18, 90, 90)
 HSV_HI = (38, 255, 255)
+
+# The same hue with the brightness and saturation floors dropped, for fuel in
+# shade -- inside a hopper, under a ramp. Far too loose to threshold on: it
+# takes in banners, shirts and the yellow in the stands. Nothing is proposed
+# from it on its own; it only confirms what a highlight has already seeded.
+LOOSE_LO = (15, 55, 45)
+LOOSE_HI = (40, 255, 255)
 
 # How far into a blob a distance-transform peak has to sit, as a fraction of
 # one ball's radius, before it counts as a ball centre. Too low merges two
@@ -211,11 +238,130 @@ def hough_split(img: np.ndarray, sub: np.ndarray, box: tuple, pad: int,
     return out
 
 
+def box_stats(hsv: np.ndarray, box: tuple) -> tuple:
+    """(mean saturation, mean value) over a proposal, clipped to the frame."""
+    x, y, w, h = box
+    H, W = hsv.shape[:2]
+    x0, y0 = max(x, 0), max(y, 0)
+    x1, y1 = min(x + w, W), min(y + h, H)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0, 0.0
+    patch = hsv[y0:y1, x0:x1]
+    return float(patch[..., 1].mean()), float(patch[..., 2].mean())
+
+
+def drop_reflections(hsv: np.ndarray, boxes: list, v_ratio: float,
+                     reach: float) -> tuple:
+    """Separate real balls from their reflections in the floor.
+
+    The field surface is glossy, so most balls near it come with a mirrored
+    copy a short way below: same hue, same rough size, and a colour gate has no
+    way to tell the two apart. Left in, they roughly double the count in
+    exactly the places counting matters, and they teach the detector that a
+    smear on the floor is fuel.
+
+    What separates them is that a reflection is DIMMER than the ball casting
+    it, and sits almost directly under it. So a proposal is dropped when
+    another proposal sits above it, within `reach` ball-heights, horizontally
+    aligned to within half a width, and this one's mean brightness is below
+    `v_ratio` of that one's. Two real balls stacked in frame are lit alike and
+    survive; a reflection is never as bright as its source.
+    """
+    scored = [(b, box_stats(hsv, b)) for b in boxes]
+    order = sorted(range(len(scored)), key=lambda i: scored[i][0][1])  # top first
+    keep, dropped = [], []
+    for pos, i in enumerate(order):
+        (x, y, w, h), (_, v) = scored[i]
+        cx = x + w / 2
+        reflection = False
+        for j in order[:pos]:
+            (ax, ay, aw, ah), (_, av) = scored[j]
+            if ay + ah > y + h:
+                continue
+            gap = y - (ay + ah)
+            if gap < -ah * 0.25 or gap > ah * reach:
+                continue
+            if abs((ax + aw / 2) - cx) > max(aw, w) * 0.5:
+                continue
+            if v < av * v_ratio:
+                reflection = True
+                break
+        (dropped if reflection else keep).append((x, y, w, h))
+    return keep, dropped
+
+
+def rescue_pass(img: np.ndarray, hsv: np.ndarray, strict: np.ndarray,
+                taken: list, units: list, loose_lo: tuple, loose_hi: tuple,
+                min_cover: float, close_k: int) -> list:
+    """Find the balls a robot is carrying, which the colour gate cannot see.
+
+    Measure a ball in a hopper and the reason is obvious: its bright side
+    reads V=103 and its rim V=58, against a gate whose floor is 90. What
+    survives the threshold is a 7x7 dot of its highlight -- below `--min-area`,
+    so dropped, so a robot holding four balls contributes nothing. These are
+    not incidental balls. For a counting model they are the ones that decide
+    whether a score is attributed at all.
+
+    Lowering the gate to reach them is not an option: at V=45 the mask takes in
+    every yellow banner in the stands. But the highlight IS reliable, and it is
+    surrounded by the same ball at lower brightness. So each unclaimed
+    highlight is grown into a ball-sized box for its band, and kept only if
+    that box is mostly loose-yellow.
+
+    Why not Hough here, when Hough is what cracked the clusters: a hopper has
+    bars across it, and a bar cuts the circular gradient a circle finder needs.
+    It does not cut the highlight. Measured on a synthetic hopper -- four balls
+    at 45% brightness behind 2 px bars -- Hough found one of four at its
+    loosest setting and none at a usable one.
+    """
+    H, W = strict.shape
+    loose = cv2.inRange(hsv, np.array(loose_lo, np.uint8), np.array(loose_hi, np.uint8))
+    loose = cv2.morphologyEx(loose, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    if close_k > 1:
+        # Bridge the bars. A strut thinner than a ball's radius does not divide
+        # one ball into two, however much the mask says otherwise.
+        loose = cv2.morphologyEx(loose, cv2.MORPH_CLOSE,
+                                 np.ones((close_k, close_k), np.uint8))
+
+    claimed = np.zeros((H, W), np.uint8)
+    for x, y, w, h in taken:
+        claimed[max(y, 0):max(y + h, 0), max(x, 0):max(x + w, 0)] = 1
+
+    n, _, stats, centroids = cv2.connectedComponentsWithStats(strict, 8)
+    out = []
+    for i in range(1, n):
+        cx, cy = (int(round(v)) for v in centroids[i])
+        if not (0 <= cy < H and 0 <= cx < W):
+            continue
+        if claimed[cy, cx] or not loose[cy, cx]:
+            continue
+        unit = unit_at(units, cy, H)
+        if not unit:
+            continue
+        radius = math.sqrt(unit / math.pi)
+        if stats[i, cv2.CC_STAT_AREA] > unit * 1.2:
+            continue              # big enough to be a ball in its own right
+        x0, y0 = max(int(cx - radius), 0), max(int(cy - radius), 0)
+        x1, y1 = min(int(cx + radius), W), min(int(cy + radius), H)
+        if x1 - x0 < 5 or y1 - y0 < 4:
+            continue
+        patch = loose[y0:y1, x0:x1]
+        if patch.size == 0 or (patch > 0).mean() < min_cover:
+            continue              # a highlight on something that is not a ball
+        claimed[y0:y1, x0:x1] = 1
+        out.append((x0, y0, x1 - x0, y1 - y0))
+    return out
+
+
 def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            keep_clumps: bool, split: bool = True, max_split: int = 8,
            hsv_lo: tuple = HSV_LO, hsv_hi: tuple = HSV_HI,
-           merge_factor: float = 1.6, hough: bool = True) -> tuple:
-    """-> (gated boxes, boxes recovered by splitting, heaps skipped).
+           merge_factor: float = 1.6, hough: bool = True,
+           rescue: bool = True, reflections: bool = True,
+           loose_lo: tuple = LOOSE_LO, loose_hi: tuple = LOOSE_HI,
+           min_cover: float = 0.6, close_k: int = 5,
+           v_ratio: float = 0.82, reach: float = 1.6) -> tuple:
+    """-> (gated, recovered, heaps skipped, dropped as reflections).
 
     Three return values rather than one list because the preview needs to
     distinguish them and so do you: a frame where most proposals came out of
@@ -248,10 +394,10 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
         # The old escape hatch: box the heap as one thing. Still usually makes
         # the dataset worse, still here for whoever wants to see it.
         return ([(x, y, w, h) for x, y, w, h, _, _ in singles],
-                [(x, y, w, h) for _, x, y, w, h, _ in clumps], 0)
+                [(x, y, w, h) for _, x, y, w, h, _ in clumps], 0, [])
 
     if not split or not singles:
-        return [(x, y, w, h) for x, y, w, h, _, _ in singles], [], len(clumps)
+        return [(x, y, w, h) for x, y, w, h, _, _ in singles], [], len(clumps), []
 
     H = img.shape[0]
     units = unit_areas([(x, y, w, h, a) for x, y, w, h, a, _ in singles], H)
@@ -290,7 +436,19 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
             recovered.extend(pieces)
         else:
             heaps += 1
-    return gated, recovered, heaps
+
+    if rescue:
+        # Everything so far is built on the strict mask. This is the pass that
+        # looks where the strict mask is blind -- shade, and behind bars.
+        recovered.extend(rescue_pass(img, hsv, mask, gated + recovered, units,
+                                     loose_lo, loose_hi, min_cover, close_k))
+
+    dropped = []
+    if reflections:
+        gated, drop_a = drop_reflections(hsv, gated, v_ratio, reach)
+        recovered, drop_b = drop_reflections(hsv, recovered, v_ratio, reach)
+        dropped = drop_a + drop_b
+    return gated, recovered, heaps, dropped
 
 
 def to_yolo(boxes, W: int, H: int) -> str:
@@ -320,6 +478,33 @@ def main() -> int:
                     help="biggest blob the watershed cut is used on, in "
                          "ball-areas. Bigger clusters go to the circle finder, "
                          "which is what --no-hough turns off")
+    ap.add_argument("--no-rescue", dest="rescue", action="store_false",
+                    help="don't look for balls the colour gate cannot see -- "
+                         "the ones in shade inside a robot's hopper")
+    ap.add_argument("--no-reflections", dest="reflections", action="store_false",
+                    help="keep proposals that look like a ball's reflection in "
+                         "the floor instead of dropping them")
+    ap.add_argument("--loose-lo", type=hsv_arg, default=LOOSE_LO,
+                    help=f"lower gate for the rescue pass (default "
+                         f"{','.join(map(str, LOOSE_LO))}). Too loose to "
+                         f"threshold on alone -- nothing is proposed from it "
+                         f"without a highlight to seed it")
+    ap.add_argument("--loose-hi", type=hsv_arg, default=LOOSE_HI,
+                    help=f"upper gate for the rescue pass (default "
+                         f"{','.join(map(str, LOOSE_HI))})")
+    ap.add_argument("--close", dest="close_k", type=int, default=5,
+                    help="kernel that bridges an occluder in the rescue pass. "
+                         "A hopper bar is thinner than a ball; this is what "
+                         "stops it reading as two half balls")
+    ap.add_argument("--min-cover", type=float, default=0.6,
+                    help="fraction of a rescued circle that must be yellow. "
+                         "The guard against round things in the crowd")
+    ap.add_argument("--v-ratio", type=float, default=0.82,
+                    help="a proposal dimmer than this fraction of the one "
+                         "above it is its reflection. Raise to drop more")
+    ap.add_argument("--reach", type=float, default=1.6,
+                    help="how far below a ball, in ball-heights, its "
+                         "reflection can sit")
     ap.add_argument("--no-hough", dest="hough", action="store_false",
                     help="don't look for balls inside a cluster by their "
                          "shading. Leaves every heap unlabelled, which is most "
@@ -335,6 +520,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="only the first N frames")
     ap.add_argument("--preview", type=Path, default=None,
                     help="write one annotated frame here and stop")
+    ap.add_argument("--show-dropped", action="store_true",
+                    help="draw what the reflection filter removed, in green")
     ap.add_argument("--preview-frame", default=None,
                     help="which frame to preview (filename or substring); "
                          "default is the middle one")
@@ -352,7 +539,10 @@ def main() -> int:
     def run(img):
         return detect(img, args.min_area, args.max_area, args.min_fill,
                       args.keep_clumps, args.split, args.max_split,
-                      args.hsv_lo, args.hsv_hi, args.merge_factor, args.hough)
+                      args.hsv_lo, args.hsv_hi, args.merge_factor, args.hough,
+                      args.rescue, args.reflections, args.loose_lo,
+                      args.loose_hi, args.min_cover, args.close_k,
+                      args.v_ratio, args.reach)
 
     if args.preview:
         src = images[len(images) // 2]
@@ -363,24 +553,32 @@ def main() -> int:
                 return 1
             src = matches[0]
         img = cv2.imread(str(src))
-        gated, recovered, heaps = run(img)
+        gated, recovered, heaps, dropped = run(img)
         for x, y, w, h in gated:
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 1)
         for x, y, w, h in recovered:
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 140, 255), 1)
-        cv2.putText(img, f"{len(gated)} gated + {len(recovered)} split = "
-                         f"{len(gated) + len(recovered)}   ({heaps} heaps skipped)",
+        if args.show_dropped:
+            # Green is what was thrown away. Look at this before believing the
+            # count: a reflection filter that is eating real balls looks
+            # exactly like one that is working, from the count alone.
+            for x, y, w, h in dropped:
+                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 1)
+        cv2.putText(img, f"{len(gated)} gated + {len(recovered)} found = "
+                         f"{len(gated) + len(recovered)}   "
+                         f"({len(dropped)} reflections dropped, {heaps} heaps skipped)",
                     (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         args.preview.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(args.preview), img)
-        print(f"{src.name}: {len(gated)} gated, {len(recovered)} from splits, "
-              f"{heaps} heaps skipped -> {args.preview}")
+        print(f"{src.name}: {len(gated)} gated, {len(recovered)} recovered, "
+              f"{len(dropped)} dropped as reflections, {heaps} heaps skipped "
+              f"-> {args.preview}")
         return 0
 
     if args.limit:
         images = images[:args.limit]
 
-    written = skipped = total = from_splits = heaps_total = 0
+    written = skipped = total = from_splits = heaps_total = reflections_total = 0
     for src in images:
         split_dir = src.parent.name
         dst = DATASET / "labels" / split_dir / f"{src.stem}.txt"
@@ -391,8 +589,9 @@ def main() -> int:
         if img is None:
             continue
         H, W = img.shape[:2]
-        gated, recovered, heaps = run(img)
+        gated, recovered, heaps, dropped = run(img)
         boxes = gated + recovered
+        reflections_total += len(dropped)
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(to_yolo(boxes, W, H))
         written += 1
@@ -403,7 +602,8 @@ def main() -> int:
     print(f"wrote {written} label files ({skipped} skipped as already present)")
     if written:
         print(f"{total} fuel proposals, {total/written:.0f} per frame "
-              f"({from_splits} of them recovered from merged blobs, "
+              f"({from_splits} of them recovered from clusters and shade, "
+              f"{reflections_total} reflections dropped, "
               f"{heaps_total/written:.1f} heaps skipped per frame)")
     print("\nThese are proposals for class 0 (fuel) only. robot_blue/robot_red/"
           "hub_blue/hub_red come from train/autolabel_objects.py, which appends "

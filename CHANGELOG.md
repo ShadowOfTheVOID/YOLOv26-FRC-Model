@@ -241,8 +241,25 @@ harvest's output as a source of its own.
   Those are now found with a Hough circle search over the gradient, radius
   range pinned to the band's measured ball — 30 of 30 on a hex-packed cluster
   where the watershed found none, and no box pair overlapping by more than 0.5
-  IoU. It costs ~60 ms a frame, about 2 minutes over a 2,200-frame set.
-  `--no-hough` turns it off.
+  IoU. `--no-hough` turns it off.
+- **Fuel a robot was carrying was never labelled, and the floor's reflections
+  were.** Two failures of the same colour gate, in opposite directions.
+  A ball in a hopper reads V=103 at its highlight and V=58 at its rim against
+  a floor of 90, so it survived as a 7x7 dot below `--min-area` and a robot
+  holding four contributed nothing — the balls that decide whether a score is
+  attributed at all. The highlight is now used as a seed and grown to the
+  band's ball size, kept only where a much looser gate agrees it is yellow;
+  Hough is no use there because a hopper bar cuts the gradient (one of four on
+  a synthetic hopper, against four of four this way). Meanwhile the glossy
+  floor gave most balls a mirrored copy below, which the gate happily labelled
+  as fuel, roughly doubling the count where counting matters. A proposal with
+  a brighter one above it, within `--reach` ball-heights and aligned to half a
+  width, is now dropped as its reflection.
+  On a synthetic frame of 13 balls (9 on the floor, 4 behind hopper bars), 9
+  reflections and a yellow banner: 13 kept, 9 dropped, nothing on the banner.
+  `--no-rescue` and `--no-reflections` turn each off, `--show-dropped` draws
+  the removals in green, and `--close`, `--min-cover`, `--v-ratio`, `--reach`
+  and `--loose-lo/--loose-hi` tune them. ~33 ms a frame all told.
   The band-local size also catches the merge the fill gate never could: two
   balls side by side fill their bounding box to 0.82 and passed as a single
   ball of twice the local size. New knobs: `--no-split`, `--merge-factor`,
