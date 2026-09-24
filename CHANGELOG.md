@@ -211,6 +211,40 @@ harvest's output as a source of its own.
   or a mistake, and `device: cpu` scrolled past as one line. It now names the
   GPU and its memory, reports the HIP version, and on a CPU fallback says
   which of the two causes it is looking at.
+### Fixed
+
+- **`autolabel_objects.py` deleted every fuel box it found.** Without
+  `--append` it rewrote each label file from scratch, and the documented
+  workflow runs it *after* `autolabel_fuel.py` — so one run threw away ~200
+  fuel proposals per frame across the whole dataset, with no error and no
+  symptom until a model trained on it stopped seeing fuel. Appending is now
+  the default; `--overwrite` is the explicit way to start over, and `--append`
+  is accepted and ignored so existing commands keep working.
+- **Hubs no longer need the videos.** The script bailed on any match whose
+  cleaned video was missing, but the video is only needed for the robots'
+  temporal-median background — hub boxes are replayed from geometry in the
+  database and need nothing. Since a frame bundle ships without videos (~330 MB
+  a match), that meant every machine except the one that harvested got no hub
+  labels either. It now writes what it can and says which part it skipped.
+- **`autolabel_fuel.py` proposed a fraction of the fuel on a busy frame.**
+  Fuel rests in loose groups, a group is one connected component, and the fill
+  gate that correctly rejects a heap rejected every pair and triple with it —
+  92 proposals on a frame holding several hundred balls. Components that fail
+  the gate are now split with a distance transform and a watershed, one seed
+  per ball centre, and each piece is sized against the median ball in its own
+  band of the frame before being kept. On a synthetic frame of 18 balls in
+  groups plus a 20-ball heap, proposals went from 12 (three of them merged
+  pairs) to 18 with the heap still skipped.
+  The band-local size also catches the merge the fill gate never could: two
+  balls side by side fill their bounding box to 0.82 and passed as a single
+  ball of twice the local size. New knobs: `--no-split`, `--merge-factor`,
+  `--max-split`, `--hsv-lo/--hsv-hi` for broadcasts whose yellow sits outside
+  the default gate, and `--preview-frame` to preview a specific frame instead
+  of the middle one. The preview now separates gated boxes (red) from
+  recovered ones (orange) and counts the heaps it skipped.
+
+### Added
+
 - **`train.py --batch` takes a fraction or `-1`, plus `--workers`, `--cache`
   and `--no-amp`.** `--batch 0.70` fills 70% of a card whose memory you have
   not measured; `--workers 32 --cache ram` is what stops a fast GPU idling

@@ -107,7 +107,12 @@ def main() -> int:
                     help="ignore detections below this fraction (the near rail)")
     ap.add_argument("--preview", type=Path)
     ap.add_argument("--append", action="store_true",
-                    help="append to existing label files instead of skipping them")
+                    help="accepted and ignored: appending is now the default")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="REPLACE existing label files instead of appending. "
+                         "This deletes the fuel boxes autolabel_fuel.py wrote "
+                         "-- ~200 per frame -- so it is only for starting the "
+                         "object labels over")
     args = ap.parse_args()
 
     from tbavid.db import connect
@@ -125,11 +130,22 @@ def main() -> int:
     total = 0
     for r in rows:
         video = Path(r["clean_path"])
-        if not video.exists():
-            print(f"  ! missing {video}")
-            continue
-        bg = background(video)
         hubs = hub_boxes(r["event_key"])
+        bg = None
+        if video.exists():
+            bg = background(video)
+        else:
+            # A frame bundle is shipped without the videos -- they are ~330 MB
+            # a match -- so on any machine but the one that harvested, this is
+            # the normal case rather than an error. Robots need the temporal
+            # median background and stop here; hubs are replayed from geometry
+            # recorded in the database and do not, so skipping the whole match
+            # threw away the labels that were still available.
+            print(f"  ! no video at {video}: robots need it, hubs do not")
+            if not hubs:
+                print(f"    and no hub geometry for {r['event_key']} either -- "
+                      f"nothing to write for this match")
+                continue
         if not hubs:
             print(f"  {r['event_key']}: no hub geometry recorded "
                   f"(run.py db hub --event {r['event_key']} --alliance blue --box x,y,w,h)")
@@ -138,7 +154,8 @@ def main() -> int:
                         for p in (DATASET / "images" / split).glob(f"{r['video_id']}_*.jpg"))
         if args.preview and images:
             img = cv2.imread(str(images[len(images) // 2]))
-            for cls, x, y, w, h in robots(img, bg, args.roi_top, args.roi_bottom) + hubs:
+            found = robots(img, bg, args.roi_top, args.roi_bottom) if bg is not None else []
+            for cls, x, y, w, h in found + hubs:
                 col = (255, 0, 0) if "blue" in cls else (0, 0, 255)
                 cv2.rectangle(img, (x, y), (x + w, y + h), col, 2)
                 cv2.putText(img, cls, (x, max(y - 4, 10)),
@@ -153,12 +170,18 @@ def main() -> int:
             if img is None:
                 continue
             H, W = img.shape[:2]
-            boxes = robots(img, bg, args.roi_top, args.roi_bottom) + hubs
+            boxes = (robots(img, bg, args.roi_top, args.roi_bottom)
+                     if bg is not None else []) + hubs
             lines = [f"{CLASSES[c]} {(x+w/2)/W:.6f} {(y+h/2)/H:.6f} {w/W:.6f} {h/H:.6f}"
                      for c, x, y, w, h in boxes]
             dst = DATASET / "labels" / src.parent.name / f"{src.stem}.txt"
             dst.parent.mkdir(parents=True, exist_ok=True)
-            existing = dst.read_text() if (dst.exists() and args.append) else ""
+            # Append unless explicitly told otherwise. These two scripts write
+            # into the same file, fuel first and objects second, and the old
+            # default here rewrote it from scratch: one run of this silently
+            # deleted every fuel box in the dataset, and the only symptom was a
+            # model that had stopped seeing fuel.
+            existing = "" if args.overwrite else (dst.read_text() if dst.exists() else "")
             if existing and not existing.endswith("\n"):
                 existing += "\n"
             dst.write_text(existing + "\n".join(lines) + ("\n" if lines else ""))
