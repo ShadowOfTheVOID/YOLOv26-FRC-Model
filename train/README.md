@@ -47,6 +47,11 @@ in the stalls while looking fine on the average.
 .venv-train/bin/python train/train.py            # yolo26n first; add --p2 later
 ```
 
+Not on this machine: [deploy/SETUP.md](../deploy/SETUP.md) for Colab and
+Kaggle, [deploy/AMD_DEVCLOUD.md](../deploy/AMD_DEVCLOUD.md) for an AMD
+Instinct MI300X, where the useful settings are different enough to be worth
+their own page.
+
 `--per-match 80` matters more than it looks. At 3 fps a match yields ~480
 frames that are largely near-duplicates, and trimming to 80 spread-out ones
 took a 100-epoch run on an 8 GB M2 from ~27 h to ~5.5 h with no real loss of

@@ -195,6 +195,27 @@ harvest's output as a source of its own.
 - Every manifest entry records which profile it got and why, and the crop notes
   carry the reconciliation, so a refused divider is visible afterwards rather
   than being a number that quietly differs.
+- **`deploy/AMD_DEVCLOUD.md` — training on an AMD Instinct MI300X.** The
+  Colab and Kaggle pages assume a small GPU you lose in twelve hours; 192 GB
+  that stays up wants different settings, and the obvious ones are wrong. With
+  ~1,100 training frames, a batch big enough to fill the card leaves 11
+  optimizer steps per epoch and converges worse than the 8 GB M2 did, so the
+  page spends the memory on resolution, the P2 head and a bigger checkpoint
+  instead, and on eight independent runs rather than one DDP job. It also
+  documents the failure that eats an afternoon: `pip install ultralytics`
+  inside a ROCm image resolves torch from PyPI, PyPI's torch is the CUDA
+  build, it silently replaces the ROCm one, and the run falls back to the CPU
+  with nothing in the log to say so.
+- **`train.py` prints which chip it got.** ROCm reports AMD hardware through
+  `torch.cuda`, so `device: 0` said nothing about whether that was an MI300X
+  or a mistake, and `device: cpu` scrolled past as one line. It now names the
+  GPU and its memory, reports the HIP version, and on a CPU fallback says
+  which of the two causes it is looking at.
+- **`train.py --batch` takes a fraction or `-1`, plus `--workers`, `--cache`
+  and `--no-amp`.** `--batch 0.70` fills 70% of a card whose memory you have
+  not measured; `--workers 32 --cache ram` is what stops a fast GPU idling
+  while eight cores decode JPEGs; `--no-amp` is the fix for the NaN-loss and
+  zero-mAP symptom AMP produces on some ROCm builds.
 
 ## v0.2.0 — 2026-09-16
 

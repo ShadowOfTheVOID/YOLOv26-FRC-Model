@@ -585,6 +585,10 @@ GPU (73 h on an 8 GB M2), host the API anywhere. See
 **[deploy/SETUP.md](deploy/SETUP.md)** for click-by-click Colab and Replit
 setup, [deploy/README.md](deploy/README.md) for the reasoning, and
 [`deploy/colab_train.ipynb`](deploy/colab_train.ipynb) for the notebook.
+[deploy/AMD_DEVCLOUD.md](deploy/AMD_DEVCLOUD.md) covers an AMD Instinct
+MI300X on the AMD Developer Cloud, which is a different machine entirely --
+192 GB of memory changes which settings are worth using, and not in the
+direction you would guess.
 
 ## Known limitations
 

@@ -41,6 +41,17 @@ def dataset_root(data_yaml: Path) -> Path:
     return Path(data_yaml).resolve().parent
 
 
+def batch_arg(text: str):
+    """`--batch 32`, `--batch 0.70`, `--batch -1`.
+
+    Ultralytics reads a float in (0, 1) as a fraction of GPU memory to fill
+    and -1 as "work it out", which is how you use a card whose memory you
+    have not measured against. argparse with type=int rejected both.
+    """
+    value = float(text)
+    return int(value) if value.is_integer() else value
+
+
 def pick_device() -> str:
     import torch
     if torch.cuda.is_available():
@@ -48,6 +59,44 @@ def pick_device() -> str:
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def describe_device(device: str) -> None:
+    """Say which chip this is about to run on, and shout if it is the CPU.
+
+    ROCm reports AMD hardware through `torch.cuda`, so an MI300X and an H100
+    both come back as device "0" and nothing in the log distinguishes a
+    192 GB accelerator from a fallback. The failure that matters is quieter
+    still: `pip install ultralytics` inside a ROCm image pulls torch from
+    PyPI, which is the CUDA build, and it overwrites the ROCm one. Then
+    `torch.cuda.is_available()` is False, this picks "cpu", and a run that
+    should take an hour takes a week without ever saying why. Print the name
+    so the first ten lines of output answer "am I on the GPU".
+    """
+    import torch
+    if device == "cpu":
+        print("  WARNING: training on the CPU.")
+        if getattr(torch.version, "hip", None):
+            print("           This is a ROCm build of torch but no GPU is "
+                  "visible -- check `rocm-smi`, and that the container was "
+                  "started with --device=/dev/kfd --device=/dev/dri.")
+        else:
+            print(f"           torch {torch.__version__} has no GPU support "
+                  f"(cuda={torch.version.cuda}, hip=None). On an AMD box this "
+                  f"usually means a PyPI wheel replaced the ROCm one; see "
+                  f"deploy/AMD_DEVCLOUD.md.")
+        return
+    if device == "mps":
+        return
+    for idx in [d for d in device.split(",") if d.strip().isdigit()]:
+        try:
+            name = torch.cuda.get_device_name(int(idx))
+            mem = torch.cuda.get_device_properties(int(idx)).total_memory
+        except Exception:
+            continue
+        print(f"  gpu {idx}: {name} ({mem / 1024**3:.0f} GB)")
+    if getattr(torch.version, "hip", None):
+        print(f"  ROCm/HIP {torch.version.hip}")
 
 
 def warn_if_slow(device: str, imgsz: int, batch: int, n_train: int) -> None:
@@ -78,7 +127,24 @@ def main() -> int:
                          "from --model's pretrained weights")
     ap.add_argument("--imgsz", type=int, default=960)
     ap.add_argument("--epochs", type=int, default=100)
-    ap.add_argument("--batch", type=int, default=4)
+    ap.add_argument("--batch", type=batch_arg, default=4,
+                    help="images per step. An integer, or a fraction of GPU "
+                         "memory (0.70), or -1 to autodetect. 4 suits an 8 GB "
+                         "laptop; a 192 GB MI300X wants far more -- see "
+                         "deploy/AMD_DEVCLOUD.md for why bigger is not always "
+                         "better on a dataset this small")
+    ap.add_argument("--workers", type=int, default=8,
+                    help="dataloader workers. The default keeps a laptop "
+                         "responsive; on a many-core GPU box JPEG decoding "
+                         "becomes the bottleneck and this is what fixes it")
+    ap.add_argument("--cache", default="",
+                    help="'ram' or 'disk' to cache decoded images. 'ram' is "
+                         "the single biggest speedup on a box with memory to "
+                         "spare (~1.4 GB per 1000 frames at 1920x504)")
+    ap.add_argument("--no-amp", dest="amp", action="store_false",
+                    help="disable mixed precision. Reach for this if the loss "
+                         "goes NaN or mAP stays at zero -- a known ROCm "
+                         "symptom, and it costs speed rather than accuracy")
     ap.add_argument("--device", default=None)
     ap.add_argument("--name", default="fuel26")
     ap.add_argument("--resume", action="store_true")
@@ -116,6 +182,7 @@ def main() -> int:
     from ultralytics import YOLO
     device = args.device or pick_device()
     print(f"device: {device}")
+    describe_device(device)
     n_train = len(list((ROOT / "dataset" / "images" / "train").glob("*.jpg")))
     warn_if_slow(device, f"{args.imgsz}{'-p2' if args.p2 else ''}", args.batch, n_train)
 
@@ -135,6 +202,9 @@ def main() -> int:
         name=args.name,
         resume=args.resume,
         project=str(ROOT / "runs"),
+        workers=args.workers,
+        cache=args.cache or False,
+        amp=args.amp,
         # Small-object settings. The default scale=0.5 can shrink a 17px ball
         # to 8px, below what even the P2 head resolves well; mosaic helps early
         # but is closed before the final epochs so the model finishes on real
