@@ -176,12 +176,18 @@ Blocking scoring at the scrimmage:
 - Dataset: `dataset-fuel/` built with `--matches 2026nhdur`, off-camera frames
   dropped, fuel-only — 721 train / 185 val, 200,252 boxes. Val is a single
   match, so its mAP says "converged", not "works at a scrimmage".
-- Droplet: 1x MI300X, reachable from the Mac as `ssh mi300x` (alias in
-  `~/.ssh/config`). P2 at 1280 crashed twice on the assigner OOM above (batch
-  16, then batch 4). Relaunched as `yolo26s --imgsz 960 --batch 16`, no P2,
-  under nohup in the container; confirm it gets past epoch 1.
-  `deploy/amd_watch.sh` (untested) copies `best.pt` to the host as it trains.
-- After training: bring home `best.pt`, `results.csv`, `args.yaml`; destroy the
-  droplet (it bills while idle, and is destroyed without warning when credit
-  runs out); run `run.py detect`; then bootstrap the quarantined frames and the
-  six matches `--matches` left out.
+- First model trained: `yolo26s`, `--imgsz 960`, no P2, 100 epochs on the
+  MI300X (~27 s an epoch). Validated directly: `best.pt` mAP50 0.613,
+  mAP50-95 0.321, precision 0.666, recall 0.623 (`last.pt` 0.605 / 0.319).
+  Two resumed copies of the run trained into the same folder at once, so its
+  `results.csv` interleaves them -- trust the direct validation, not the csv.
+  Validation labels come from the same colour heuristic, so these numbers
+  measure agreement with the labeller, not with reality.
+- Weights belong at `runs/fuel26_mi300x/weights/best.pt` in the Mac checkout.
+  The droplet was being destroyed once that copy was confirmed; a new one is
+  ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
+  alias in `~/.ssh/config`.
+- Next: make `count.py` accept explicit hub boxes with a fuel-only model; robot
+  labels and a robot-detecting model; a command that runs a model with
+  tracking over native-rate video into `ShotCounter`; a hand-scored recording
+  from the scrimmage camera position to validate against.
