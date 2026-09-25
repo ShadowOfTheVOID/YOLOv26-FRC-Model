@@ -118,7 +118,7 @@ docker exec -it rocm /bin/bash
 # container
 cd /workspace/frc && tar -xzf tbavid_code.tgz && tar -xzf dataset.tgz
 python3 -m pip install --no-deps ultralytics ultralytics-thop
-python3 -m pip install opencv-python-headless pyyaml tqdm matplotlib pandas psutil py-cpuinfo scipy requests pillow
+python3 -m pip install opencv-python-headless pyyaml tqdm matplotlib pandas polars psutil py-cpuinfo scipy requests pillow
 python3 -c "import torch; assert torch.cuda.is_available(), 'torch got clobbered'; print('ok')"
 export YOLO_CONFIG_DIR=/workspace/frc/.ultralytics
 ```
@@ -127,6 +127,11 @@ export YOLO_CONFIG_DIR=/workspace/frc/.ultralytics
 resolves torch from PyPI, PyPI's torch is the CUDA build, and it **overwrites
 the ROCm one** with no error: `torch.cuda.is_available()` turns False and
 `train.py` falls back to the CPU. Run that assert after any later install.
+
+The price is carrying the dependency list yourself, and a missing one fails
+late: without `polars`, Ultralytics trains a whole epoch and then dies saving
+`results.csv`. If an import error names a module after the first epoch,
+install that module -- the assert again after -- and re-run.
 
 The dataset's `path:` still says where it was built (`/Users/...`); `train.py`
 notices and repoints it at the yaml's own directory, and says so.
