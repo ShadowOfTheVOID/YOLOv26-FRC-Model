@@ -1608,6 +1608,71 @@ def test_nothing_to_verify_against():
           "health" in m.state())
 
 
+def test_robot_autolabel_rules():
+    """The rules that turn YOLOE's robot proposals into labels, or drop a frame.
+
+    Boxes are the ones measured on the real 2026nhdur frame. What matters most
+    is the gate: a frame with robots found but not all labelled teaches the
+    detector that the rest are floor, so it must be dropped whole.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    from autolabel_robots import (alliance, has_robots, merge, screen, verdict,
+                                  yolo_lines)
+
+    red_a = (1488, 285, 1616, 346, 0.51)
+    red_b = (1526, 211, 1626, 264, 0.34)
+    both = (1494, 212, 1628, 347, 0.44)       # spans the two red robots
+    hub = (1251, 12, 1437, 340, 0.30)         # the red hub, h/w 1.8
+    wall = (1650, 30, 1915, 315, 0.14)        # alliance wall and ladder
+    blue = (307, 238, 425, 304, 0.69)
+    blue2 = (414, 285, 531, 353, 0.13)
+    why = {d: r for d, r in screen([red_a, red_b, both, hub, wall, blue, blue2])}
+    check("real robots pass", all(why[d] is None for d in (red_a, red_b, blue, blue2)))
+    check("the hub is too tall to be a robot", why[hub] == "tall")
+    check("a box around two robots is not a robot", why[both] == "spans two")
+    check("the wall is ~10x the frame's robots", why[wall] == "too big")
+    check("size needs others to compare with", screen([wall])[0][1] is None)
+    check("a box ending above the field line is the stands",
+          screen([blue], field_top=320)[0][1] == "above field")
+
+    dup = (1490, 286, 1615, 347, 0.23)       # same robot from another tile
+    check("NMS keeps the confident copy",
+          merge([dup, red_a, blue]) == [blue, red_a])
+
+    def band(hue, sat, val, n=100, grey=0):
+        px = [(hue, sat, val)] * n + [(0, 10, 120)] * grey
+        return np.array(px, np.uint8).reshape(-1, 1, 3)
+    check("a blue bumper is blue", alliance(band(115, 180, 150))[0] == "robot_blue")
+    check("red wraps round the hue circle",
+          alliance(band(175, 180, 150))[0] == "robot_red"
+          and alliance(band(4, 180, 150))[0] == "robot_red")
+    # Robot 69: a navy bumper that compression turns grey-black. Guessing
+    # would put a blue robot in the red class for the whole match.
+    check("a crushed navy bumper is unknown, not guessed",
+          alliance(band(118, 40, 40))[0] is None)
+    check("a few coloured pixels on grey floor decide nothing",
+          alliance(band(115, 180, 150, n=3, grey=97))[0] is None)
+    mixed = np.concatenate([band(115, 180, 150, n=40), band(2, 180, 150, n=30)])
+    check("a blue robot beside a red ramp is not a clear call",
+          alliance(mixed)[0] is None)
+
+    four = [("robot_blue", blue), ("robot_blue", blue2),
+            ("robot_red", red_a), ("robot_red", red_b)]
+    check("four readable robots is a training frame", verdict(four, 0, 4) is None)
+    check("one unreadable robot drops the frame", verdict(four, 1, 4) is not None)
+    check("two found drops the frame", verdict(four[:2], 0, 4) is not None)
+    check("four of one alliance means one is not a robot",
+          verdict([("robot_red", red_a)] * 4, 0, 4) is not None)
+
+    line = yolo_lines([("robot_red", (100, 50, 300, 150, 0.5))], 1000, 500)[0]
+    check("labels are class, centre and size, normalised",
+          line == "2 0.200000 0.200000 0.200000 0.200000")
+    check("fuel-only labels have no robots",
+          not has_robots("0 .5 .5 .1 .1\n0 .2 .2 .1 .1\n"))
+    check("a second run sees the robots it wrote",
+          has_robots("0 .5 .5 .1 .1\n" + line + "\n"))
+
+
 def test_counting_model_dataset():
     """Deriving the counting model's dataset from the five-class one.
 
@@ -1905,6 +1970,7 @@ def main() -> int:
                test_ball_counting, test_shot_attribution,
                test_models_that_can_count_and_shoot, test_hub_geometry, test_scrimmage_scoreboard,
                test_nothing_to_verify_against, test_counting_model_dataset,
+               test_robot_autolabel_rules,
                test_model_must_name_its_classes):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")

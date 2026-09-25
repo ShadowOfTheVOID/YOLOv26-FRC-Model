@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""Propose robot boxes with an open-vocabulary detector: no hand labels, no video.
+
+Why not the motion heuristic in autolabel_objects.py: on the real 2026nhdur
+preview it boxed three people in the stands and found one robot of six, and
+after the field-line fix it still missed the robot in the trench, the one in
+the corner and a clearly visible blue one, and boxed the red trench. It keys on
+bumper colour AND movement, and a robot that sits still, or has a bumper the
+broadcast has crushed to near-black, fails both.
+
+YOLOE (`yoloe-26s-seg.pt`) takes the class as a text prompt, so it can be asked
+for robots it has never been trained on. Measured on two real frames, each
+robot hand-marked:
+
+    2026nhdur (5 robots): 4 found; both hubs boxed as well, one box spanning
+                          two robots
+    second frame (5):     full frame found only 74. Three overlapping tiles at
+                          2x added 7314 and the corner robot, at 0.09-0.34;
+                          both red robots on the right still missed
+
+So it is a recall problem, not a precision one. Once the tall boxes (the hubs)
+and the boxes that swallow two others are removed, what is left are robots.
+That decides how the output is used. A frame where it found most of the robots
+is a good training frame; a frame where it found two of six would teach the
+detector that the other four are floor. So frames are GATED, not labelled
+partially: below --min-robots, or with a robot whose alliance cannot be read,
+the whole frame is moved out of the dataset to dataset/skipped/robots/, image
+and label together, and `--restore` puts every one back.
+
+Alliance comes from the bottom band of the box, where the bumper is: a hue
+vote among pixels saturated enough to have a hue at all. Measured: 7314 blue
+0.52 / red 0.00, 49/25 red 0.48 / 0.00. The fixed saturation >= 120 gate the
+motion heuristic uses read robot 69's navy bumper as no colour at all; its
+pixels have median saturation 8-93 and value 25-89, and no threshold separates
+that from the grey floor. Such a robot has unknown alliance, and the gate
+drops its frame rather than guessing.
+
+    # look first: draws kept boxes in alliance colour, rejects in grey with why
+    .venv-train/bin/python train/autolabel_robots.py --preview previews/robots
+    # how many frames survive at each --min-robots, changing nothing
+    .venv-train/bin/python train/autolabel_robots.py --dry-run
+    # append robot boxes to the fuel labels; move rejected frames aside
+    .venv-train/bin/python train/autolabel_robots.py
+
+It appends to label files written by autolabel_fuel.py and skips any that
+already have a robot box, so a second run adds nothing twice. Run
+drop_offcamera.py and autolabel_fuel.py first.
+
+What it does not fix: robots it misses in frames that pass the gate are still
+unlabelled. The detector trained on these labels will find more of them than
+YOLOE did, and relabelling with it (the bootstrap in train/README.md) is the
+next round.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+DATASET = ROOT / "dataset"
+CLASSES = {"fuel": 0, "robot_blue": 1, "robot_red": 2, "hub_blue": 3, "hub_red": 4}
+
+WEIGHTS = "yoloe-26s-seg.pt"
+# Of ten prompts tried on the nhdur frame, "robotic vehicle" covered 4 of 5
+# robots, "robot" 3, "wheeled robot" 3; "machine", "cart", "vehicle", "box",
+# "bumper" and "metal cart with wheels" found none. Together they cover what
+# each finds alone.
+ROBOT_PROMPTS = ("robotic vehicle", "robot", "wheeled robot")
+# Things in every frame that are not robots. Asked for by name, each takes
+# its own class instead of competing for "robot"; ~50 people a frame were
+# boxed as "person" on the nhdur frame. All measurements above include them.
+DECOYS = ("person", "chair", "hub")
+
+TALL = 1.3          # h/w above this is not a robot: the hubs came out 1.0-2.3
+HOLDS = 0.8         # a box with two others this far inside it spans two robots
+BIG = 4.0           # area over this many times the other boxes' median
+HUE_SAT, HUE_VAL = 60, 30
+BLUE_HUE = (95, 130)
+RED_HUE = (10, 165)  # red is <= 10 or >= 165 on OpenCV's 0-180 hue
+MIN_VOTE = 0.05      # of the band's pixels
+MAX_PER_ALLIANCE = 3
+
+
+# --- pure box logic (numpy only, tested in CI) ------------------------------
+
+def iou(a, b) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def inside(a, b) -> float:
+    """Fraction of box a that lies inside box b."""
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    area = (a[2] - a[0]) * (a[3] - a[1])
+    return ix * iy / area if area > 0 else 0.0
+
+
+def merge(dets: list, thr: float = 0.5) -> list:
+    """Greedy NMS over (x1, y1, x2, y2, conf) from every prompt and tile."""
+    kept = []
+    for d in sorted(dets, key=lambda d: -d[4]):
+        if all(iou(d, k) <= thr for k in kept):
+            kept.append(d)
+    return kept
+
+
+def screen(dets: list, field_top: int = 0) -> list:
+    """(det, reason) for each merged box; reason None means it is a robot.
+
+    NMS alone kept a box around both red robots on the nhdur frame: its IoU
+    with each of them was 0.40 and 0.29, under any sane threshold, because it
+    is so much larger than either. What gives it away is that both sit inside
+    it.
+
+    Size is judged against the frame's other boxes, not in pixels, because a
+    robot's size depends on the camera. The red alliance wall and ladder came
+    out as a 0.14 "robot" 265 x 285 px, 9.7x the median of the four real
+    robots in the same frame (~7,800 px^2 each).
+    """
+    out = []
+    areas = [(d[2] - d[0]) * (d[3] - d[1]) for d in dets]
+    for i, d in enumerate(dets):
+        w, h = d[2] - d[0], d[3] - d[1]
+        others = areas[:i] + areas[i + 1:]
+        if h > TALL * w:
+            why = "tall"
+        elif sum(inside(o, d) >= HOLDS for o in dets if o is not d) >= 2:
+            why = "spans two"
+        elif len(others) >= 2 and w * h > BIG * float(np.median(others)):
+            why = "too big"
+        elif field_top and d[3] < field_top:
+            why = "above field"
+        else:
+            why = None
+        out.append((d, why))
+    return out
+
+
+def alliance(hsv_band: np.ndarray):
+    """(class or None, blue share, red share) from the bumper band's pixels."""
+    px = hsv_band.reshape(-1, 3).astype(int)
+    if not len(px):
+        return None, 0.0, 0.0
+    hued = (px[:, 1] >= HUE_SAT) & (px[:, 2] >= HUE_VAL)
+    blue = float((hued & (px[:, 0] >= BLUE_HUE[0]) & (px[:, 0] <= BLUE_HUE[1])).mean())
+    red = float((hued & ((px[:, 0] <= RED_HUE[0]) | (px[:, 0] >= RED_HUE[1]))).mean())
+    # A blue robot beside the red ramp picks up some red and the other way
+    # round; the bumper has to win clearly, not by a few pixels.
+    if blue >= MIN_VOTE and blue >= 2 * red:
+        return "robot_blue", blue, red
+    if red >= MIN_VOTE and red >= 2 * blue:
+        return "robot_red", blue, red
+    return None, blue, red
+
+
+def verdict(labelled: list, unknown: int, min_robots: int):
+    """Why this frame cannot be a training frame, or None if it can."""
+    if unknown:
+        return f"{unknown} robot(s) of unknown alliance"
+    for cls in ("robot_blue", "robot_red"):
+        n = sum(c == cls for c, _ in labelled)
+        if n > MAX_PER_ALLIANCE:
+            return f"{n} {cls} -- one of them is not a robot"
+    if len(labelled) < min_robots:
+        return (f"{len(labelled)} robot(s) found, under --min-robots "
+                f"{min_robots}; the rest would be labelled floor")
+    return None
+
+
+def yolo_lines(labelled: list, W: int, H: int) -> list:
+    return [f"{CLASSES[c]} {(x1+x2)/2/W:.6f} {(y1+y2)/2/H:.6f} "
+            f"{(x2-x1)/W:.6f} {(y2-y1)/H:.6f}"
+            for c, (x1, y1, x2, y2, _) in labelled]
+
+
+def has_robots(label_text: str) -> bool:
+    return any(line.split()[:1] in (["1"], ["2"]) for line in label_text.splitlines())
+
+
+# --- model and images --------------------------------------------------------
+
+def load(weights: str):
+    from ultralytics import YOLOE
+    model = YOLOE(weights)
+    names = list(ROBOT_PROMPTS + DECOYS)
+    model.set_classes(names, model.get_text_pe(names))
+    return model
+
+
+def propose(model, img, conf: float, imgsz: int = 1280, tiles: bool = True) -> list:
+    """Robot boxes from the whole frame plus three half-width tiles at 2x.
+
+    Robots in a wide broadcast are ~100 px across. On the second test frame
+    the whole-frame pass found one of five; the tiles found three.
+    """
+    import cv2
+    H, W = img.shape[:2]
+    views = [(img, 0, 1.0)]
+    if tiles:
+        half = W // 2
+        for x0 in (0, W // 4, W - half):
+            views.append((cv2.resize(img[:, x0:x0 + half], None, fx=2, fy=2), x0, 2.0))
+    dets = []
+    for view, x0, scale in views:
+        r = model.predict(view, conf=conf, imgsz=imgsz, verbose=False)[0]
+        for b, c, k in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
+                           r.boxes.cls.tolist()):
+            if int(k) < len(ROBOT_PROMPTS):
+                x1, y1, x2, y2 = (v / scale for v in b)
+                dets.append((x1 + x0, y1, x2 + x0, y2, float(c)))
+    return merge(dets)
+
+
+def label_frame(model, img, args):
+    """(labelled, rejected, unknown, field_top, reason) for one image."""
+    import cv2
+    field_top = 0
+    if args.field_line:
+        from autolabel_objects import field_line
+        field_top = field_line(img)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    labelled, rejected, unknown = [], [], 0
+    for d, why in screen(propose(model, img, args.conf, args.imgsz, args.tiles), field_top):
+        if why:
+            rejected.append((d, why))
+            continue
+        x1, y1, x2, y2 = (int(round(v)) for v in d[:4])
+        band = hsv[max(y1, int(y2 - 0.4 * (y2 - y1))):y2, max(x1, 0):x2]
+        cls, _, _ = alliance(band)
+        if cls is None:
+            unknown += 1
+            rejected.append((d, "alliance?"))
+        else:
+            labelled.append((cls, d))
+    return labelled, rejected, unknown, field_top, verdict(labelled, unknown, args.min_robots)
+
+
+def draw(img, labelled, rejected, field_top, reason):
+    import cv2
+    out = img.copy()
+    if field_top:
+        cv2.line(out, (0, field_top), (out.shape[1], field_top), (255, 255, 255), 1)
+    for (d, why) in rejected:
+        p1, p2 = (int(d[0]), int(d[1])), (int(d[2]), int(d[3]))
+        cv2.rectangle(out, p1, p2, (140, 140, 140), 1)
+        cv2.putText(out, f"{why} {d[4]:.2f}", (p1[0], max(p1[1] - 4, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (140, 140, 140), 1)
+    for cls, d in labelled:
+        col = (255, 0, 0) if cls == "robot_blue" else (0, 0, 255)
+        p1, p2 = (int(d[0]), int(d[1])), (int(d[2]), int(d[3]))
+        cv2.rectangle(out, p1, p2, col, 2)
+        cv2.putText(out, f"{d[4]:.2f}", (p1[0], max(p1[1] - 4, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+    cv2.putText(out, reason or "KEEP", (10, out.shape[0] - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255) if reason else (0, 255, 0), 2)
+    return out
+
+
+def restore(skipped: Path) -> int:
+    n = 0
+    for split in ("train", "val"):
+        for img in sorted((skipped / split).glob("*.jpg")):
+            img.rename(DATASET / "images" / split / img.name)
+            lab = skipped / split / f"{img.stem}.txt"
+            if lab.exists():
+                lab.rename(DATASET / "labels" / split / lab.name)
+            n += 1
+    print(f"restored {n} frames from {skipped}")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--weights", default=WEIGHTS,
+                    help="YOLOE weights; downloaded from the Ultralytics GitHub "
+                         "release on first use (~30 MB, plus ~240 MB for the "
+                         "text encoder)")
+    ap.add_argument("--conf", type=float, default=0.1,
+                    help="lower finds more robots and more of everything else. "
+                         "Real robots scored 0.07-0.77 in the test frames")
+    ap.add_argument("--imgsz", type=int, default=1280)
+    ap.add_argument("--no-tiles", dest="tiles", action="store_false",
+                    help="whole frame only: ~4x faster, finds fewer robots")
+    ap.add_argument("--no-field-line", dest="field_line", action="store_false")
+    ap.add_argument("--min-robots", type=int, default=4,
+                    help="a frame with fewer is moved out, not half-labelled. "
+                         "Six are on the field; see --dry-run for how many "
+                         "frames survive each value")
+    ap.add_argument("--preview", type=Path, metavar="DIR",
+                    help="write annotated frames here and change nothing")
+    ap.add_argument("--images", nargs="*", type=Path,
+                    help="with --preview: these images instead of a dataset sample")
+    ap.add_argument("--sample", type=int, default=12,
+                    help="with --preview: how many dataset frames, spread evenly")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="label nothing, move nothing; report what would happen")
+    ap.add_argument("--skipped", type=Path, default=DATASET / "skipped" / "robots")
+    ap.add_argument("--restore", action="store_true",
+                    help="move every frame this script set aside back into the dataset")
+    args = ap.parse_args()
+
+    if args.restore:
+        return restore(args.skipped)
+
+    import cv2
+    images = args.images or sorted(p for split in ("train", "val")
+                                   for p in (DATASET / "images" / split).glob("*.jpg"))
+    if not images:
+        print("no images under dataset/images -- run prepare_dataset.py first")
+        return 1
+    if args.preview and not args.images:
+        step = max(len(images) // args.sample, 1)
+        images = images[::step][:args.sample]
+
+    model = load(args.weights)
+    counts, reasons = {}, {}
+    kept = moved = boxes = already = 0
+    for i, src in enumerate(images):
+        img = cv2.imread(str(src))
+        if img is None:
+            continue
+        H, W = img.shape[:2]
+        lab = DATASET / "labels" / src.parent.name / f"{src.stem}.txt"
+        existing = lab.read_text() if lab.exists() else ""
+        if not args.preview and has_robots(existing):
+            already += 1
+            continue
+        labelled, rejected, unknown, field_top, reason = label_frame(model, img, args)
+        n = len(labelled) + unknown
+        counts[n] = counts.get(n, 0) + 1
+        if reason:
+            key = ("unknown alliance" if "unknown" in reason else
+                   "too many of one alliance" if "not a robot" in reason else
+                   "too few robots")
+            reasons[key] = reasons.get(key, 0) + 1
+        if args.preview:
+            args.preview.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(args.preview / f"{src.stem}.jpg"),
+                        draw(img, labelled, rejected, field_top, reason))
+            print(f"{src.name}: {len(labelled)} robots, {unknown} unknown -- "
+                  f"{reason or 'keep'}")
+            continue
+        if (i + 1) % 50 == 0:
+            print(f"  {i + 1}/{len(images)} frames")
+        if args.dry_run:
+            kept += reason is None
+            moved += reason is not None
+            continue
+        if reason:
+            dest = args.skipped / src.parent.name
+            dest.mkdir(parents=True, exist_ok=True)
+            src.rename(dest / src.name)
+            if lab.exists():
+                lab.rename(dest / lab.name)
+            moved += 1
+            continue
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        lines = yolo_lines(labelled, W, H)
+        lab.parent.mkdir(parents=True, exist_ok=True)
+        lab.write_text(existing + "\n".join(lines) + "\n")
+        kept += 1
+        boxes += len(lines)
+
+    if args.preview:
+        print(f"\npreviews -> {args.preview}")
+        return 0
+    print("\nrobots per frame (including unknown alliance):")
+    for n in sorted(counts):
+        print(f"  {n:2d}: {counts[n]} frames")
+    for m in range(2, 7):
+        print(f"  --min-robots {m} would keep at most "
+              f"{sum(v for k, v in counts.items() if k >= m)} frames")
+    for why, n in sorted(reasons.items(), key=lambda r: -r[1]):
+        print(f"  rejected, {why}: {n}")
+    if already:
+        print(f"{already} frames already had robot boxes and were left alone")
+    verb = "would" if args.dry_run else ""
+    print(f"\n{kept} frames {verb} labelled ({boxes} robot boxes), "
+          f"{moved} {verb} moved to {args.skipped}".replace("  ", " "))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -576,8 +576,9 @@ is dropping dead-time stills.
 ## Training
 
 See **[train/README.md](train/README.md)**. Fuel boxes are auto-labelled by
-colour (56k in ~3s); robots and hubs are proposed by
-`train/autolabel_objects.py` and need review.
+colour (56k in ~3s); robots by an open-vocabulary model in
+`train/autolabel_robots.py`, which drops frames it cannot label fully; hubs
+are replayed from recorded geometry by `train/autolabel_objects.py`.
 
 ## Where to run it
 

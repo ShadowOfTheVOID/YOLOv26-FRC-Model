@@ -21,5 +21,7 @@ dist/
 *.tar.xz
 *.zip
 *.pt
+# YOLOE text encoder, downloaded beside the script on first use (242 MB)
+*.ts
 logs/
 .DS_Store

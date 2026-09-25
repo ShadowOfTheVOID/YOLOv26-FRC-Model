@@ -341,6 +341,24 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **Robot labels without hand-labelling: `train/autolabel_robots.py`.** Asks
+  an open-vocabulary detector (YOLOE, `yoloe-26s-seg.pt`, prompted "robotic
+  vehicle" / "robot" / "wheeled robot") for robots it was never trained on,
+  over the whole frame and three 2x tiles. On two real frames with every robot
+  hand-marked it found 4 of 5 and 2 of 5 at the default `--conf 0.1` (the
+  corner robot scored 0.09), and nothing else once three rules
+  are applied: too tall (the hubs), a box holding two others (one box around
+  both red robots), and ~10x the area of the frame's other boxes (the red
+  alliance wall). Alliance is a hue vote in the box's bumper band; the navy
+  bumper of robot 69 has median saturation 8-93 and is left unknown rather
+  than guessed. Recall is the weakness, so a frame is labelled only if every
+  robot found has a readable alliance and at least `--min-robots` (4) were
+  found; otherwise it is moved to `dataset/skipped/robots/` with its label,
+  and `--restore` brings them back. Both test frames were rejected, so how
+  many of a real dataset survive is unmeasured: `--dry-run` reports it per
+  `--min-robots` value before anything is written. Missed robots in frames
+  that pass are still unlabelled; the bootstrap in `train/README.md` is the
+  next round.
 - **Robot proposals stop boxing the crowd and start finding the near robots.**
   The first real preview boxed three people in the stands and one robot of
   six. People in alliance colours who move are exactly what the robot test

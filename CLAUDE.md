@@ -58,9 +58,9 @@ from it.
 
 **Training flow** (`train/`, see `train/README.md`):
 `prepare_dataset.py` (splits by match, never by frame, hash-stable) →
-`drop_offcamera.py` → `autolabel_fuel.py` → optional `autolabel_objects.py`
-(robots need the cleaned videos; hubs replay geometry recorded with
-`run.py db hub`) → `subset_classes.py` → `train.py` → `benchmark.py`. Label
+`drop_offcamera.py` → `autolabel_fuel.py` → optional `autolabel_robots.py`
+(YOLOE text prompts; drops frames it cannot label fully) and
+`autolabel_objects.py` (hubs replay geometry recorded with `run.py db hub`) → `subset_classes.py` → `train.py` → `benchmark.py`. Label
 once, derive twice: the five-class scouting detector and the three-class
 counting model (`fuel`, `hub_blue`, `hub_red`) come from one labelled set.
 Training writes weights only; `run.py detect --weights .../best.pt` is what
@@ -155,14 +155,15 @@ Status of per-robot scouting:
   with robot ids drawn on, `--out` for JSON. It refuses a model without robot
   classes rather than reporting an empty scouting sheet.
 - It needs a model that detects robots (`robot_blue`/`robot_red`); none has
-  been trained yet. `train/autolabel_objects.py` now proposes robot boxes
-  without the match videos (background = median of the match's own frames)
-  and boxes the whole robot, not just the bumper band. First real preview:
-  3 people in the stands boxed, 1 robot of 6 found. Fixed by bounding robots
-  with the fuel-learned field line and relaxing `--roi-bottom` to 0.98 (was
-  0.80, which cut the near robots); re-preview on real frames to confirm.
-  The field line is one horizontal line, so side stands on an angled camera
-  still get through.
+  been trained yet. The motion heuristic in `autolabel_objects.py` found 1 of
+  6 robots on the first real preview and still missed three after fixes;
+  don't tune it further. `train/autolabel_robots.py` (YOLOE, text prompts,
+  whole frame + 2x tiles) replaced it for robots: 4/5 and 2/5 on two
+  hand-marked real frames, false positives removed by the tall / spans-two /
+  too-big rules. It gates frames (unknown alliance or < `--min-robots` found
+  → moved to `dataset/skipped/robots/`); both test frames were rejected, so
+  its yield on a real dataset is the next thing to measure (`--dry-run`).
+  YOLOE weights come from GitHub releases; huggingface is not needed.
 - It needs video at the camera's native frame rate: ball flights cannot be
   tracked from the 3 fps exported frames.
 - Tallies are per robot track. Team identity: `run.py shots --annotate`
@@ -206,6 +207,7 @@ Blocking scoring at the scrimmage:
   The droplet was being destroyed once that copy was confirmed; a new one is
   ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
   alias in `~/.ssh/config`.
-- Next: robot labels and a robot-detecting model (the one thing `run.py
-  shots` still lacks); a hand-scored recording from the scrimmage camera
+- Next: `autolabel_robots.py --dry-run` on the Mac for the yield, then
+  `dataset-scout` and a robot-detecting model (the one thing `run.py shots`
+  still lacks); a hand-scored recording from the scrimmage camera
   position to validate both commands against.

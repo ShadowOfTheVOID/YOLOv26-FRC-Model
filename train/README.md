@@ -96,8 +96,19 @@ layouts.
 
 ## What still needs a human
 
-Only `fuel` is auto-labelled. `robot_blue`, `robot_red`, `hub_blue`, `hub_red`
-need annotation — but far less than it looks:
+`fuel` is auto-labelled by colour. Robots have an automatic path too, with
+limits: `autolabel_robots.py` asks an open-vocabulary model for them and keeps
+only frames where it found most of them (see its docstring for the measured
+recall). Run it after `autolabel_fuel.py`, then derive the scouting set:
+
+```bash
+.venv-train/bin/python train/autolabel_robots.py --preview previews/robots   # look
+.venv-train/bin/python train/autolabel_robots.py --dry-run                   # count
+.venv-train/bin/python train/autolabel_robots.py                             # write
+python3 train/subset_classes.py --classes fuel,robot_blue,robot_red --out dataset-scout
+```
+
+Everything else needs annotation — but far less than it looks:
 
 - **The hubs are static.** The camera is fixed within a match, so the two hub
   boxes are identical across all 532 frames. Annotate once, replicate.
