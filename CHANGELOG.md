@@ -309,6 +309,17 @@ harvest's output as a source of its own.
   three ball-diameters a candidate, which a clump of four in a row is: raised
   to six, since the pit band and the painted border run tens of diameters and
   nothing shorter is worth the risk.
+- **The reflection filter was eating fuel out of the piles.** Measured on a
+  real broadcast frame rather than a synthetic one: of 23 boxes it dropped, 14
+  kept 85% or more of their source's saturation. Those were not reflections —
+  they were balls lower in a pile, shaded by the ones above, and shading
+  scales value while leaving saturation alone (the same fact that finds a ball
+  inside a hopper). A reflection does lose saturation, being the ball's colour
+  mixed with the grey it reflects in, so both conditions are now required
+  before anything is dropped. On that frame: 23 drops down to 9 and the total
+  up from 207 to 221. On a synthetic with reflections modelled physically —
+  blended toward the floor colour rather than merely dimmed — all 11 are still
+  caught, and a ball stacked under another ball survives. `--sat-keep` tunes it.
 - **The preview names which pass proposed each box** — red through the gate,
   orange split out of a cluster, cyan rescued from shade, green dropped as a
   reflection, with the learned field line drawn in white. `train/diagnose_labels.py`

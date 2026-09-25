@@ -251,7 +251,7 @@ def box_stats(hsv: np.ndarray, box: tuple) -> tuple:
 
 
 def drop_reflections(hsv: np.ndarray, boxes: list, v_ratio: float,
-                     reach: float) -> tuple:
+                     reach: float, sat_keep: float = 0.85) -> tuple:
     """Separate real balls from their reflections in the floor.
 
     The field surface is glossy, so most balls near it come with a mirrored
@@ -260,22 +260,28 @@ def drop_reflections(hsv: np.ndarray, boxes: list, v_ratio: float,
     exactly the places counting matters, and they teach the detector that a
     smear on the floor is fuel.
 
-    What separates them is that a reflection is DIMMER than the ball casting
-    it, and sits almost directly under it. So a proposal is dropped when
-    another proposal sits above it, within `reach` ball-heights, horizontally
-    aligned to within half a width, and this one's mean brightness is below
-    `v_ratio` of that one's. Two real balls stacked in frame are lit alike and
-    survive; a reflection is never as bright as its source.
+    A reflection is dimmer than the ball casting it and sits almost directly
+    under it -- but dimmer alone is not enough, and measuring a real frame says
+    why. Of 23 boxes dropped by a brightness-only rule, 14 kept 85% or more of
+    their source's SATURATION. Those were not reflections. They were balls
+    lower in a pile, shaded by the ones above: shading scales value and leaves
+    saturation alone, which is the same fact that lets a ball be found inside
+    a hopper.
+
+    A reflection does lose saturation, because it is the ball's colour mixed
+    with the grey it is reflecting in. So both have to hold -- dimmer than the
+    source AND less saturated than it -- before anything is dropped. A ball
+    stacked under another ball keeps its colour and survives.
     """
     scored = [(b, box_stats(hsv, b)) for b in boxes]
     order = sorted(range(len(scored)), key=lambda i: scored[i][0][1])  # top first
     keep, dropped = [], []
     for pos, i in enumerate(order):
-        (x, y, w, h), (_, v) = scored[i]
+        (x, y, w, h), (sat, v) = scored[i]
         cx = x + w / 2
         reflection = False
         for j in order[:pos]:
-            (ax, ay, aw, ah), (_, av) = scored[j]
+            (ax, ay, aw, ah), (asat, av) = scored[j]
             if ay + ah > y + h:
                 continue
             gap = y - (ay + ah)
@@ -283,7 +289,7 @@ def drop_reflections(hsv: np.ndarray, boxes: list, v_ratio: float,
                 continue
             if abs((ax + aw / 2) - cx) > max(aw, w) * 0.5:
                 continue
-            if v < av * v_ratio:
+            if v < av * v_ratio and sat < asat * sat_keep:
                 reflection = True
                 break
         (dropped if reflection else keep).append((x, y, w, h))
@@ -509,7 +515,8 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
            min_cover: float = 0.6, close_k: int = 5, sat_ratio: float = 0.7,
            roi_top: float = -1.0, roi_bottom: float = 1.0,
            flat_v: float = 0.05, roi_margin: float = 4.0,
-           v_ratio: float = 0.82, reach: float = 1.6) -> tuple:
+           v_ratio: float = 0.82, reach: float = 1.6,
+           sat_keep: float = 0.85) -> tuple:
     """-> (gated, split out of clusters, rescued from shade, heaps, dropped).
 
     Four buckets rather than one list because when a proposal is wrong, the
@@ -626,7 +633,8 @@ def detect(img: np.ndarray, min_area: int, max_area: int, min_fill: float,
         # compared and the reflection survived.
         tagged = ([(b, 0) for b in gated] + [(b, 1) for b in recovered]
                   + [(b, 2) for b in rescued])
-        keep, dropped = drop_reflections(hsv, [b for b, _ in tagged], v_ratio, reach)
+        keep, dropped = drop_reflections(hsv, [b for b, _ in tagged], v_ratio,
+                                         reach, sat_keep)
         kept = set(keep)
         gated = [b for b, t in tagged if t == 0 and b in kept]
         recovered = [b for b, t in tagged if t == 1 and b in kept]
@@ -727,6 +735,11 @@ def main() -> int:
     ap.add_argument("--v-ratio", type=float, default=0.82,
                     help="a proposal dimmer than this fraction of the one "
                          "above it is its reflection. Raise to drop more")
+    ap.add_argument("--sat-keep", type=float, default=0.85,
+                    help="a reflection also loses saturation, because it is "
+                         "the ball mixed with the grey it reflects in. Keep a "
+                         "proposal holding this fraction of the source's "
+                         "saturation: it is a ball in shade, not a mirror")
     ap.add_argument("--reach", type=float, default=1.6,
                     help="how far below a ball, in ball-heights, its "
                          "reflection can sit")
@@ -769,7 +782,7 @@ def main() -> int:
                       args.loose_hi, args.min_cover, args.close_k, args.sat_ratio,
                       args.roi_top, args.roi_bottom, args.flat_v,
                       args.roi_margin,
-                      args.v_ratio, args.reach)
+                      args.v_ratio, args.reach, args.sat_keep)
 
     if args.preview:
         src = images[len(images) // 2]
