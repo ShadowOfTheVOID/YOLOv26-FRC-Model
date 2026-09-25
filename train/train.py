@@ -41,6 +41,36 @@ def dataset_root(data_yaml: Path) -> Path:
     return Path(data_yaml).resolve().parent
 
 
+def repoint_dataset(data_yaml: Path) -> None:
+    """Point the yaml's `path:` at wherever the dataset actually is now.
+
+    prepare_dataset.py and subset_classes.py write an absolute `path:`, because
+    Ultralytics resolves a relative one against its own datasets directory
+    rather than the yaml's -- so a dataset built on a Mac says
+    `path: /Users/.../dataset-fuel`, and on any other machine Ultralytics
+    stops with "images not found" after the GPU has already been set up.
+    The Colab and Kaggle notebooks each rewrote the line themselves; nothing
+    else did, and the first run on an AMD droplet hit exactly that.
+
+    The yaml's own directory is the right answer whenever it holds the images,
+    so use it. Rewritten in place and said out loud, so the file on disk
+    matches what was trained.
+    """
+    text = data_yaml.read_text()
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith("path:"):
+            continue
+        current = Path(line.split(":", 1)[1].strip())
+        here = data_yaml.resolve().parent
+        if current.exists() or not (here / "images").is_dir():
+            return
+        lines[i] = f"path: {here}"
+        data_yaml.write_text("\n".join(lines) + "\n")
+        print(f"  dataset moved: {current} -> {here} (rewrote {data_yaml.name})")
+        return
+
+
 def batch_arg(text: str):
     """`--batch 32`, `--batch 0.70`, `--batch -1`.
 
@@ -164,6 +194,8 @@ def main() -> int:
               + ("" if args.data == DATA_YAML else
                  ", then train/subset_classes.py"))
         return 1
+
+    repoint_dataset(args.data)
 
     # Off the yaml's own directory, not ROOT/dataset: pointed at a derived set
     # this used to count the five-class one's labels and report a healthy

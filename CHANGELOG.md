@@ -336,6 +336,23 @@ harvest's output as a source of its own.
   Frames below `--min-singles` or `--min-coverage` are now moved to
   `dataset/skipped/` and reported per match, with `--no-quarantine` to label
   them anyway. Re-running `prepare_dataset.py` restores anything moved.
+- **A dataset built on one machine now trains on another.** `prepare_dataset.py`
+  and `subset_classes.py` write an absolute `path:` into the yaml — they have
+  to, since Ultralytics resolves a relative one against its own datasets
+  directory rather than the yaml's — so a set built on a Mac said
+  `/Users/.../dataset-fuel`, and the first run on an AMD droplet stopped with
+  "images not found" after the GPU was already up. The Colab and Kaggle
+  notebooks each rewrote the line by hand; nothing else did. `train.py` now
+  repoints `path:` at the yaml's own directory whenever the recorded one is
+  missing and the images are beside the yaml, and prints that it did.
+- **`deploy/AMD_DEVCLOUD.md` describes the machine you actually get.** On the
+  PyTorch 1-Click image torch lives in a Docker container named `rocm`, not on
+  the host, so the guide's `python3`/`pip` steps failed as written on the
+  host. It now separates host commands (`docker`, `scp`, `rocm-smi`, `tmux`)
+  from container ones (`python3`, `pip`, `train.py`), copies the data in with
+  `docker cp`, and warns that files written in the container die with it.
+  Batch and workers drop to 16 each: the 1x plan has 20 vCPU, and a first
+  harvest of ~700 training frames wants optimizer steps more than memory.
 - **`train/drop_offcamera.py` removes frames that are not the main camera.**
   A crowd shot that survived the harvester's shot cut reached the labeller,
   which proposed 49 boxes on spectators' yellow shirts — and every quality

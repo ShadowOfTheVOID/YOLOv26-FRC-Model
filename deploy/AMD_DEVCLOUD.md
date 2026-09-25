@@ -72,69 +72,87 @@ rocm-smi                           # 1 or 8 MI300X rows, ~192 GB each
 If `rocm-smi` prints nothing useful, stop here — everything below assumes the
 driver sees the card.
 
-## 3. Get PyTorch that actually talks to the GPU
+## 3. Find where PyTorch actually is
 
-The quick-start image already has one. Confirm before installing anything:
+On the PyTorch 1-Click image, **torch lives inside a Docker container named
+`rocm`, not on the host.** The login banner says so; it is easy to miss. On the
+host, `python3 -c "import torch"` fails and `pip` does not exist -- that is
+expected, and installing pip there only gives you a second, torch-less Python
+to confuse with the real one.
+
+The rule for everything below:
+
+| runs on the **host** (`root@<droplet-name>`) | runs in the **container** (`root@<hex id>`) |
+| --- | --- |
+| `docker`, `scp`, `rocm-smi`, `tmux` | `python3`, `pip`, `train.py` |
+
+A "command not found" almost always means you are on the wrong side of that
+line. `hostname` tells you which.
 
 ```bash
-python3 -c "import torch; print(torch.__version__, torch.version.hip, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+# host
+rocm-smi                                          # 1 x MI300X
+docker exec -it rocm python3 -c "import torch; print(torch.__version__, torch.version.hip, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-You want a `+rocm` or `+gitXXXXX` version, a non-`None` HIP version, `True`,
-and `AMD Instinct MI300X`. `torch.cuda` is not a typo: PyTorch exposes ROCm
-devices through the same `torch.cuda` API, which is why `train.py`'s existing
-device detection needs no AMD-specific branch — and also why the log cannot
-tell you which vendor's chip it found, so `train.py` now prints the name.
+Want a `+rocm` version, a non-`None` HIP version, `True`, and
+`AMD Instinct MI300X VF`. `torch.cuda` is not a typo: PyTorch exposes ROCm
+devices through the same API, which is why `train.py` needs no AMD branch --
+and why the log could not otherwise tell you which vendor's chip it found, so
+`train.py` prints the name.
 
-Starting from a bare Ubuntu droplet instead, run the container rather than
-installing ROCm by hand:
-
-```bash
-docker run -it --rm \
-  --device=/dev/kfd --device=/dev/dri --group-add video \
-  --ipc=host --shm-size 16G --security-opt seccomp=unconfined \
-  -v /root/frc:/workspace/frc -w /workspace/frc \
-  rocm/pytorch:latest
-```
-
-`--shm-size` is the one people leave off. The default 64 MB is enough for
-`--workers 2` and dies as `DataLoader worker (pid N) is killed by signal: Bus
-error` at the worker count step 6 actually asks for.
-
-### The failure this page exists for
+## 4. Upload, copy in, install
 
 ```bash
-pip install ultralytics          # <-- do not do this here
-```
+# Mac -- with the ssh alias from the section below
+ssh mi300x 'mkdir -p /root/frc'
+scp dataset.tgz tbavid_code.tgz mi300x:/root/frc/
 
-That resolves `torch` from PyPI, PyPI's `torch` is the CUDA build, and it
-**overwrites the ROCm one**. Nothing errors. `torch.cuda.is_available()` turns
-False, `train.py` falls back to `cpu`, and your 192 GB accelerator watches a
-CPU do ninety epochs. Install Ultralytics without letting it touch torch:
+# host
+docker exec rocm mkdir -p /workspace/frc
+docker cp /root/frc/dataset.tgz    rocm:/workspace/frc/
+docker cp /root/frc/tbavid_code.tgz rocm:/workspace/frc/
+tmux new -s train          # on its own line: tmux swallows anything pasted after it
+docker exec -it rocm /bin/bash
 
-```bash
-pip install --no-deps ultralytics ultralytics-thop
-pip install opencv-python-headless pyyaml tqdm matplotlib pandas psutil \
-            py-cpuinfo scipy requests pillow
+# container
+cd /workspace/frc && tar -xzf tbavid_code.tgz && tar -xzf dataset.tgz
+python3 -m pip install --no-deps ultralytics ultralytics-thop
+python3 -m pip install opencv-python-headless pyyaml tqdm matplotlib pandas psutil py-cpuinfo scipy requests pillow
 python3 -c "import torch; assert torch.cuda.is_available(), 'torch got clobbered'; print('ok')"
+export YOLO_CONFIG_DIR=/workspace/frc/.ultralytics
 ```
 
-Run that assert again after *any* later `pip install`. `opencv-python-headless`
-rather than `opencv-python` for the usual reason: the non-headless build wants
-`libGL`, which a container has no reason to carry.
+`--no-deps` is the step that matters. Plain `pip install ultralytics`
+resolves torch from PyPI, PyPI's torch is the CUDA build, and it **overwrites
+the ROCm one** with no error: `torch.cuda.is_available()` turns False and
+`train.py` falls back to the CPU. Run that assert after any later install.
 
-## 4. Upload the dataset and the code
+The dataset's `path:` still says where it was built (`/Users/...`); `train.py`
+notices and repoints it at the yaml's own directory, and says so.
+
+**Files written inside the container die with it.** Copy weights out to the
+host as you go, and from there to your Mac:
 
 ```bash
-# from your laptop
-scp dataset.tgz root@<droplet-ip>:/root/frc/
-./deploy/make_code_archive.sh && scp tbavid_code.tgz root@<droplet-ip>:/root/frc/
-# on the droplet
-cd /root/frc && tar -xzf tbavid_code.tgz && tar -xzf dataset.tgz
+# host
+docker cp rocm:/workspace/frc/runs/fuel26_mi300x/weights/best.pt /root/frc/
 ```
 
-The code archive excludes `.env` by design, and training does not need a TBA
-key — it reads `dataset/`, not the API.
+### An ssh alias saves every later command a flag
+
+The droplet logs in as `root`; the key is whichever one you attached at
+creation. In `~/.ssh/config` on the Mac:
+
+```
+Host mi300x
+    HostName <droplet-ip>
+    User root
+    IdentityFile ~/.ssh/<the key you attached>
+```
+
+The 1-Click image also prints a JupyterLab URL and token. The token is a live
+credential for the box -- keep it out of chat logs and screenshots.
 
 ## 5. Warm MIOpen once, deliberately
 
@@ -144,8 +162,8 @@ will be. Give it a cache that survives a container restart, and let a 2-epoch
 run pay the cost while you are watching:
 
 ```bash
-export MIOPEN_USER_DB_PATH=/root/frc/.miopen
-export MIOPEN_CUSTOM_CACHE_DIR=/root/frc/.miopen
+export MIOPEN_USER_DB_PATH=/workspace/frc/.miopen
+export MIOPEN_CUSTOM_CACHE_DIR=/workspace/frc/.miopen
 export PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
 mkdir -p "$MIOPEN_USER_DB_PATH"
 
@@ -167,24 +185,27 @@ python3 train/train.py \
     --model yolo26s.pt --p2 \
     --imgsz 1280 \
     --epochs 100 \
-    --batch 32 \
-    --workers 32 \
+    --batch 16 \
+    --workers 16 \
     --cache ram \
     --name fuel26_mi300x
 ```
 
 What changed from the laptop defaults, and why each one:
 
-- **`--batch 32`** (was 4). The M2 measurement is ~1.1 GB per image for
-  `s`+P2 at 960, so 32 is an *estimated* ~50 GB of 192 — deliberately short of
-  the ceiling. `--batch 0.70` lets Ultralytics fill 70% of memory instead, and
+- **`--batch 16`** (was 4). Memory would allow far more -- the M2 measurement
+  is ~1.1 GB per image for `s`+P2 at 960 -- but a first harvest is ~700
+  training frames, and at 16 that is ~45 optimizer steps an epoch against 23
+  at 32. Step count is the constraint here, not memory. `--batch 0.70` lets Ultralytics fill 70% of memory instead, and
   `--batch -1` lets it guess; both are now accepted. Read step 7 before
   raising it.
 - **`--imgsz 1280`** (was 960). Fuel is ~17 px, and the native frame is
   1920x504. Resolution is what a small-object problem actually wants, and on
   this card it is affordable in a way batch size is not useful.
-- **`--workers 32`, `--cache ram`**. With this much compute, JPEG decoding
-  becomes the bottleneck and the GPU idles at 30% while eight cores decode.
+- **`--workers 16`, `--cache ram`**. With this much compute, JPEG decoding
+  becomes the bottleneck and the GPU idles while the CPU decodes. The 1x plan
+  has 20 vCPU; 16 workers leaves room for the trainer itself, and more than the
+  core count oversubscribes and gets slower, not faster.
   `ram` caches the decoded set — about 1.4 GB per 1000 frames at this size, so
   under 10 GB of system RAM for the whole harvest.
 - **`--p2`** stops being a considered tradeoff. It costs speed and memory, and
