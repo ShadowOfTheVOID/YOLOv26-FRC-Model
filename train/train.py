@@ -71,6 +71,28 @@ def repoint_dataset(data_yaml: Path) -> None:
         return
 
 
+def share_by_file() -> None:
+    """Pass dataloader tensors between processes by file, not by descriptor.
+
+    PyTorch's default on Linux hands each tensor a worker produces to the
+    trainer as an open file descriptor. A batch here is a lot of tensors --
+    one measured batch carried 6,454 fuel labels across 16 images -- and 16
+    workers each keep several batches in flight, so a busy batch pushes the
+    process past the container's open-file limit (often 1024). What that
+    looks like is not an error about files: it is "received 0 items of
+    ancdata" and "Pin memory thread exited unexpectedly", four epochs into a
+    run that was fine, on the MI300X droplet.
+
+    The file_system strategy shares through /dev/shm instead, which the limit
+    does not touch. Linux only; macOS already uses its own mechanism.
+    """
+    import platform
+    if platform.system() != "Linux":
+        return
+    import torch.multiprocessing as mp
+    mp.set_sharing_strategy("file_system")
+
+
 def batch_arg(text: str):
     """`--batch 32`, `--batch 0.70`, `--batch -1`.
 
@@ -212,6 +234,7 @@ def main() -> int:
     print(f"{len(non_empty)} labelled frames of {len(labels)} label files")
 
     from ultralytics import YOLO
+    share_by_file()
     device = args.device or pick_device()
     print(f"device: {device}")
     describe_device(device)

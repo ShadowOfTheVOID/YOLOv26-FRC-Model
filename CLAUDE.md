@@ -114,6 +114,11 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
   crash had P2 at 1280; the warmup at 960 without P2 ran clean at batch 16.
   Which of the two is responsible has not been separated — `--p2 --imgsz
   960` is the next experiment. Known good: `--imgsz 960`, no `--p2`.
+- `received 0 items of ancdata` / `Pin memory thread exited unexpectedly` is
+  the dataloader exceeding the container's open-file limit on a dense batch.
+  `train.py` shares tensors via `/dev/shm` to avoid it; `ulimit -n 65536`
+  works on older code. Resume with `--model runs/<name>/weights/last.pt
+  --resume`.
 - Run training under `nohup ... > train.log 2>&1 &`; a foreground run dies
   when the terminal is needed for anything else.
 

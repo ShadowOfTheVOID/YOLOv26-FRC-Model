@@ -341,6 +341,14 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **Training no longer dies on a dense batch after a few good epochs.** On
+  the MI300X droplet a clean run (mAP50 0.49 → 0.54 over epochs 2–4) died in
+  epoch 5 with `received 0 items of ancdata` and `Pin memory thread exited
+  unexpectedly` — nothing about files, though that is the cause. PyTorch's
+  dataloader hands tensors between processes as open file descriptors; a
+  batch of 16 frames carrying 6,454 fuel labels, times 16 workers, ran the
+  container past its open-file limit. `train.py` now uses the `file_system`
+  sharing strategy on Linux, which goes through `/dev/shm` instead.
 - **The MI300X recipe drops `--p2` and trains at 960.** `yolo26s --p2
   --imgsz 1280` died in epoch 1 inside the loss's `TaskAlignedAssigner`: one
   16.6 GiB allocation refused with 177 GiB free. Cutting the batch from 16 to

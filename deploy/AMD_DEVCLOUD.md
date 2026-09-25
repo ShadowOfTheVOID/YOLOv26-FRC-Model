@@ -220,6 +220,13 @@ What changed from the laptop defaults, and why each one:
   core count oversubscribes and gets slower, not faster.
   `ram` caches the decoded set — about 1.4 GB per 1000 frames at this size, so
   under 10 GB of system RAM for the whole harvest.
+- **A crash four epochs in that names no file.** `received 0 items of
+  ancdata`, then `Pin memory thread exited unexpectedly`: dataloader workers
+  hand tensors over as open file descriptors, a dense batch (6,454 labels in
+  one) runs the container past its open-file limit, and it dies. `train.py`
+  now shares through `/dev/shm` instead; on older code, `ulimit -n 65536`
+  before launching does the same job. Resume a dead run from its last epoch
+  with `--model runs/<name>/weights/last.pt --resume`.
 - **What was given up.** At 960 a 17 px ball is ~8 px on the finest (stride
   8) grid, which is exactly what `--p2` was meant to fix. Getting it back
   means finding which of P2 and 1280 triggers the refusal -- `--p2 --imgsz
