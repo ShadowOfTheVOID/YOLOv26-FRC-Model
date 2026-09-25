@@ -336,6 +336,23 @@ harvest's output as a source of its own.
   Frames below `--min-singles` or `--min-coverage` are now moved to
   `dataset/skipped/` and reported per match, with `--no-quarantine` to label
   them anyway. Re-running `prepare_dataset.py` restores anything moved.
+- **`train/drop_offcamera.py` removes frames that are not the main camera.**
+  A crowd shot that survived the harvester's shot cut reached the labeller,
+  which proposed 49 boxes on spectators' yellow shirts — and every quality
+  check passed it, because they ask whether the visible yellow ended up inside
+  a box and on that frame it did. Nothing in a colour gate can know the yellow
+  is a T-shirt, and nothing in the per-frame checks separated it: the dark
+  arena's real field frame scores lower on floor area and on ball-size spread
+  than the crowd shot does.
+  What separates them is that the camera does not move within a match, so the
+  match's own median frame is what the field looks like and a crowd shot is a
+  different picture rather than a bad one. Each frame is scored by its mean
+  absolute difference from that median on a 64×24 thumbnail, as a modified
+  z-score against the match's own spread (median and MAD, so a handful of
+  crowd shots cannot raise their own bar). On a synthetic match of 40 field
+  frames and 3 crowd shots: field frames peak at z=1.1, crowd shots score 238,
+  and the default threshold of 8 sits between them with a 216× margin.
+  Run it before `autolabel_fuel.py`; `--dry-run` lists without moving.
 - **`prepare_dataset.py --matches`** builds a dataset from named matches or a
   whole event. The fuel labeller is a colour heuristic and does not survive
   every broadcast: a wide shot whose fuel sits in one corral gives it 9–22
