@@ -336,6 +336,19 @@ harvest's output as a source of its own.
   Frames below `--min-singles` or `--min-coverage` are now moved to
   `dataset/skipped/` and reported per match, with `--no-quarantine` to label
   them anyway. Re-running `prepare_dataset.py` restores anything moved.
+- **`CLAUDE.md`** gives a Claude Code session on another machine the context
+  this work was done in: the commands, the harvest and training flows, the
+  stdlib-only rule for the API path, what the fuel labeller can and cannot
+  label and why, and the pitfalls of the MI300X droplet — with a dated
+  "current work" section meant to be deleted once it goes stale.
+- **The MI300X recipe trains at `--batch 4`, not 16.** `yolo26s --p2
+  --imgsz 1280 --batch 16` died in epoch 1 inside the loss's
+  `TaskAlignedAssigner`: one 16.6 GiB allocation refused with 177.4 GiB free,
+  a single-block limit on the virtualized card rather than a full one. The
+  tensor is batch × objects × anchor positions, and this data drives all
+  three up — mosaic packs ~500 fuel into an image, and P2 at 1280 is ~136k
+  positions. Batch 4 cuts it fourfold; `--imgsz 960 --batch 8` is the
+  fallback. Not yet confirmed through a full run.
 - **A dataset built on one machine now trains on another.** `prepare_dataset.py`
   and `subset_classes.py` write an absolute `path:` into the yaml — they have
   to, since Ultralytics resolves a relative one against its own datasets
