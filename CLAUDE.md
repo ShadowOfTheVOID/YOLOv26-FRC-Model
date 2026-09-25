@@ -135,6 +135,24 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
 
 ## Current work (as of 2026-09-25 — delete this section once stale)
 
+**Deadline: the 10-st-throwdown scrimmage, Saturday 2026-10-10.** The model's
+jobs, in priority order: (1) replace FMS scoring at that scrimmage via
+`run.py count --scoreboard`; (2) per-robot scouting — who shot, made and
+missed — which is weeks of work (robot labels, team identity, shot and miss
+detection) and is planned for after the scrimmage.
+
+Blocking the scrimmage path:
+- `count.py` refuses a model without `hub_blue`/`hub_red` classes even when hub
+  boxes are passed explicitly, so the fuel-only model cannot count as-is.
+  Planned: accept a fuel-only model when hub boxes are given.
+- Hub active/inactive is not modelled anywhere; the counter credits every ball
+  into a hub. The game rule (what switches state, whether inactive-hub fuel
+  scores) is still to be confirmed with the user before designing it.
+- The model has only seen the nhdur broadcast. It must be validated on a
+  recording from the scrimmage's own camera position against a hand count,
+  and benchmarked (`train/benchmark.py`) on the laptop that will run it.
+- Recommend a human scorekeeper in parallel on the day.
+
 - Branch `claude/exciting-gauss-cyri8u`, pushed, not merged.
 - Dataset: `dataset-fuel/` built with `--matches 2026nhdur`, off-camera frames
   dropped, fuel-only — 721 train / 185 val, 200,252 boxes. Val is a single
