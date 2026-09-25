@@ -66,6 +66,14 @@ counting model (`fuel`, `hub_blue`, `hub_red`) come from one labelled set.
 Training writes weights only; `run.py detect --weights .../best.pt` is what
 fills the database's `detections` table afterwards.
 
+**Scoring and scouting logic** is pure state, no model or video, so it is
+tested without a GPU: `count.BallCounter` counts balls into each hub (a fuel
+track that enters a hub region and vanishes, with guards against blobs,
+occlusion and pass-overs); `shooting.ShotCounter` adds whose they were and the
+misses — a shot is a ball that starts at a robot and gets clear of it, and
+broken flights are stitched back together. Its per-hub totals must equal
+`BallCounter`'s for the same balls; a test holds them to that.
+
 ## Labelling: what was learned the hard way
 
 `autolabel_fuel.py` is a colour heuristic with several passes — colour gate,
@@ -135,13 +143,24 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
 
 ## Current work (as of 2026-09-25 — delete this section once stale)
 
-**Deadline: the 10-st-throwdown scrimmage, Saturday 2026-10-10.** The model's
-jobs, in priority order: (1) replace FMS scoring at that scrimmage via
-`run.py count --scoreboard`; (2) per-robot scouting — who shot, made and
-missed — which is weeks of work (robot labels, team identity, shot and miss
-detection) and is planned for after the scrimmage.
+**The point of the model is per-robot scouting**: which robot shot, how many
+it made, how many it missed. It must also replace FMS scoring at the
+10-st-throwdown scrimmage, **Saturday 2026-10-10**; scoring is a subset of
+the same pipeline, since per-hub totals fall out of attributed shots.
 
-Blocking the scrimmage path:
+Status of per-robot scouting:
+- `tbavid/shooting.py` (`ShotCounter`) is built and tested as logic only. Not
+  yet wired to a model or video.
+- It needs a model that detects robots (`robot_blue`/`robot_red`); none has
+  been trained, and there are no robot labels yet.
+- It needs video at the camera's native frame rate: ball flights cannot be
+  tracked from the 3 fps exported frames.
+- Tallies are per robot track. Team identity is still open: an operator
+  assigning tracks to teams at match start is the practical route at a
+  scrimmage; `identify.py` bumper OCR is unreliable at broadcast resolution.
+- Not yet validated against a hand-scored match.
+
+Blocking scoring at the scrimmage:
 - `count.py` refuses a model without `hub_blue`/`hub_red` classes even when hub
   boxes are passed explicitly, so the fuel-only model cannot count as-is.
   Planned: accept a fuel-only model when hub boxes are given.

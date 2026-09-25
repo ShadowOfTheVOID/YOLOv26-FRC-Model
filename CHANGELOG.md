@@ -341,6 +341,23 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **`tbavid/shooting.py` — who shot, and the misses.** `count.py` knows how
+  many balls went into each hub; scouting needs whose they were, and the
+  misses, which `count.py` cannot see at all since a ball that never reaches a
+  hub is not an event there. `ShotCounter` follows each ball from the robot
+  that launched it to wherever it ended and files **made**, **missed** or
+  **wrong hub** against that robot track. A shot is a ball that starts at a
+  robot *and gets clear of it* — measured from the robot's box as it is now,
+  so a ball riding in a hopper is not a shot every time its robot drives. A
+  make with no visible shooter is kept as *unattributed*, so per-hub totals
+  always equal `BallCounter`'s for the same balls; a test holds them to that.
+  Flights the tracker breaks are stitched back together by where the ball was
+  heading. The first detector's per-frame recall of 0.62 makes those routine,
+  and each would otherwise read as a miss by the shooter plus a make by
+  nobody. That includes a flight broken before the ball cleared its robot,
+  which the first version called "carried". `by_team()` folds robot tracks
+  into teams once something assigns them. Logic only: nothing trains robot
+  detection yet, and it needs native-frame-rate video, not 3 fps frames.
 - **Training no longer dies on a dense batch after a few good epochs.** On
   the MI300X droplet a clean run (mAP50 0.49 → 0.54 over epochs 2–4) died in
   epoch 5 with `received 0 items of ancdata` and `Pin memory thread exited

@@ -30,6 +30,7 @@ from tbavid.db import build, connect, export_for_serving, summary, write_live
 from tbavid.live import Counter as LiveCounter
 from tbavid.count import (BallCounter, health, hub_of, hubs_from_db,
                           learn_hubs)
+from tbavid.shooting import ShotCounter
 from tbavid.detect import (CLASSES, alliance_of, frame_path, model_source,
                            rows_from_boxes, write_rows)
 from tbavid.field import AUTO, ENDED, IDLE, TELEOP, Match
@@ -1140,6 +1141,172 @@ def test_ball_counting():
           any("too few frames" in l for l in c.report()))
 
 
+def _still(tid, alliance, box, frames):
+    """A robot standing in one place for the given frames."""
+    return {tid: [(f, (alliance, box)) for f in range(frames)]}
+
+
+def _play_shots(robots, balls, **kw):
+    """Run robot and ball paths through a ShotCounter. Returns (events, counter)."""
+    c = ShotCounter(HUB, **kw)
+    frames = [f for p in list(robots.values()) + list(balls.values()) for f, _ in p]
+    last = max(frames) if frames else 0
+    events = []
+    for frame in range(last + 30):
+        r = {tid: v for tid, path in robots.items() for f, v in path if f == frame}
+        b = {tid: box for tid, path in balls.items() for f, box in path if f == frame}
+        events += c.update(frame, frame / 30.0, r, b)
+    events += c.flush(last + 40, (last + 40) / 30.0)
+    return events, c
+
+
+# A blue robot standing below-left of the blue hub (300..400 x 100..200).
+BLUE_BOT = (100.0, 300.0, 80.0, 60.0)
+RED_BOT = (500.0, 300.0, 80.0, 60.0)
+
+
+def _shot(tid, x1, y1, n=20, start=0, x0=134.0, y0=300.0, keep=None):
+    """A ball leaving the blue robot's top edge for (x1, y1), top-left coords.
+
+    `keep` drops frames from the flight, to make a track the detector broke.
+    """
+    path = _fly(tid, x0, y0, x1, y1, n, start=start)[tid]
+    if keep is not None:
+        path = [(f, b) for i, (f, b) in enumerate(path) if keep(i)]
+    return {tid: path}
+
+
+def test_shot_attribution():
+    """Who shot, and did it go in -- including the misses count.py cannot see.
+
+    Every case here is a way per-robot scouting numbers go wrong without anyone
+    noticing: a ball in a hopper counted as a shot every time its robot drove,
+    an intake counted as a make, a pass-over counted as in, and -- the one the
+    first detector's 0.62 per-frame recall makes routine -- a flight the tracker
+    broke in two, read as a miss by its shooter plus a make by nobody.
+    """
+    bot = _still(1, "blue", BLUE_BOT, 80)
+
+    events, c = _play_shots(bot, _shot(10, 344, 144))
+    s = c.per_robot.get(1, {})
+    check("a shot from a robot into its hub is a make for that robot",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (1, 1, 0))
+    check("and says which robot, alliance and outcome",
+          [(e["robot"], e["alliance"], e["outcome"]) for e in events]
+          == [(1, "blue", "made")])
+
+    _, c = _play_shots(bot, _shot(11, 600, 420))
+    s = c.per_robot.get(1, {})
+    check("a shot that lands away from any hub is a miss -- which count.py never sees",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (1, 0, 1))
+
+    # A ball riding in a hopper while its robot drives 200 px. It travels far
+    # from where it started, but never gets clear of the robot it is in.
+    driving = {1: [(f, ("blue", (100.0 + 5 * f, 300.0, 80.0, 60.0))) for f in range(40)]}
+    carried = {12: [(f, (134.0 + 5 * f, 310.0, 12.0, 12.0)) for f in range(40)]}
+    _, c = _play_shots(driving, carried)
+    check("a ball carried in a moving robot is not a shot",
+          not c.per_robot and c.ignored["carried"] == 1)
+
+    # A ball on the floor rolled into a robot's intake: ends at a robot, not a hub.
+    intake = {13: [(f, (400.0 - 8 * f, 350.0, 12.0, 12.0)) for f in range(30)]}
+    _, c = _play_shots(bot, intake)
+    check("a ball picked up off the floor is neither a shot nor a make",
+          not c.per_robot and sum(c.hub_totals().values()) == 0)
+
+    # Seen for the first time mid-air -- launch hidden behind another robot.
+    # Nobody gets the credit, but the hub still has the ball.
+    _, c = _play_shots(bot, _fly(14, 240, 150, 344, 144, 12))
+    check("a make with no visible shooter is unattributed, not lost",
+          not c.per_robot and c.unattributed["blue"] == 1
+          and c.hub_totals()["blue"] == 1)
+
+    # The flight broken for 3 frames: the old track is still 'missing' when the
+    # new id appears where the ball was heading.
+    short = _shot(15, 344, 144, keep=lambda i: not 10 <= i <= 12)
+    short = {15: [(f, b) for f, b in short[15] if f < 10],
+             16: [(f, b) for f, b in short[15] if f > 12]}
+    _, c = _play_shots(bot, short)
+    s = c.per_robot.get(1, {})
+    check("a flight the tracker broke briefly is still one make",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (1, 1, 0)
+          and c.unattributed["blue"] == 0 and c.stitched == 1)
+
+    # Broken for long enough that the first piece had already ended as a miss.
+    longer = _shot(17, 344, 144, n=24)
+    longer = {17: [(f, b) for f, b in longer[17] if f < 8],
+              18: [(f, b) for f, b in longer[17] if f > 14]}
+    _, c = _play_shots(bot, longer)
+    s = c.per_robot.get(1, {})
+    check("...and a longer break takes back the miss it had looked like",
+          (s.get("made"), s.get("missed")) == (1, 0) and c.unattributed["blue"] == 0)
+
+    # Into the hub region, then out the other side: it passed over.
+    over = _shot(19, 344, 144)
+    over.update(_fly(20, 360, 144, 620, 144, 15, start=24))
+    _, c = _play_shots(bot, over)
+    s = c.per_robot.get(1, {})
+    check("a shot that passes over the hub and lands beyond it is a miss",
+          (s.get("made"), s.get("missed")) == (0, 1) and c.reacquired == 1)
+
+    # Two robots; the ball starts at the red one and goes in the blue hub.
+    both = dict(bot)
+    both.update(_still(2, "red", RED_BOT, 80))
+    events, c = _play_shots(both, _shot(21, 344, 144, x0=534.0))
+    check("the ball is credited to the robot it left, not the nearest one later",
+          2 in c.per_robot and 1 not in c.per_robot)
+    check("and a red robot scoring in the blue hub is recorded as that, not a make",
+          c.per_robot[2]["wrong_hub"] == 1 and c.per_robot[2]["made"] == 0
+          and c.hub_totals()["blue"] == 1)
+
+    # Shooting from against the hub: almost no room to clear the robot, but the
+    # hub proves the ball left it.
+    close = _still(3, "blue", (300.0, 212.0, 80.0, 60.0), 40)
+    _, c = _play_shots(close, {22: [(f, (330.0, 206.0 - 8 * f, 12.0, 12.0))
+                                    for f in range(8)]})
+    check("a shot from against the hub still counts, though it barely cleared",
+          c.per_robot.get(3, {}).get("made") == 1)
+
+    # Tracks fold into teams, and an unassigned one is kept, not dropped.
+    two = _shot(23, 344, 144)
+    two.update(_shot(24, 600, 420, start=30))
+    _, c = _play_shots(_still(1, "blue", BLUE_BOT, 80), two)
+    teams = c.by_team({1: 254})
+    check("by_team folds a robot's tracks into its team",
+          teams[254]["shots"] == 2 and teams[254]["made"] == 1
+          and teams[254]["missed"] == 1)
+    check("the report reads per robot, with accuracy",
+          any("2 shots, 1 made, 1 missed" in l and "50%" in l for l in c.report()))
+
+    # The ordinary case on a real field: a ball rides in the hopper while the
+    # robot drives, then is shot. One track, one shot -- the carrying is not a
+    # second one, and the drive does not make it a shot early.
+    drive = {4: [(f, ("blue", (60.0 + 3 * f, 300.0, 80.0, 60.0))) for f in range(60)]}
+    ride = [(f, (94.0 + 3 * f, 310.0, 12.0, 12.0)) for f in range(20)]
+    x, y = ride[-1][1][0], ride[-1][1][1]
+    ride += [(20 + i, (x + (344 - x) * i / 14, y + (144 - y) * i / 14, 12.0, 12.0))
+             for i in range(1, 15)]
+    _, c = _play_shots(drive, {25: ride})
+    s = c.per_robot.get(4, {})
+    check("a ball carried and then shot is one shot, and a make",
+          (s.get("shots"), s.get("made")) == (1, 1) and c.ignored["carried"] == 0)
+
+    # Scouting and scoring must never disagree about what went in. The same
+    # balls through BallCounter and ShotCounter give the same per-hub totals,
+    # whoever shot them and whether a shooter was seen at all.
+    both = dict(_still(1, "blue", BLUE_BOT, 90))
+    both.update(_still(2, "red", RED_BOT, 90))
+    balls = _shot(26, 344, 144)                            # blue robot, made
+    balls.update(_fly(27, 240, 150, 344, 144, 12, start=30))   # nobody, made
+    balls.update(_shot(28, 344, 150, x0=534.0, start=50))  # red robot, blue hub
+    balls.update(_shot(29, 600, 420, start=20))            # blue robot, missed
+    _, shots = _play_shots(both, balls)
+    _, scores = _play(balls)
+    check("per-hub totals from shots agree with the scoring counter",
+          shots.hub_totals() == scores.totals
+          and shots.hub_totals()["blue"] == 3)
+
+
 def test_hub_geometry():
     """Where the hub is, learned or recorded."""
     check("a point in the hub names its alliance",
@@ -1618,7 +1785,7 @@ def main() -> int:
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
                test_serving_export, test_live_counter, test_live_rows,
                test_detect_rows, test_detect_writes, test_api_stays_stdlib,
-               test_ball_counting, test_hub_geometry, test_scrimmage_scoreboard,
+               test_ball_counting, test_shot_attribution, test_hub_geometry, test_scrimmage_scoreboard,
                test_nothing_to_verify_against, test_counting_model_dataset,
                test_model_must_name_its_classes):
         fn()
