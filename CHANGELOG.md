@@ -336,6 +336,13 @@ harvest's output as a source of its own.
   Frames below `--min-singles` or `--min-coverage` are now moved to
   `dataset/skipped/` and reported per match, with `--no-quarantine` to label
   them anyway. Re-running `prepare_dataset.py` restores anything moved.
+- **`prepare_dataset.py --matches`** builds a dataset from named matches or a
+  whole event. The fuel labeller is a colour heuristic and does not survive
+  every broadcast: a wide shot whose fuel sits in one corral gives it 9–22
+  isolated balls to measure from against 85 on a close one, and ball size,
+  ball saturation and the field region are all derived from those. It is
+  better to train on the broadcasts it handles than on labels it got wrong
+  everywhere else.
 - **The preview names which pass proposed each box** — red through the gate,
   orange split out of a cluster, cyan rescued from shade, green dropped as a
   reflection, with the learned field line drawn in white. `train/diagnose_labels.py`

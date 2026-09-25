@@ -101,6 +101,16 @@ def main() -> int:
                     help="cap frames per match (0 = all). 60-100 diverse frames "
                          "beats 480 consecutive near-duplicates and trains in a "
                          "fraction of the time")
+    ap.add_argument("--matches", nargs="*", default=None,
+                    help="only these matches, by any substring of the id "
+                         "(e.g. 2026nhdur for a whole event). The fuel "
+                         "labeller is a colour heuristic and does not survive "
+                         "every broadcast -- on a wide shot whose fuel sits in "
+                         "one corral it has 9-22 isolated balls to measure "
+                         "from against 85 on a close one, and everything it "
+                         "derives from them is noise. Building the first "
+                         "dataset from the broadcasts it handles beats "
+                         "training on labels it got wrong")
     ap.add_argument("--scoreboard-ok-only", action="store_true",
                     help="use only matches whose scoreboard read cleanly. A "
                          "failed read means an overlay layout the crop "
@@ -121,6 +131,19 @@ def main() -> int:
     for f in frames:
         by_match[match_of(f)].append(f)
     matches = sorted(by_match)
+    if args.matches:
+        wanted = [m for m in matches if any(f in m for f in args.matches)]
+        dropped = [m for m in matches if m not in wanted]
+        if not wanted:
+            print(f"--matches {' '.join(args.matches)} left nothing. Available:")
+            for m in matches:
+                print(f"  {m}")
+            return 1
+        print(f"--matches keeps {len(wanted)} of {len(matches)} matches "
+              f"({len(dropped)} left out)")
+        matches = wanted
+        by_match = {m: by_match[m] for m in matches}
+        frames = [f for m in matches for f in by_match[m]]
 
     if args.scoreboard_ok_only:
         good = _scoreboard_ok_videos()
