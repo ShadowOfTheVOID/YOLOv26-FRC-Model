@@ -341,6 +341,18 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **Robot proposals stop boxing the crowd and start finding the near robots.**
+  The first real preview boxed three people in the stands and one robot of
+  six. People in alliance colours who move are exactly what the robot test
+  looks for, and nothing told it where the field was; meanwhile `--roi-bottom`
+  defaulted to 0.80 and threw away every robot in the near fifth of the frame,
+  which on that camera was most of them. Robots now have to sit below the
+  field line learned from the fuel on the same frame, the line autolabel_fuel
+  already uses, so it follows whatever camera is in use instead of assuming
+  one. `--roi-bottom` is now 0.98, since static things by the near rail
+  already fail the motion test. On a synthetic frame built to match that
+  preview, the old settings gave 2 boxes in the stands and 0 near robots; the
+  new ones give 0 and 2, plus the far robot. `--no-field-line` turns it off.
 - **Robots can be auto-labelled without the match videos, and their boxes
   cover the robot, not just its bumper.** `autolabel_objects.py` finds robots
   as bumper colour that has moved against the match's empty-field background,

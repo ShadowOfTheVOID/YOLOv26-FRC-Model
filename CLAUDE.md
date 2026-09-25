@@ -157,9 +157,12 @@ Status of per-robot scouting:
 - It needs a model that detects robots (`robot_blue`/`robot_red`); none has
   been trained yet. `train/autolabel_objects.py` now proposes robot boxes
   without the match videos (background = median of the match's own frames)
-  and boxes the whole robot, not just the bumper band. Its proposals include
-  people in alliance colours near the rail and need review; not yet run on
-  real frames.
+  and boxes the whole robot, not just the bumper band. First real preview:
+  3 people in the stands boxed, 1 robot of 6 found. Fixed by bounding robots
+  with the fuel-learned field line and relaxing `--roi-bottom` to 0.98 (was
+  0.80, which cut the near robots); re-preview on real frames to confirm.
+  The field line is one horizontal line, so side stands on an angled camera
+  still get through.
 - It needs video at the camera's native frame rate: ball flights cannot be
   tracked from the 3 fps exported frames.
 - Tallies are per robot track. Team identity: `run.py shots --annotate`

@@ -125,7 +125,29 @@ def robot_body(bumper: tuple, moving: np.ndarray) -> tuple:
     return (int(min(xs)), int(min(ys)), int(max(xe) - min(xs)), int(max(ye) - min(ys)))
 
 
-def robots(img: np.ndarray, bg: np.ndarray, roi_top: float, roi_bottom: float) -> list:
+def field_line(img: np.ndarray) -> int:
+    """The row above which nothing is on the field, from the fuel on it.
+
+    Borrowed from autolabel_fuel: fuel lies on the floor, so the densest run of
+    fuel rows marks where the field is, and a line a few ball-diameters above
+    it separates field from stands. Robots need it as much as fuel did. People
+    in the stands wear alliance colours and move, which is the whole robot
+    test, and a fixed fraction of frame height cannot say where the stands
+    stop on a camera nobody has measured.
+
+    Returns 0 when the frame has too little fuel to learn a line from, and the
+    fixed --roi-top applies alone.
+    """
+    from types import SimpleNamespace
+
+    import autolabel_fuel as af
+    gates = SimpleNamespace(hsv_lo=af.HSV_LO, hsv_hi=af.HSV_HI, min_area=60,
+                            max_area=3000, min_fill=0.62)
+    return af.af_field_top(img, gates)
+
+
+def robots(img: np.ndarray, bg: np.ndarray, roi_top: float, roi_bottom: float,
+           field_top: int = 0) -> list:
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     H = img.shape[0]
     diff = cv2.absdiff(img, bg).max(axis=2)
@@ -157,6 +179,8 @@ def robots(img: np.ndarray, bg: np.ndarray, roi_top: float, roi_bottom: float) -
             cy = (y + h / 2) / H
             if cy < roi_top or cy > roi_bottom:
                 continue                       # crowd above, rail below
+            if y + h / 2 < field_top:
+                continue                       # above the field: the stands
             out.append((cls,) + robot_body((int(x), int(y), int(w), int(h)), body))
     return out
 
@@ -182,8 +206,16 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--video", help="cleaned video for one match (default: all in db)")
     ap.add_argument("--roi-top", type=float, default=0.05)
-    ap.add_argument("--roi-bottom", type=float, default=0.80,
-                    help="ignore detections below this fraction (the near rail)")
+    ap.add_argument("--roi-bottom", type=float, default=0.98,
+                    help="ignore detections below this fraction. It was 0.80, "
+                         "which on a real broadcast discarded every robot in "
+                         "the near fifth of the field -- two of the three "
+                         "nearest robots in the first preview. Static things "
+                         "along the near rail are already rejected for not "
+                         "moving")
+    ap.add_argument("--no-field-line", dest="field_line", action="store_false",
+                    help="don't learn where the field starts from the fuel on "
+                         "it; use --roi-top alone")
     ap.add_argument("--preview", type=Path)
     ap.add_argument("--append", action="store_true",
                     help="accepted and ignored: appending is now the default")
@@ -235,7 +267,11 @@ def main() -> int:
                         for p in (DATASET / "images" / split).glob(f"{r['video_id']}_*.jpg"))
         if args.preview and images:
             img = cv2.imread(str(images[len(images) // 2]))
-            found = robots(img, bg, args.roi_top, args.roi_bottom) if bg is not None else []
+            line = field_line(img) if args.field_line else 0
+            found = (robots(img, bg, args.roi_top, args.roi_bottom, line)
+                     if bg is not None else [])
+            if line:
+                cv2.line(img, (0, line), (img.shape[1], line), (255, 255, 255), 1)
             for cls, x, y, w, h in found + hubs:
                 col = (255, 0, 0) if "blue" in cls else (0, 0, 255)
                 cv2.rectangle(img, (x, y), (x + w, y + h), col, 2)
@@ -251,7 +287,8 @@ def main() -> int:
             if img is None:
                 continue
             H, W = img.shape[:2]
-            boxes = (robots(img, bg, args.roi_top, args.roi_bottom)
+            line = field_line(img) if args.field_line else 0
+            boxes = (robots(img, bg, args.roi_top, args.roi_bottom, line)
                      if bg is not None else []) + hubs
             lines = [f"{CLASSES[c]} {(x+w/2)/W:.6f} {(y+h/2)/H:.6f} {w/W:.6f} {h/H:.6f}"
                      for c, x, y, w, h in boxes]
