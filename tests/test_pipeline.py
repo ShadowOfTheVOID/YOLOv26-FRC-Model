@@ -1632,6 +1632,18 @@ def test_robot_autolabel_rules():
     check("a box around two robots is not a robot", why[both] == "spans two")
     check("the wall is ~10x the frame's robots", why[wall] == "too big")
     check("size needs others to compare with", screen([wall])[0][1] is None)
+    # The KEEP frame from the first real previews: two hubs, the blue ladder
+    # around robot 1307, and three real robots. With the hubs in the median
+    # the ladder passed; it must be judged against robots only.
+    hub_b, hub_r = (493, 10, 690, 425, 0.22), (1265, 10, 1440, 330, 0.25)
+    ladder = (170, 147, 343, 348, 0.3)
+    r1307, r7674 = (267, 227, 343, 307, 0.12), (380, 205, 493, 275, 0.68)
+    r1058 = (1575, 283, 1688, 367, 0.50)
+    why = {d: r for d, r in screen([hub_b, hub_r, ladder, r1307, r7674, r1058])}
+    check("the ladder is too big once the hubs are out of the median",
+          why[ladder] == "too big")
+    check("and the near and far robots beside it are kept",
+          all(why[d] is None for d in (r1307, r7674, r1058)))
     check("a box ending above the field line is the stands",
           screen([blue], field_top=320)[0][1] == "above field")
 

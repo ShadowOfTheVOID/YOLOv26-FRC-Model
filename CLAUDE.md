@@ -158,11 +158,16 @@ Status of per-robot scouting:
   been trained yet. The motion heuristic in `autolabel_objects.py` found 1 of
   6 robots on the first real preview and still missed three after fixes;
   don't tune it further. `train/autolabel_robots.py` (YOLOE, text prompts,
-  whole frame + 2x tiles) replaced it for robots: 4/5 and 2/5 on two
-  hand-marked real frames, false positives removed by the tall / spans-two /
-  too-big rules. It gates frames (unknown alliance or < `--min-robots` found
-  → moved to `dataset/skipped/robots/`); both test frames were rejected, so
-  its yield on a real dataset is the next thing to measure (`--dry-run`).
+  whole frame + 2x tiles) replaced it for robots. Five real nhdur previews:
+  ~16 of 27 robots found (~60%), no frame fully boxed; of 10 misses, 5 show
+  at conf 0.02-0.12 and 5 not at all. False positives (hubs, a box over two
+  robots, alliance wall, blue ladder) are removed by the tall / spans-two /
+  too-big rules. Gate: unknown alliance drops the frame; `--min-robots`
+  defaults to 2 (4 kept nothing usable). Labels will be noisy -- a weak first
+  robot model, improved by relabelling with it, is the realistic outcome.
+  Alliance is read from the box's bottom band, so a box that stops above the
+  bumper can read the ramp under it (robot 307 came out red over the red
+  ramp).
   YOLOE weights come from GitHub releases; huggingface is not needed.
 - It needs video at the camera's native frame rate: ball flights cannot be
   tracked from the 3 fps exported frames.

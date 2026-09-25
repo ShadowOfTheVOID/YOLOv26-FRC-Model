@@ -27,6 +27,16 @@ partially: below --min-robots, or with a robot whose alliance cannot be read,
 the whole frame is moved out of the dataset to dataset/skipped/robots/, image
 and label together, and `--restore` puts every one back.
 
+The first five real previews (nhdur, ~27 robots hand-counted) settled how
+strict that can be. YOLOE found ~16 of 27 robots (~60%); no frame had all of
+its robots boxed, and at --min-robots 4 the gate kept one frame of five -- the
+one where the blue ladder had passed as a robot. Of the 10 robots it missed,
+5 appear at conf 0.02-0.12 and 5 not at all, so no lower threshold closes the
+gap. A gate that keeps nothing trains nothing, so the default is 2: frames
+still carry unlabelled robots, and the bootstrap in train/README.md, not this
+script, is what recovers them. Unknown alliance still drops the frame (2 of
+the 5), because a wrong class is worse than a missing frame.
+
 Alliance comes from the bottom band of the box, where the bumper is: a hue
 vote among pixels saturated enough to have a hue at all. Measured: 7314 blue
 0.52 / red 0.00, 49/25 red 0.48 / 0.00. The fixed saturation >= 120 gate the
@@ -77,7 +87,7 @@ DECOYS = ("person", "chair", "hub")
 
 TALL = 1.3          # h/w above this is not a robot: the hubs came out 1.0-2.3
 HOLDS = 0.8         # a box with two others this far inside it spans two robots
-BIG = 4.0           # area over this many times the other boxes' median
+BIG = 3.0           # area over this many times the other robots' median
 HUE_SAT, HUE_VAL = 60, 30
 BLUE_HUE = (95, 130)
 RED_HUE = (10, 165)  # red is <= 10 or >= 165 on OpenCV's 0-180 hue
@@ -124,22 +134,35 @@ def screen(dets: list, field_top: int = 0) -> list:
     robot's size depends on the camera. The red alliance wall and ladder came
     out as a 0.14 "robot" 265 x 285 px, 9.7x the median of the four real
     robots in the same frame (~7,800 px^2 each).
+
+    The median is over boxes that are not already rejected. It first included
+    the two hubs (tall, ~56,000 and ~82,000 px^2), which lifted it far enough
+    that the blue ladder -- 34,800 px^2 against real robots of 6,100-9,500 --
+    came out 3.7x and passed as a robot, in the one frame of the first five
+    real previews that the gate kept. Against the robots alone it is 4.4x.
+    Real robots in those frames differ by at most ~1.7x near to far, so the
+    limit is 3x, not 4x.
     """
-    out = []
-    areas = [(d[2] - d[0]) * (d[3] - d[1]) for d in dets]
-    for i, d in enumerate(dets):
+    first = []
+    for d in dets:
         w, h = d[2] - d[0], d[3] - d[1]
-        others = areas[:i] + areas[i + 1:]
         if h > TALL * w:
             why = "tall"
         elif sum(inside(o, d) >= HOLDS for o in dets if o is not d) >= 2:
             why = "spans two"
-        elif len(others) >= 2 and w * h > BIG * float(np.median(others)):
-            why = "too big"
         elif field_top and d[3] < field_top:
             why = "above field"
         else:
             why = None
+        first.append((d, why))
+    out = []
+    for d, why in first:
+        if why is None:
+            others = [(o[2] - o[0]) * (o[3] - o[1]) for o, w in first
+                      if w is None and o is not d]
+            area = (d[2] - d[0]) * (d[3] - d[1])
+            if len(others) >= 2 and area > BIG * float(np.median(others)):
+                why = "too big"
         out.append((d, why))
     return out
 
@@ -291,10 +314,10 @@ def main() -> int:
     ap.add_argument("--no-tiles", dest="tiles", action="store_false",
                     help="whole frame only: ~4x faster, finds fewer robots")
     ap.add_argument("--no-field-line", dest="field_line", action="store_false")
-    ap.add_argument("--min-robots", type=int, default=4,
-                    help="a frame with fewer is moved out, not half-labelled. "
-                         "Six are on the field; see --dry-run for how many "
-                         "frames survive each value")
+    ap.add_argument("--min-robots", type=int, default=2,
+                    help="a frame with fewer is moved out. 4 kept 1 of the "
+                         "first 5 real previews (and that one was wrong); "
+                         "see --dry-run for how many survive each value")
     ap.add_argument("--preview", type=Path, metavar="DIR",
                     help="write annotated frames here and change nothing")
     ap.add_argument("--images", nargs="*", type=Path,

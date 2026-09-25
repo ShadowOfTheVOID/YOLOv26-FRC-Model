@@ -341,6 +341,16 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **Robot labelling: the blue ladder no longer passes as a robot, and the
+  gate keeps frames.** On the first five real previews the "too big" rule
+  compared each box with a median that included the two hubs (~56,000 and
+  ~82,000 px^2), so the ladder (34,800 px^2, beside robots of 6,100-9,500)
+  came out 3.7x and passed -- in the only frame the gate kept. The median is
+  now over boxes not already rejected, and the limit is 3x (real robots
+  differed by at most ~1.7x near to far). The same previews put YOLOE's
+  recall at ~16 of 27 robots; no frame had every robot boxed, so
+  `--min-robots` 4 kept nothing usable. The default is now 2, which keeps 3 of
+  those 5 frames; the missed robots in them are left for the bootstrap.
 - **Robot labels without hand-labelling: `train/autolabel_robots.py`.** Asks
   an open-vocabulary detector (YOLOE, `yoloe-26s-seg.pt`, prompted "robotic
   vehicle" / "robot" / "wheeled robot") for robots it was never trained on,
@@ -352,7 +362,7 @@ harvest's output as a source of its own.
   alliance wall). Alliance is a hue vote in the box's bumper band; the navy
   bumper of robot 69 has median saturation 8-93 and is left unknown rather
   than guessed. Recall is the weakness, so a frame is labelled only if every
-  robot found has a readable alliance and at least `--min-robots` (4) were
+  robot found has a readable alliance and at least `--min-robots` were
   found; otherwise it is moved to `dataset/skipped/robots/` with its label,
   and `--restore` brings them back. Both test frames were rejected, so how
   many of a real dataset survive is unmeasured: `--dry-run` reports it per
