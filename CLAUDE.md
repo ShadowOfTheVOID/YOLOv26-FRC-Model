@@ -155,20 +155,34 @@ Status of per-robot scouting:
   with robot ids drawn on, `--out` for JSON. It refuses a model without robot
   classes rather than reporting an empty scouting sheet.
 - It needs a model that detects robots (`robot_blue`/`robot_red`); none has
-  been trained, and there are no robot labels yet.
+  been trained yet. `train/autolabel_objects.py` now proposes robot boxes
+  without the match videos (background = median of the match's own frames)
+  and boxes the whole robot, not just the bumper band. Its proposals include
+  people in alliance colours near the rail and need review; not yet run on
+  real frames.
 - It needs video at the camera's native frame rate: ball flights cannot be
   tracked from the 3 fps exported frames.
-- Tallies are per robot track. Team identity is still open: an operator
-  assigning tracks to teams at match start is the practical route at a
-  scrimmage; `identify.py` bumper OCR is unreliable at broadcast resolution.
+- Tallies are per robot track. Team identity: `run.py shots --annotate`
+  then `--teams` (an operator reads the ids off the video) is what works now.
+  `identify.py` has the voting and assignment design but no bumper scorer.
+  Two scorers were tried on real bumpers from the 16/17 broadcasts (digits
+  ~9 px tall): plain rendered-digit template matching ranked the right number
+  2nd and 4th, and a band-localised version mislocated the number both times
+  (a sponsor mark merged in; grey floor passed as white digits). Don't build
+  on those. A camera placed to see bumpers at the scrimmage is the stronger
+  lever; for broadcast footage, tune a scorer on real bumper crops once a
+  robot model supplies them.
 - Not yet validated against a hand-scored match.
 
 Blocking scoring at the scrimmage:
 - Done: `count.py` accepts a fuel-only model when hub boxes are given
   (`--hub-blue/--hub-red` or `--event`), so the first model can count now.
 - Hub active/inactive is not modelled anywhere; the counter credits every ball
-  into a hub. The game rule (what switches state, whether inactive-hub fuel
-  scores) is still to be confirmed with the user before designing it.
+  into a hub. No visible state cue was found on the hubs in four broadcasts
+  (same black box and painted trim in every frame), so auto-labelling state
+  from pixels would be guessing. If state follows the match clock, it belongs
+  in `field.py`'s timeline, not the detector. The rule (what switches state,
+  whether inactive-hub fuel scores) is still to be confirmed with the user.
 - The model has only seen the nhdur broadcast. It must be validated on a
   recording from the scrimmage's own camera position against a hand count,
   and benchmarked (`train/benchmark.py`) on the laptop that will run it.

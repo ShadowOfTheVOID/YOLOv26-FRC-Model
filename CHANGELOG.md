@@ -341,6 +341,24 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **Robots can be auto-labelled without the match videos, and their boxes
+  cover the robot, not just its bumper.** `autolabel_objects.py` finds robots
+  as bumper colour that has moved against the match's empty-field background,
+  and took that background from the cleaned match video — which a frame bundle
+  does not include, so robots could not be proposed off the harvesting
+  machine at all. The camera is fixed for a match, so the median of the
+  match's own exported frames is that background: a robot is in any one place
+  for a small share of the match and drops out. Those frames are also the
+  ones the dataset images were copied from, so the background lines up pixel
+  for pixel. Separately, the box it drew was the bumper band only, and a shot
+  leaves from the top of the robot — so no launch would have started inside
+  any robot's box and `run.py shots` could never have attributed one. Boxes
+  now grow from the bumper up through the moving pixels connected to it,
+  using a more sensitive motion mask than the bumper gate, since a dark frame
+  over grey carpet differs from the empty field by only ~25 levels, under the
+  bumper gate's 40. On a synthetic match: background clean, each box from
+  bumper to shooter, two adjacent robots kept apart, a static blue ramp
+  ignored. Not yet checked on real frames — `--preview` is the check.
 - **`run.py shots` — per-robot scouting from a model over video.** Runs the
   detector with tracking over a match video or a camera, feeds robots and
   balls into `ShotCounter`, and prints each shot as it is decided and a
