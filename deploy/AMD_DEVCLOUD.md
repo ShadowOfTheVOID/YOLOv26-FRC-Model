@@ -187,10 +187,10 @@ Single GPU, the scouting detector, with the settings this hardware unlocks:
 ```bash
 python3 train/train.py \
     --data dataset/dataset.yaml \
-    --model yolo26s.pt --p2 \
-    --imgsz 1280 \
+    --model yolo26s.pt \
+    --imgsz 960 \
     --epochs 100 \
-    --batch 4 \
+    --batch 16 \
     --workers 16 \
     --cache ram \
     --name fuel26_mi300x
@@ -198,35 +198,32 @@ python3 train/train.py \
 
 What changed from the laptop defaults, and why each one:
 
-- **`--batch 4`** -- the same as the laptop, and not by choice. At 16 this
-  configuration crashes in the first epoch, inside the loss:
+- **No `--p2`, and `--imgsz 960`** -- not by choice. `--p2 --imgsz 1280`
+  crashes in the first epoch, inside the loss's `TaskAlignedAssigner`:
   `torch.OutOfMemoryError: Tried to allocate 16.60 GiB ... of which 177.40
-  GiB is free`. It is not the card running out; it is one allocation the
-  virtualized MI300X (the "VF") will not grant in a single block. The step
-  that matches predictions to labels (`TaskAlignedAssigner`) builds a tensor
-  of batch x objects x anchor positions, and this data drives all three up:
-  mosaic packs four frames of ~220 fuel into one image (sized for 500), and
-  the P2 head at 1280 is ~136,000 positions. The warmup's `yolo26n` at 960
-  built the same tensor at ~2.3 GB without complaint; the ceiling is
-  somewhere between. Batch 4 cuts it fourfold -- the fix in use, not yet
-  confirmed through a full 100-epoch run. If that still fails,
-  `--imgsz 960 --batch 8` is the fallback, trading resolution per ball for
-  batch. A warning that the assigner is "retrying assignment one image at a
-  time" is Ultralytics recovering on its own -- only a traceback is fatal.
-  On ~700 training frames, 180 steps an epoch is no hardship.
-- **`--imgsz 1280`** (was 960). Fuel is ~17 px, and the native frame is
-  1920x504. Resolution is what a small-object problem actually wants, and on
-  this card it is affordable in a way batch size is not useful -- though it
-  is also what drives the assigner tensor above, so resolution and batch
-  trade against each other here.
+  GiB is free`. The card is not full; one allocation that large is refused.
+  The first guess was that the batch sized it, and it was wrong: the request
+  was the same 16.60 GiB at `--batch 16` and at `--batch 4`. What every
+  crash had in common was the P2 head at 1280; what every clean run had in
+  common was 960 without it -- the warmup ran two epochs of that at batch 16
+  without one warning. Which of the two is responsible has not been
+  separated, so this recipe uses the configuration that has been shown to
+  work. A warning that the assigner is "retrying assignment one image at a
+  time" is Ultralytics recovering on its own; only a traceback is fatal.
+- **`--batch 16`** (was 4). ~700 training frames at 16 is ~45 optimizer
+  steps an epoch. Step count is the constraint here, not memory.
+  `--batch 0.70` lets Ultralytics fill 70% of memory and `--batch -1` lets it
+  guess; read step 7 before raising it.
 - **`--workers 16`, `--cache ram`**. With this much compute, JPEG decoding
   becomes the bottleneck and the GPU idles while the CPU decodes. The 1x plan
   has 20 vCPU; 16 workers leaves room for the trainer itself, and more than the
   core count oversubscribes and gets slower, not faster.
   `ram` caches the decoded set — about 1.4 GB per 1000 frames at this size, so
   under 10 GB of system RAM for the whole harvest.
-- **`--p2`** stops being a considered tradeoff. It costs speed and memory, and
-  here you have both.
+- **What was given up.** At 960 a 17 px ball is ~8 px on the finest (stride
+  8) grid, which is exactly what `--p2` was meant to fix. Getting it back
+  means finding which of P2 and 1280 triggers the refusal -- `--p2 --imgsz
+  960` is the obvious next experiment -- once a working `best.pt` exists.
 
 Eight GPUs, if you took the 8x droplet:
 

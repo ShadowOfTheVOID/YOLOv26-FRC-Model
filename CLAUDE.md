@@ -108,11 +108,12 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
   CUDA build silently. The hand-carried list must include `polars`.
 - `train.py` repoints a moved dataset's `path:` automatically.
 - `NNPACK ... Unsupported hardware` spam is harmless (one per dataloader worker).
-- `yolo26s --p2 --imgsz 1280 --batch 16` crashes in the loss's
-  TaskAlignedAssigner: one 16.6 GiB allocation refused with 177 GiB free (the
-  VF will not grant a single block that large). The tensor scales with
-  batch × objects (mosaic packs ~500) × anchors (P2 at 1280 ≈ 136k), so
-  `--batch 4` is the current fix; `--imgsz 960 --batch 8` is the fallback.
+- `yolo26s --p2 --imgsz 1280` crashes in the loss's TaskAlignedAssigner: one
+  16.6 GiB allocation refused with 177–186 GiB free. It asks for the same
+  16.6 GiB at batch 16 and batch 4, so batch is not what sizes it. Every
+  crash had P2 at 1280; the warmup at 960 without P2 ran clean at batch 16.
+  Which of the two is responsible has not been separated — `--p2 --imgsz
+  960` is the next experiment. Known good: `--imgsz 960`, no `--p2`.
 - Run training under `nohup ... > train.log 2>&1 &`; a foreground run dies
   when the terminal is needed for anything else.
 
@@ -134,8 +135,9 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
   dropped, fuel-only — 721 train / 185 val, 200,252 boxes. Val is a single
   match, so its mAP says "converged", not "works at a scrimmage".
 - Droplet: 1x MI300X, reachable from the Mac as `ssh mi300x` (alias in
-  `~/.ssh/config`). The first full run crashed on the assigner OOM above; the
-  next step was relaunching with `--batch 4` and confirming epoch 1 completes.
+  `~/.ssh/config`). P2 at 1280 crashed twice on the assigner OOM above (batch
+  16, then batch 4). Relaunched as `yolo26s --imgsz 960 --batch 16`, no P2,
+  under nohup in the container; confirm it gets past epoch 1.
   `deploy/amd_watch.sh` (untested) copies `best.pt` to the host as it trains.
 - After training: bring home `best.pt`, `results.csv`, `args.yaml`; destroy the
   droplet (it bills while idle, and is destroyed without warning when credit
