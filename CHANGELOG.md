@@ -320,6 +320,22 @@ harvest's output as a source of its own.
   up from 207 to 221. On a synthetic with reflections modelled physically —
   blended toward the floor colour rather than merely dimmed — all 11 are still
   caught, and a ball stacked under another ball survives. `--sat-keep` tunes it.
+- **A frame that cannot be labelled is now removed instead of mislabelled.**
+  Checked against four other broadcasts, the labeller fell apart on all of
+  them, and the cause is one number: every measurement here is scaled off the
+  ISOLATED balls, and those matches keep their fuel in one corral. The frame
+  this was tuned on shows 85 isolated balls; the four that failed show 6, 16,
+  20 and 22, so ball size, ball saturation and the field line are all being
+  read off noise. The decisive measure is what it leaves behind — of the
+  yellow pixels on the frame, how many ended up inside a proposal: 59% on the
+  working frame against 13%, 38%, 35% and 50%, which is a corral of several
+  hundred balls in plain sight with nothing drawn on it.
+  Writing those labels is worse than writing none, because Ultralytics reads
+  a missing box as "nothing here" — so the frame would teach the detector
+  that a mass of fuel is background, which is the thing it most needs to find.
+  Frames below `--min-singles` or `--min-coverage` are now moved to
+  `dataset/skipped/` and reported per match, with `--no-quarantine` to label
+  them anyway. Re-running `prepare_dataset.py` restores anything moved.
 - **The preview names which pass proposed each box** — red through the gate,
   orange split out of a cluster, cyan rescued from shade, green dropped as a
   reflection, with the learned field line drawn in white. `train/diagnose_labels.py`

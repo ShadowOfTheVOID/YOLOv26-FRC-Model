@@ -671,6 +671,47 @@ def af_field_top(img: np.ndarray, args, margin: float = 4.0) -> int:
                      unit_areas(singles, img.shape[0]), img.shape[0], margin)
 
 
+def frame_quality(img: np.ndarray, boxes: list, hsv_lo: tuple,
+                  hsv_hi: tuple) -> tuple:
+    """-> (isolated balls found, fraction of visible fuel inside a box).
+
+    Every measurement here is scaled off the ISOLATED balls: ball size per
+    band, ball saturation, where the field starts. A frame whose fuel is all
+    in one corral has almost none of them, and then nothing downstream means
+    anything. Measured across five broadcasts, the frame this was tuned on has
+    85 isolated balls and the four that failed have 6, 16, 20 and 22.
+
+    Counting them is not enough on its own, so the second number is the one
+    that decides: of the yellow pixels on this frame, how many ended up inside
+    some proposal. The working frame covers 59%. The four failures cover 13%,
+    38%, 35% and 50% -- which is a corral of several hundred balls sitting in
+    plain sight with no box on it.
+
+    That frame must not be labelled. Ultralytics reads the absence of a box as
+    "there is nothing here", so writing these labels teaches the detector that
+    a mass of fuel is background -- the exact thing it most needs to find, and
+    a lesson it will apply to every dense pile it ever sees.
+    """
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = cv2.morphologyEx(
+        cv2.inRange(hsv, np.array(hsv_lo, np.uint8), np.array(hsv_hi, np.uint8)),
+        cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    singles = 0
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if area < 60 or w < 5 or h < 4:
+            continue
+        if area <= 3000 and area / float(w * h) >= 0.62:
+            singles += 1
+    covered = np.zeros(mask.shape, np.uint8)
+    for x, y, w, h in boxes:
+        covered[max(y, 0):y + h, max(x, 0):x + w] = 1
+    total = int((mask > 0).sum())
+    frac = float(((mask > 0) & (covered > 0)).sum()) / total if total else 1.0
+    return singles, frac
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -758,6 +799,17 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="only the first N frames")
     ap.add_argument("--preview", type=Path, default=None,
                     help="write one annotated frame here and stop")
+    ap.add_argument("--min-singles", type=int, default=30,
+                    help="isolated balls a frame must show before its labels "
+                         "are trusted. Everything here is measured off them")
+    ap.add_argument("--min-coverage", type=float, default=0.55,
+                    help="fraction of the frame's visible fuel that must end "
+                         "up inside a box. Below this there is a corral no "
+                         "box was drawn on, and the labels would teach the "
+                         "detector that a pile of fuel is background")
+    ap.add_argument("--no-quarantine", dest="quarantine", action="store_false",
+                    help="write labels for frames that fail those checks "
+                         "instead of moving them out of the dataset")
     ap.add_argument("--show-dropped", action="store_true",
                     help="draw what the reflection filter removed, in green")
     ap.add_argument("--preview-frame", default=None,
@@ -820,7 +872,15 @@ def main() -> int:
                     (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         args.preview.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(args.preview), img)
+        singles, frac = frame_quality(img, gated + recovered + rescued,
+                                      args.hsv_lo, args.hsv_hi)
+        verdict = ("OK" if singles >= args.min_singles and frac >= args.min_coverage
+                   else "CANNOT LABEL -- would be quarantined")
         print(f"{src.name}\n"
+              f"  {singles:4} isolated balls to measure from (need "
+              f"{args.min_singles})\n"
+              f"  {frac:4.0%} of the visible fuel is inside a box (need "
+              f"{args.min_coverage:.0%})  -> {verdict}\n"
               f"  red    {len(gated):4}  through the colour gate\n"
               f"  orange {len(recovered):4}  split out of clusters\n"
               f"  cyan   {len(rescued):4}  rescued from shade (hoppers)\n"
@@ -833,6 +893,7 @@ def main() -> int:
         images = images[:args.limit]
 
     written = skipped = total = from_splits = heaps_total = reflections_total = 0
+    quarantined = []
     for src in images:
         split_dir = src.parent.name
         dst = DATASET / "labels" / split_dir / f"{src.stem}.txt"
@@ -846,6 +907,20 @@ def main() -> int:
         gated, recovered, rescued, heaps, dropped = run(img)
         boxes = gated + recovered + rescued
         reflections_total += len(dropped)
+
+        singles, frac = frame_quality(img, boxes, args.hsv_lo, args.hsv_hi)
+        if args.quarantine and (singles < args.min_singles
+                                or frac < args.min_coverage):
+            # Out of the dataset rather than into it with bad labels. An
+            # unlabelled image in dataset/images is not neutral -- it is a
+            # positive assertion that the frame is empty.
+            dest = DATASET / "skipped" / split_dir
+            dest.mkdir(parents=True, exist_ok=True)
+            src.rename(dest / src.name)
+            if dst.exists():
+                dst.unlink()
+            quarantined.append((src.name, singles, frac))
+            continue
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(to_yolo(boxes, W, H))
         written += 1
@@ -859,6 +934,22 @@ def main() -> int:
               f"({from_splits} of them recovered from clusters and shade, "
               f"{reflections_total} reflections dropped, "
               f"{heaps_total/written:.1f} heaps skipped per frame)")
+    if quarantined:
+        by_match = {}
+        for name, singles, frac in quarantined:
+            key = name.rsplit("_", 1)[0]
+            by_match.setdefault(key, []).append((singles, frac))
+        print(f"\n{len(quarantined)} frames moved to dataset/skipped/ -- their "
+              f"fuel is in one mass this cannot resolve, and labelling them "
+              f"would teach the detector that a pile of fuel is background:")
+        for key, rows in sorted(by_match.items(), key=lambda kv: -len(kv[1])):
+            singles = sum(r[0] for r in rows) / len(rows)
+            frac = sum(r[1] for r in rows) / len(rows)
+            print(f"  {len(rows):5} frames  {key}   "
+                  f"(avg {singles:.0f} isolated balls, {frac:.0%} of fuel boxed)")
+        print("  Re-run prepare_dataset.py afterwards if a whole match went, so "
+              "the train/val split is rebuilt from what is left.")
+
     print("\nThese are proposals for class 0 (fuel) only. robot_blue/robot_red/"
           "hub_blue/hub_red come from train/autolabel_objects.py, which appends "
           "to these files rather than replacing them.")
