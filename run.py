@@ -463,6 +463,153 @@ def cmd_count(args, cfg):
     return 0
 
 
+def _source_fps(source) -> float:
+    """A video file's frame rate, or 0.0 when it cannot be known."""
+    if isinstance(source, int) or not Path(str(source)).is_file():
+        return 0.0
+    try:
+        import cv2
+        cap = cv2.VideoCapture(str(source))
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        cap.release()
+        return fps if fps > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def cmd_shots(args, cfg):
+    """Per-robot shots from a model over video: who shot, made, missed."""
+    import json
+
+    from tbavid import count as counting
+    from tbavid import db as dbmod
+    from tbavid import detect as det
+    from tbavid import shooting
+
+    hubs = {}
+    for alliance, raw in (("blue", args.hub_blue), ("red", args.hub_red)):
+        box = _hub_arg(raw, f"hub-{alliance}")
+        if box:
+            hubs[alliance] = box
+    if not hubs and args.event:
+        con = dbmod.connect()
+        hubs = counting.hubs_from_db(con, args.event)
+        con.close()
+        if hubs:
+            print(f"hub geometry from the database for {args.event}: "
+                  + ", ".join(f"{a}={list(map(int, b))}" for a, b in hubs.items()))
+    try:
+        teams = shooting.parse_teams(args.teams)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+
+    source = int(args.source) if str(args.source).isdigit() else args.source
+    fps = args.fps or _source_fps(source)
+    if fps and fps < shooting.MIN_TRACKING_FPS:
+        # Refusing would be wrong -- a 20 fps phone clip is still worth a
+        # look -- but at the 3 fps of exported frames a ball crosses the field
+        # between two samples, and every flight becomes noise.
+        print(f"! {fps:.0f} fps is too slow to follow a ball in flight; shots "
+              f"need at least {shooting.MIN_TRACKING_FPS:.0f}. Use the match "
+              f"video, not exported frames.")
+    elif not fps:
+        print("  frame rate unknown, so shot times are wall-clock. Pass --fps "
+              "for a recording.")
+
+    model = det.load(args.weights)
+    print(f"model: {det.model_source(args.weights)}  source: {source}\n")
+
+    state = {"writer": None, "flash": None}
+
+    def label(robot):
+        if robot is None:
+            return "unattributed"
+        team = teams.get(robot)
+        return f"robot {robot}" + (f" (team {team})" if team else "")
+
+    def on_event(e):
+        text = e["outcome"].replace("_", " ").upper()
+        where = f" -> {e['hub']} hub" if e.get("hub") else ""
+        print(f"{e['t']:8.1f}s  {label(e['robot']):<24} {text}{where}")
+        state["flash"] = (e["t"], f"{label(e['robot'])}: {text}")
+
+    def on_frame(frame, t, result, robots, balls, counter):
+        if not args.annotate:
+            return
+        img = getattr(result, "orig_img", None)
+        if img is None:
+            return
+        import cv2
+        if state["writer"] is None:
+            h, w = img.shape[:2]
+            state["writer"] = cv2.VideoWriter(
+                str(args.annotate), cv2.VideoWriter_fourcc(*"mp4v"),
+                fps or 30.0, (w, h))
+        out = img.copy()
+        colour = {"blue": (255, 120, 0), "red": (0, 0, 255)}
+        for alliance, (x, y, w, h) in ((counter.hubs if counter else hubs) or {}).items():
+            cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)),
+                          colour.get(alliance, (255, 255, 255)), 2)
+        for tid, (alliance, (x, y, w, h)) in robots.items():
+            cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)),
+                          colour.get(alliance, (255, 255, 255)), 2)
+            # The id is what --teams needs. Watching this video once, with the
+            # match roster to hand, is how track ids become team numbers.
+            cv2.putText(out, f"R{tid}" + (f" {teams[tid]}" if tid in teams else ""),
+                        (int(x), max(int(y) - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, colour.get(alliance, (255, 255, 255)), 2)
+        for (x, y, w, h) in balls.values():
+            cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)),
+                          (0, 220, 255), 1)
+        if counter is not None:
+            for row, (tid, st) in enumerate(sorted(counter.per_robot.items())):
+                cv2.putText(out, f"R{tid}: {st['made']}/{st['shots']} made",
+                            (10, 24 + 22 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                            colour.get(st["alliance"], (255, 255, 255)), 2)
+        if state["flash"] and t - state["flash"][0] < 1.5:
+            cv2.putText(out, state["flash"][1], (10, out.shape[0] - 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        state["writer"].write(out)
+
+    result = shooting.run_shots(model, source, hubs=hubs or None,
+                                conf=args.conf, tracker=args.tracker,
+                                learn_frames=args.learn, fps=fps,
+                                max_frames=args.frames, on_event=on_event,
+                                on_frame=on_frame)
+    if state["writer"] is not None:
+        state["writer"].release()
+        print(f"annotated video: {args.annotate}")
+    if "error" in result:
+        print(result["error"])
+        return 1
+
+    counter = result["counter"]
+    print("\n" + "\n".join(counter.report()))
+    by_team = counter.by_team(teams) if teams else {}
+    if by_team:
+        print("\nby team:")
+        for team, row in sorted(by_team.items(),
+                                key=lambda kv: (kv[0] is None, kv[0] or 0)):
+            name = "unassigned tracks" if team is None else f"team {team}"
+            acc = f"{100 * row['made'] / row['shots']:.0f}%" if row["shots"] else "-"
+            print(f"  {name:<18} {row['shots']} shots, {row['made']} made, "
+                  f"{row['missed']} missed  [{acc}]")
+    if args.out:
+        payload = {
+            "source": str(source), "fps": fps, "frames": result["frames"],
+            "hubs": result["hubs"], "events": result["events"],
+            "per_robot": {str(k): v for k, v in counter.per_robot.items()},
+            "by_team": {str(k): v for k, v in by_team.items()},
+            "hub_totals": counter.hub_totals(),
+            "unattributed": counter.unattributed,
+            "ignored": counter.ignored,
+            "stitched": counter.stitched, "reacquired": counter.reacquired,
+        }
+        Path(args.out).write_text(json.dumps(payload, indent=2))
+        print(f"wrote {args.out}")
+    return 0
+
+
 def cmd_live(args, cfg):
     """Scout a live feed: read the scoreboard as it happens, keep no video."""
     import json
@@ -847,6 +994,41 @@ def main(argv=None):
                         "until identify.py has a scorer, which is the honest "
                         "answer rather than a guess.")
     p.set_defaults(func=cmd_detect)
+
+    p = sub.add_parser("shots",
+                       help="per-robot shots from a model over video: who "
+                            "shot, how many went in, how many missed")
+    p.add_argument("--weights", type=Path, required=True,
+                   help="the .pt -- it must detect robots as well as fuel")
+    p.add_argument("--source", required=True,
+                   help="a match video, or a camera index such as 0. Not "
+                        "exported frames: a ball in flight cannot be followed "
+                        "at 3 fps")
+    p.add_argument("--event", help="event key, for hub geometry recorded "
+                                   "with `run.py db hub`")
+    p.add_argument("--hub-blue", dest="hub_blue", metavar="X,Y,W,H",
+                   help="blue hub box in frame pixels")
+    p.add_argument("--hub-red", dest="hub_red", metavar="X,Y,W,H",
+                   help="red hub box in frame pixels")
+    p.add_argument("--learn", type=int, default=90,
+                   help="with no boxes given, frames to learn the hubs over "
+                        "(needs a model with hub classes)")
+    p.add_argument("--conf", type=float, default=0.25, help="confidence floor")
+    p.add_argument("--tracker", default="bytetrack.yaml")
+    p.add_argument("--fps", type=float, default=0.0,
+                   help="the source's frame rate, when the file does not say")
+    p.add_argument("--frames", type=int, default=0,
+                   help="stop after N frames (0 = the whole source)")
+    p.add_argument("--teams", default="",
+                   help="robot track ids to team numbers, e.g. 3=254,7=254,"
+                        "5=1678. Read the ids off --annotate; one team can "
+                        "have several")
+    p.add_argument("--annotate", type=Path,
+                   help="write a video with robot ids, balls, hubs and each "
+                        "outcome drawn on -- for assigning teams and for "
+                        "checking shots by eye")
+    p.add_argument("--out", type=Path, help="write the results as JSON")
+    p.set_defaults(func=cmd_shots)
 
     p = sub.add_parser("live",
                        help="scout a live feed: read the scoreboard as it "

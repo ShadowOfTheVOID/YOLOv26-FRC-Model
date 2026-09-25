@@ -96,6 +96,7 @@ Output lands in these folders:
 | `live` | scout a live feed: read the scoreboard as it happens, keep no video |
 | `detect` | run a trained `.pt` over harvested frames and record what it found |
 | `count` | count scored fuel from the detector; `--scoreboard` makes it the scoreboard at a scrimmage |
+| `shots` | per-robot shots from a model over match video: who shot, how many went in, how many missed |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |
 | `reprocess` | re-run crop/render/scoreboard on already-downloaded sources |

@@ -1307,6 +1307,123 @@ def test_shot_attribution():
           and shots.hub_totals()["blue"] == 3)
 
 
+class _Rows(list):
+    def tolist(self):
+        return list(self)
+
+
+class _FakeBoxes:
+    def __init__(self, rows):
+        self.xyxy = _Rows([list(r[:4]) for r in rows])
+        self.conf = _Rows([r[4] for r in rows])
+        self.cls = _Rows([r[5] for r in rows])
+        self.id = _Rows([r[6] for r in rows]) if rows else None
+
+    def __len__(self):
+        return len(self.xyxy)
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self.boxes = _FakeBoxes(rows)
+        self.orig_img = None
+
+
+class _FakeModel:
+    """Stands in for an ultralytics model: class names, and a track() that
+    yields scripted per-frame detections. Everything but the network runs."""
+
+    def __init__(self, names, frames):
+        self.names = names
+        self.frames = frames
+
+    def track(self, **kw):
+        for rows in self.frames:
+            yield _FakeResult(rows)
+
+
+def _frames_of(names, robots, balls, n):
+    """Robot and ball paths as per-frame detection rows for a _FakeModel."""
+    index = {v: k for k, v in names.items()}
+    frames = []
+    for f in range(n):
+        rows = []
+        for tid, path in robots.items():
+            for ff, (alliance, (x, y, w, h)) in path:
+                if ff == f:
+                    rows.append((x, y, x + w, y + h, 0.9,
+                                 index[f"robot_{alliance}"], tid))
+        for tid, path in balls.items():
+            for ff, (x, y, w, h) in path:
+                if ff == f:
+                    rows.append((x, y, x + w, y + h, 0.9, index["fuel"], tid))
+        frames.append(rows)
+    return frames
+
+
+def test_models_that_can_count_and_shoot():
+    """What each command demands of a model -- and no more than it needs.
+
+    count.py used to refuse any model without hub classes, even with both hub
+    boxes handed to it. The first trained model is fuel-only, so that refusal
+    was all that stood between it and a working counter.
+    """
+    from tbavid.count import model_can_count, run_source
+    from tbavid.shooting import model_can_shoot, parse_teams, run_shots
+
+    fuel_only = {0: "fuel"}
+    five = dict(enumerate(CLASSES))
+
+    check("a fuel-only model can count once it is handed the hub boxes",
+          model_can_count(fuel_only, HUB) is None)
+    check("...and without them it says to pass the boxes, not just no",
+          "--hub-blue" in (model_can_count(fuel_only, None) or ""))
+    check("a model with no fuel class cannot count at all",
+          "no fuel class" in (model_can_count({0: "robot_blue"}, HUB) or ""))
+    check("a model with hub classes can still learn the hubs itself",
+          model_can_count(five, None) is None)
+
+    # The whole counting loop, fed by the stand-in: a fuel-only model and two
+    # drawn boxes, which is the scrimmage set-up.
+    model = _FakeModel(fuel_only,
+                       _frames_of(fuel_only, {}, _fly(1, 50, 150, 348, 150, 20), 60))
+    out = run_source(model, None, lambda h: BallCounter(h), hubs=HUB)
+    check("run_source counts with a fuel-only model and given hubs",
+          "error" not in out and out["counter"].totals["blue"] == 1)
+
+    check("shots refuse a model with no robot classes, and say why",
+          "robot classes" in (model_can_shoot(fuel_only, HUB) or ""))
+    check("the five-class model can attribute shots",
+          model_can_shoot(five, HUB) is None)
+
+    bot = _still(1, "blue", BLUE_BOT, 80)
+    balls = _shot(10, 344, 144)
+    balls.update(_shot(11, 600, 420, start=30))
+    model = _FakeModel(five, _frames_of(five, bot, balls, 80))
+    events = []
+    out = run_shots(model, None, hubs=HUB, fps=30.0, on_event=events.append)
+    s = out["counter"].per_robot.get(1, {}) if "error" not in out else {}
+    check("run_shots attributes a make and a miss to the robot, end to end",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (2, 1, 1))
+    # Wall-clock time would be milliseconds here; match time is the frame
+    # over the source rate, and a shot ~20 frames in is ~0.7 s into the match.
+    check("with fps given, shot times are match time, not processing time",
+          len(events) == 2 and min(e["t"] for e in events) > 0.5)
+
+    model = _FakeModel(fuel_only, _frames_of(fuel_only, {}, balls, 80))
+    out = run_shots(model, None, hubs=HUB, fps=30.0)
+    check("run_shots with a fuel-only model refuses rather than reporting nothing",
+          "robot classes" in out.get("error", ""))
+
+    check("--teams reads several track ids per team",
+          parse_teams("3=254, 7=254,5=1678") == {3: 254, 7: 254, 5: 1678})
+    try:
+        parse_teams("3:254")
+        check("a malformed --teams is refused", False)
+    except ValueError:
+        check("a malformed --teams is refused", True)
+
+
 def test_hub_geometry():
     """Where the hub is, learned or recorded."""
     check("a point in the hub names its alliance",
@@ -1785,7 +1902,8 @@ def main() -> int:
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
                test_serving_export, test_live_counter, test_live_rows,
                test_detect_rows, test_detect_writes, test_api_stays_stdlib,
-               test_ball_counting, test_shot_attribution, test_hub_geometry, test_scrimmage_scoreboard,
+               test_ball_counting, test_shot_attribution,
+               test_models_that_can_count_and_shoot, test_hub_geometry, test_scrimmage_scoreboard,
                test_nothing_to_verify_against, test_counting_model_dataset,
                test_model_must_name_its_classes):
         fn()

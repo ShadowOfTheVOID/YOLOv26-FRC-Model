@@ -512,3 +512,149 @@ class ShotCounter:
         if self.held:
             lines.append(f"  {len(self.held)} outcome(s) still held open")
         return lines
+
+
+# -- driving it from a model ----------------------------------------------
+#
+# Beside the rules it feeds, as count.run_source is; torch stays out of this
+# module's imports, and `model` is whatever det.load() returned.
+
+ROBOT_CLASSES = {"robot_blue": "blue", "robot_red": "red"}
+
+# Below this, a ball in flight moves further between frames than its own
+# width and a track across a flight means nothing. The exported training
+# frames are 3 fps; broadcast video is 30 or 60.
+MIN_TRACKING_FPS = 15.0
+
+
+def model_can_shoot(names: Dict[int, str],
+                    hubs: Optional[Dict[str, Box]]) -> Optional[str]:
+    """Why this model cannot attribute shots, or None when it can."""
+    from .count import CLS_FUEL, HUB_CLASSES, hub_advice
+
+    have = set(names.values())
+    if CLS_FUEL not in have:
+        return (f"this model has no {CLS_FUEL} class "
+                f"({', '.join(sorted(have))}), so there are no shots to follow.")
+    if not set(ROBOT_CLASSES) & have:
+        # Refused rather than run: without robots every make would come out
+        # unattributed and there would be no misses at all, which reads like a
+        # working scouting report with nothing in it.
+        return (f"this model has no robot classes ({', '.join(sorted(have))}). "
+                f"A shot belongs to the robot the ball leaves, so without "
+                f"robots nothing can be attributed and no miss can be seen. "
+                f"Label robots (train/autolabel_objects.py, or by hand) and "
+                f"train the five-class model.")
+    if not hubs and not set(HUB_CLASSES) <= have:
+        return (f"this model has no hub classes ({', '.join(sorted(have))}), "
+                f"so it cannot find the hubs itself. {hub_advice()}")
+    return None
+
+
+def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
+              conf: float = 0.25, tracker: str = "bytetrack.yaml",
+              learn_frames: int = 90, fps: float = 0.0, max_frames: int = 0,
+              on_event=None, on_frame=None, counter_factory=None) -> Dict:
+    """Run the detector over a source and attribute every shot.
+
+    One tracker call tracks robots and balls together; the class says which
+    is which, and a robot's class says its alliance. Hubs come from `hubs`
+    when given -- a fixed camera's two boxes, drawn once -- or are learned from
+    the first `learn_frames` when the model detects them.
+
+    `fps` makes `t` source time rather than wall time. For a recording that
+    matters: processing runs faster or slower than the match did, and a shot
+    timestamp should say when in the match it happened.
+
+    `on_frame(frame, t, result, robots, balls, counter)` sees every frame,
+    which is what an annotated video is drawn from.
+    """
+    import time as _time
+
+    from .count import CLS_FUEL, learn_hubs
+    from .detect import _boxes_of
+
+    names = dict(getattr(model, "names", {}) or {})
+    if not names:
+        return {"error": "the model carries no class names, so nothing it "
+                         "detects can be identified."}
+    reason = model_can_shoot(names, hubs)
+    if reason:
+        return {"error": reason}
+
+    factory = counter_factory or ShotCounter
+    counter: Optional[ShotCounter] = factory(hubs) if hubs else None
+    learning: List[Dict[str, Box]] = []
+    events: List[Dict] = []
+    started = _time.monotonic()
+    frame = 0
+    t = 0.0
+
+    for result in model.track(source=source, stream=True, persist=True,
+                              tracker=tracker, conf=conf, verbose=False):
+        t = frame / fps if fps else _time.monotonic() - started
+        robots: Dict[int, Tuple[str, Box]] = {}
+        balls: Dict[int, Box] = {}
+        seen_hubs: Dict[str, Box] = {}
+        for x1, y1, x2, y2, _cf, cls_index, tid in _boxes_of(result):
+            name = names.get(int(cls_index))
+            if name is None:
+                continue
+            box = (min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+            if name == CLS_FUEL and tid is not None:
+                balls[int(tid)] = box
+            elif name in ROBOT_CLASSES and tid is not None:
+                robots[int(tid)] = (ROBOT_CLASSES[name], box)
+            elif name.startswith("hub_"):
+                seen_hubs[name.split("_", 1)[1]] = box
+
+        if counter is None:
+            if seen_hubs:
+                learning.append(seen_hubs)
+            if frame >= learn_frames:
+                found = learn_hubs(learning)
+                if not found:
+                    return {"error": f"no hub was detected in the first "
+                                     f"{learn_frames} frames. Pass the boxes "
+                                     f"in with --hub-blue/--hub-red.",
+                            "frames": frame}
+                hubs = found
+                counter = factory(hubs)
+        else:
+            for e in counter.update(frame, t, robots, balls):
+                events.append(e)
+                if on_event:
+                    on_event(e)
+
+        if on_frame:
+            on_frame(frame, t, result, robots, balls, counter)
+        frame += 1
+        if max_frames and frame >= max_frames:
+            break
+
+    if counter is None:
+        return {"error": "the source ended before the hubs were learned",
+                "frames": frame}
+    for e in counter.flush(frame, t):
+        events.append(e)
+        if on_event:
+            on_event(e)
+    return {"events": events, "counter": counter, "frames": frame,
+            "hubs": {a: list(b) for a, b in (hubs or {}).items()}}
+
+
+def parse_teams(text: str) -> Dict[int, int]:
+    """'3=254,7=254,5=1678' -> {3: 254, 7: 254, 5: 1678}.
+
+    Several track ids per team is the normal case, not an error: a tracker
+    that loses a robot behind another one gives it a new id when it reappears.
+    """
+    out: Dict[int, int] = {}
+    for part in filter(None, (p.strip() for p in (text or "").split(","))):
+        tid, _, team = part.partition("=")
+        try:
+            out[int(tid)] = int(team)
+        except ValueError:
+            raise ValueError(f"--teams wants track=team pairs, e.g. 3=254 "
+                             f"(got {part!r})")
+    return out

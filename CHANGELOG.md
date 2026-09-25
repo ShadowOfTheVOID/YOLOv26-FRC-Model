@@ -341,6 +341,26 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **`run.py shots` — per-robot scouting from a model over video.** Runs the
+  detector with tracking over a match video or a camera, feeds robots and
+  balls into `ShotCounter`, and prints each shot as it is decided and a
+  per-robot summary: shots, made, missed, accuracy. `--teams 3=254,7=254`
+  names robot tracks (several ids per team is normal — a tracker that loses a
+  robot gives it a new id), `--annotate` writes a video with robot ids, balls,
+  hubs and each outcome drawn on, which is how ids become team numbers and how
+  shots get checked by eye, and `--out` writes it all as JSON. Shot times are
+  match time when the frame rate is known, not processing time, and it warns
+  below 15 fps, where a ball crosses the field between frames — exported 3 fps
+  frames are no use for this. It refuses a model with no robot classes rather
+  than producing a scouting sheet with no misses and nobody's makes. Tested end
+  to end against a stand-in model, so everything but the network runs in CI.
+- **`count.py` counts with a fuel-only model when you give it the hubs.** It
+  refused any model without hub classes, even with both hub boxes passed in —
+  and the first trained model is fuel-only. Hub classes are now needed only
+  when the hubs must be learned. On a fixed camera, drawing two boxes during
+  setup is easier and more exact than detecting them every frame anyway. The
+  refusal still names every missing class at once, and now also says how to
+  pass the boxes.
 - **`tbavid/shooting.py` — who shot, and the misses.** `count.py` knows how
   many balls went into each hub; scouting needs whose they were, and the
   misses, which `count.py` cannot see at all since a ball that never reaches a

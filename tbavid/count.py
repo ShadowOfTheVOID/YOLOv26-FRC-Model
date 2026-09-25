@@ -323,6 +323,43 @@ def hubs_from_db(con, event_key: str) -> Dict[str, Box]:
 
 LEARN_FRAMES = 90          # ~3 s at 30 fps, to fix the hub boxes
 CLS_FUEL = "fuel"
+HUB_CLASSES = ("hub_blue", "hub_red")
+
+
+def hub_advice() -> str:
+    return ("Pass the hub boxes instead -- --hub-blue X,Y,W,H --hub-red "
+            "X,Y,W,H, or --event with geometry recorded by `run.py db hub` -- "
+            "or train hub classes with train/subset_classes.py.")
+
+
+def model_can_count(names: Dict[int, str],
+                    hubs: Optional[Dict[str, Box]]) -> Optional[str]:
+    """Why this model cannot count, or None when it can.
+
+    Fuel is always needed: it is the thing being counted. Hub classes are
+    needed only when the hubs have to be *learned*. This used to demand them
+    unconditionally, so a fuel-only model was refused even with both hub boxes
+    handed to it -- and on a fixed camera, drawing two boxes during setup is
+    both easier and more exact than detecting the hubs every frame. The first
+    trained model is fuel-only, and that refusal was all that stood between it
+    and a working counter.
+
+    Everything missing is named at once, so one run is enough to see what to
+    fix.
+    """
+    have = set(names.values())
+    missing = [] if CLS_FUEL in have else [CLS_FUEL]
+    if not hubs:
+        missing += [c for c in HUB_CLASSES if c not in have]
+    if not missing:
+        return None
+    reason = (f"this model has no {', '.join(missing)} class"
+              f"{'es' if len(missing) > 1 else ''} "
+              f"({', '.join(sorted(have))}), so it cannot count balls into a "
+              f"hub.")
+    if any(c in HUB_CLASSES for c in missing):
+        return f"{reason} {hub_advice()}"
+    return f"{reason} Train one with train/subset_classes.py."
 
 
 def run_source(model, source, counter_factory, conf: float = 0.25,
@@ -364,16 +401,10 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
         return {"error": "the model carries no class names, so nothing it "
                          "detects can be identified. Every box would be "
                          "dropped and the score would read zero."}
-    missing = [c for c in (CLS_FUEL, "hub_blue", "hub_red")
-               if c not in names.values()]
-    if missing:
-        # Counting needs fuel and at least one hub. Saying so here beats a
-        # scoreboard that sits at nil all afternoon.
-        return {"error": f"this model has no {', '.join(missing)} class"
-                         f"{'es' if len(missing) > 1 else ''} "
-                         f"({', '.join(names.values())}), so it cannot count "
-                         f"balls into a hub. Train one with "
-                         f"train/subset_classes.py."}
+    # Saying why here beats a scoreboard that sits at nil all afternoon.
+    reason = model_can_count(names, hubs)
+    if reason:
+        return {"error": reason}
     counter: Optional[BallCounter] = None
     learning: List[Dict[str, Box]] = []
     started = _time.monotonic()

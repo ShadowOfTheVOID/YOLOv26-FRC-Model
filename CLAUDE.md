@@ -149,8 +149,11 @@ it made, how many it missed. It must also replace FMS scoring at the
 the same pipeline, since per-hub totals fall out of attributed shots.
 
 Status of per-robot scouting:
-- `tbavid/shooting.py` (`ShotCounter`) is built and tested as logic only. Not
-  yet wired to a model or video.
+- `tbavid/shooting.py` (`ShotCounter`) and `run.py shots` are built and
+  tested end to end against a stand-in model (`_FakeModel` in the tests):
+  per-robot made/missed, `--teams` to name tracks, `--annotate` for a video
+  with robot ids drawn on, `--out` for JSON. It refuses a model without robot
+  classes rather than reporting an empty scouting sheet.
 - It needs a model that detects robots (`robot_blue`/`robot_red`); none has
   been trained, and there are no robot labels yet.
 - It needs video at the camera's native frame rate: ball flights cannot be
@@ -161,9 +164,8 @@ Status of per-robot scouting:
 - Not yet validated against a hand-scored match.
 
 Blocking scoring at the scrimmage:
-- `count.py` refuses a model without `hub_blue`/`hub_red` classes even when hub
-  boxes are passed explicitly, so the fuel-only model cannot count as-is.
-  Planned: accept a fuel-only model when hub boxes are given.
+- Done: `count.py` accepts a fuel-only model when hub boxes are given
+  (`--hub-blue/--hub-red` or `--event`), so the first model can count now.
 - Hub active/inactive is not modelled anywhere; the counter credits every ball
   into a hub. The game rule (what switches state, whether inactive-hub fuel
   scores) is still to be confirmed with the user before designing it.
@@ -187,7 +189,6 @@ Blocking scoring at the scrimmage:
   The droplet was being destroyed once that copy was confirmed; a new one is
   ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
   alias in `~/.ssh/config`.
-- Next: make `count.py` accept explicit hub boxes with a fuel-only model; robot
-  labels and a robot-detecting model; a command that runs a model with
-  tracking over native-rate video into `ShotCounter`; a hand-scored recording
-  from the scrimmage camera position to validate against.
+- Next: robot labels and a robot-detecting model (the one thing `run.py
+  shots` still lacks); a hand-scored recording from the scrimmage camera
+  position to validate both commands against.
