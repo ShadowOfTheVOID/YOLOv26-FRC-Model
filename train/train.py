@@ -104,15 +104,21 @@ def find_shm_manager_libs() -> None:
     a separately started binary does not -- so every dataloader worker died
     with "no response from torch_shm_manager" before epoch 1. Putting that
     directory on LD_LIBRARY_PATH here is inherited by the helper when the
-    workers start it.
+    workers start it. Fixing that one exposed two more it could not load,
+    libamdhip64.so.7 and librocprofiler-sdk.so.1, from other folders of the
+    same package, so every library folder under _rocm_sdk_* and torch/lib
+    goes on the path, not just the first one found missing.
     """
     import glob
     import os
     import site
     roots = site.getsitepackages() + [site.getusersitepackages()]
-    dirs = sorted({os.path.dirname(p) for root in roots for p in glob.glob(
-        os.path.join(root, "_rocm_sdk_*", "lib", "**", "librocm-openblas.so*"),
-        recursive=True)})
+    patterns = [os.path.join("_rocm_sdk_*", "**", "*.so*"),
+                os.path.join("torch", "lib", "*.so*")]
+    dirs = sorted({os.path.dirname(p) for root in roots for pat in patterns
+                   for p in glob.glob(os.path.join(root, pat), recursive=True)})
+    if not any("_rocm_sdk_" in d for d in dirs):
+        return          # not a ROCm wheel; nothing to help find
     if dirs:
         current = os.environ.get("LD_LIBRARY_PATH", "")
         os.environ["LD_LIBRARY_PATH"] = ":".join(dirs + ([current] if current else []))

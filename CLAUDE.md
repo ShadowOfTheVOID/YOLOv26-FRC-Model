@@ -127,8 +127,8 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
   `train.py` shares tensors via `/dev/shm` to avoid it; `ulimit -n 65536`
   works on older code. On the torch 2.12+rocm7.14 image the helper that
   sharing starts (`torch_shm_manager`) could not find librocm-openblas.so.0
-  (it is in the venv's `_rocm_sdk_core/lib/host-math/lib`); `train.py` adds
-  that to `LD_LIBRARY_PATH`. Resume with `--model runs/<name>/weights/last.pt
+  nor libamdhip64 / librocprofiler-sdk (all in the venv's `_rocm_sdk_*`
+  folders); `train.py` puts every such folder on `LD_LIBRARY_PATH`. Resume with `--model runs/<name>/weights/last.pt
   --resume`.
 - Run training under `nohup ... > train.log 2>&1 &`; a foreground run dies
   when the terminal is needed for anything else.

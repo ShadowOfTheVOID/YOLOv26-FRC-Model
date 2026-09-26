@@ -346,7 +346,9 @@ harvest's output as a source of its own.
   the helper program that file_system sharing starts could not load
   librocm-openblas.so.0, which the torch 2.12+rocm7.14 image keeps in the
   venv at `_rocm_sdk_core/lib/host-math/lib` where only Python's torch finds
-  it. `train.py` now puts that directory on `LD_LIBRARY_PATH` for the helper.
+  it; with that found it then missed libamdhip64.so.7 and
+  librocprofiler-sdk.so.1. `train.py` now puts every library folder of the
+  ROCm package and torch/lib on `LD_LIBRARY_PATH` for the helper.
 - **Robots in piles of fuel are found: fuel is greyed out before YOLOE
   looks.** In the first label preview robot 1058, in the middle of the
   central pile, had no box and fuel boxes all over it -- the model would
