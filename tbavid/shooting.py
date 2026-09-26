@@ -25,8 +25,10 @@ matter:
     shot the moment its robot drove anywhere. A ball that stays with its robot
     was carried, not shot.
 
-*And it must move itself, fast*: the ball's own travel from where it was
-first seen must reach `min_travel` robot-widths within `launch_s` seconds.
+*And it must move itself, fast*: the ball's own travel must reach
+`min_travel` robot-widths within some `launch_s` window -- a sliding window,
+because a ball tracked for seconds in a hopper before it is shot must still
+count (the first version measured from first sighting and threw those away).
 "Gets clear" alone was measured on real video and failed: a robot driving
 through the centre fuel pile in 2026nhdur qm7 was credited with 42 shots and
 41 misses in 15 seconds of auto. The balls it passed never moved -- the robot
@@ -37,7 +39,21 @@ a second (a robot-width, ~0.9 m, well inside 0.3 s); a ball sitting still, or
 an id sliding to the next ball in a pile, never covers one.
 
 One exception: a ball that starts at a robot and ends in a hub is a shot
-however little it cleared. A robot shooting from against the hub has almost
+however little it cleared.
+
+*Starts at a robot* includes the space just above it (`launch_up` of its
+height): on qm7 most makes came out unattributed -- 13 of 19 -- because a ball
+leaving a shooter at speed is first detected above the box, not inside the
+30% pad around it. Only the pad around the box itself blocks stitching, so a
+flight passing over a robot can still be rejoined.
+
+## How long a flight can last
+
+A shot that has not reached a hub `max_flight_s` after its launch is a miss,
+final there. Stitching broken flights (below) is otherwise unbounded, and in
+qm7's fuel piles it walked from ball to ball for 4-8 s -- "flights" of seven
+pieces that ended as misses, or as makes credited to the wrong robot. A real
+shot is in the air for about a second. A robot shooting from against the hub has almost
 no room to clear it, and the hub itself proves the ball left.
 
 ## Made and missed
@@ -110,6 +126,13 @@ MIN_CLEAR = 1.0
 MIN_TRAVEL = 1.0
 LAUNCH_S = 0.3
 
+# How far above a robot, in its heights, a ball first seen there started at it.
+LAUNCH_UP = 0.8
+
+# Longest a shot may be in the air before it is a miss. See "How long a
+# flight can last".
+MAX_FLIGHT_S = 2.5
+
 # How long a miss is held open for the rest of a broken flight to turn up,
 # and how close to the predicted position it must appear.
 STITCH_FRAMES = 10
@@ -143,7 +166,7 @@ def gap(box: Box, point: Point) -> float:
 class _Ball:
     __slots__ = ("tid", "t0", "first", "last", "prev", "last_frame", "prev_frame",
                  "seen", "missing", "shooter", "shooter_alliance", "cleared",
-                 "started_in", "shot", "width", "launched")
+                 "started_in", "shot", "width", "launched", "trail", "launch_t")
 
     def __init__(self, tid: int, frame: int, t: float, point: Point,
                  shooter: Optional[int], shooter_alliance: Optional[str],
@@ -165,6 +188,8 @@ class _Ball:
         self.shot: Optional["_Shot"] = None
         self.width = 0.0                # shooter's box width at launch
         self.launched = False           # moved min_travel widths inside launch_s
+        self.trail = [(t, point)]       # recent (t, point), launch_s long
+        self.launch_t: Optional[float] = None
 
     def velocity(self) -> Point:
         dt = self.last_frame - self.prev_frame
@@ -181,7 +206,8 @@ class _Ball:
 
 class _Shot:
     """One ball's flight from a robot, across however many track pieces."""
-    __slots__ = ("robot", "alliance", "t0", "seen", "pieces", "confirmed", "width")
+    __slots__ = ("robot", "alliance", "t0", "seen", "pieces", "confirmed", "width",
+                 "launch_t")
 
     def __init__(self, robot: Optional[int], alliance: Optional[str], t0: float):
         self.robot = robot
@@ -193,6 +219,7 @@ class _Shot:
         # Until then it may be a ball being carried.
         self.confirmed = False
         self.width = 0.0            # shooter's box width at launch
+        self.launch_t: Optional[float] = None   # when it was seen to move off
 
 
 class _Held:
@@ -237,6 +264,8 @@ class ShotCounter:
                  min_clear: float = MIN_CLEAR,
                  min_travel: float = MIN_TRAVEL,
                  launch_s: float = LAUNCH_S,
+                 launch_up: float = LAUNCH_UP,
+                 max_flight_s: float = MAX_FLIGHT_S,
                  stitch_frames: int = STITCH_FRAMES,
                  stitch_px: float = STITCH_PX,
                  robot_memory: int = ROBOT_MEMORY,
@@ -260,6 +289,8 @@ class ShotCounter:
         self.min_clear = min_clear
         self.min_travel = min_travel
         self.launch_s = launch_s
+        self.launch_up = launch_up
+        self.max_flight_s = max_flight_s
         self.stitch_frames = stitch_frames
         self.stitch_px = stitch_px
         self.robot_memory = robot_memory
@@ -276,6 +307,7 @@ class ShotCounter:
                                         "not_from_robot": 0, "started_inside": 0}
         self.stitched = 0
         self.reacquired = 0
+        self.expired = 0
 
     # -- the frame loop -----------------------------------------------------
     def update(self, frame: int, t: float,
@@ -300,6 +332,7 @@ class ShotCounter:
                 ball.seen += 1
                 ball.missing = 0
             self._measure_clearance(self.balls[tid], t)
+            self._expire_if_long(self.balls[tid], frame, t)
 
         for tid in list(self.balls):
             ball = self.balls[tid]
@@ -320,9 +353,13 @@ class ShotCounter:
         return self._settle(frame + max(self.reacquire_frames, self.stitch_frames) + 1)
 
     # -- arrivals -----------------------------------------------------------
-    def _shooter_at(self, point: Point) -> Optional[int]:
+    def _shooter_at(self, point: Point, above: bool = True) -> Optional[int]:
+        def zone(box):
+            x, y, w, h = grow(box, self.launch_pad)
+            up = box[3] * self.launch_up if above else 0.0
+            return (x, y - up, w, h + up)
         hits = [tid for tid, (_, box, _) in self.robots.items()
-                if contains(grow(box, self.launch_pad), point)]
+                if contains(zone(box), point)]
         if not hits:
             return None
         def dist(tid):
@@ -333,10 +370,14 @@ class ShotCounter:
     def _arrive(self, tid: int, frame: int, t: float, point: Point) -> None:
         """A track id not seen before: a new ball, or an old one found again."""
         at_robot = self._shooter_at(point)
+        # Only the robot's own box (and pad) blocks stitching; the space above
+        # it is where flights pass over, and a lost one reappearing there is
+        # the same ball, not a new launch.
+        at_core = self._shooter_at(point, above=False)
 
         # 1. A lost ball of ours, briefly missing, reappearing where it was
         #    heading. Never a new track that starts at a robot: that is a launch.
-        if at_robot is None:
+        if at_core is None:
             best, best_d = None, self.stitch_px
             for ball in self.balls.values():
                 if ball.missing == 0:
@@ -358,7 +399,7 @@ class ShotCounter:
 
         # 2. A held ending taken back: a miss whose flight turns out to go on,
         #    or a ball "in" a hub that came back out the other side.
-        held = self._reclaim(point, frame, at_robot)
+        held = self._reclaim(point, frame, at_core)
         if held is not None:
             ball = _Ball(tid, frame, t, point, None, None, None)
             if held.shot is not None:
@@ -373,7 +414,7 @@ class ShotCounter:
                 # a flight.
                 ball.cleared = float("inf") if held.shot.confirmed else held.cleared
                 ball.width = held.shot.width
-                ball.first, ball.t0 = held.point, held.t
+                ball.trail = [(held.t, held.point), (t, point)]
             else:
                 # An unattributed ball that passed over a hub. It is still an
                 # unattributed ball; it just has not gone in yet.
@@ -417,16 +458,53 @@ class ShotCounter:
     def _measure_clearance(self, ball: _Ball, t: float) -> None:
         if ball.shooter is None or ball.cleared == float("inf"):
             return
-        if not ball.launched and ball.width and t - ball.t0 <= self.launch_s:
-            dx, dy = ball.last[0] - ball.first[0], ball.last[1] - ball.first[1]
-            if (dx * dx + dy * dy) ** 0.5 >= self.min_travel * ball.width:
+        if not ball.launched and ball.width:
+            if ball.trail[-1][0] != t:
+                ball.trail.append((t, ball.last))
+            while len(ball.trail) > 2 and t - ball.trail[1][0] >= self.launch_s:
+                ball.trail.pop(0)
+            t_from, p_from = ball.trail[0]
+            dx, dy = ball.last[0] - p_from[0], ball.last[1] - p_from[1]
+            if (t - t_from <= self.launch_s + 1e-9
+                    and (dx * dx + dy * dy) ** 0.5 >= self.min_travel * ball.width):
                 ball.launched = True
+                ball.launch_t = t_from
+                if ball.shot is not None and ball.shot.launch_t is None:
+                    ball.shot.launch_t = t_from
         entry = self.robots.get(ball.shooter)
         if entry is None:
             return
         box = entry[1]
         width = max(box[2], 1.0)
         ball.cleared = max(ball.cleared, gap(box, ball.last) / width)
+
+    def _expire_if_long(self, ball: _Ball, frame: int, t: float) -> None:
+        """A shot still out of a hub max_flight_s after launch: a miss, now."""
+        if ball.shooter is None and ball.shot is None:
+            return
+        launch = ball.shot.launch_t if ball.shot and ball.shot.launch_t is not None \
+            else ball.launch_t
+        if launch is None or t - launch <= self.max_flight_s:
+            return
+        if hub_of(self.hubs, ball.last) is not None:
+            return
+        shot = ball.shot
+        if shot is None:
+            shot = _Shot(ball.shooter, ball.shooter_alliance, ball.t0)
+            shot.width, shot.launch_t = ball.width, launch
+        shot.seen += ball.seen
+        shot.confirmed = True
+        if shot.seen >= self.min_track_frames:
+            # Dated past its stitch window, so it settles this frame and no
+            # later piece can take it back.
+            self.held.append(_Held("miss", shot, ball.last, ball.velocity(),
+                                   frame - self.stitch_frames - 1, t, None))
+            self.expired += 1
+        # The ball carries on as a plain ball on the floor, nobody's shot.
+        ball.shot = None
+        ball.shooter = ball.shooter_alliance = None
+        ball.launched, ball.launch_t, ball.cleared = False, None, 0.0
+        ball.seen = 0
 
     # -- endings ------------------------------------------------------------
     def _end(self, ball: _Ball, frame: int, t: float) -> None:
@@ -436,6 +514,7 @@ class ShotCounter:
         if shot is None and ball.shooter is not None:
             shot = _Shot(ball.shooter, ball.shooter_alliance, ball.t0)
             shot.width = ball.width
+            shot.launch_t = ball.launch_t
 
         if shot is not None:
             shot.seen += ball.seen

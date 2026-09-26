@@ -238,7 +238,13 @@ Blocking scoring at the scrimmage:
   then lost tracker ids mid-match (4 new ids), fixed by RobotNumbers
   re-identification. Still open: ~12 unattributed makes in 30 s (launch not
   seen), and ShotCounter's frame-count constants were set for 30 fps while
-  this video is 60 fps (its windows are half as long in time).
+  this video is 60 fps (its windows are half as long in time) -- both now
+  addressed (fps scaling; launch zone 0.8 heights above a robot). Third run,
+  checked frame by frame: every robot box is a real robot, right alliance;
+  a floor display near the referee was once boxed blue. Robots still split
+  (1058 = #5/#8/#11, 611 = #6/#12) when hidden behind people or hubs --
+  folded with --teams, deliberately not merged by guess. Stitch chains of
+  4-8 s were the fake misses: flights now capped at 2.5 s.
 - Relabelled with fuel greying (a75ff5c). 16-frame preview of the written
   labels: ~68 of ~80 visible robots boxed (~85%, from ~60%), all six in 4
   frames, robots in fuel piles boxed (1058 in qm7), no clear false positive

@@ -357,6 +357,22 @@ harvest's output as a source of its own.
   when it reappears within 1.5 robot-widths of where it was, same alliance,
   within 3 s: qm7 grew robots 16099, 15856, 16580 and 21187 mid-match, each
   splitting a real robot's tally.
+- **Shots: flights capped at 2.5 s, hopper shots kept, launches seen from
+  above.** From the annotated qm7 video (frames checked by eye):
+  - Stitching broken flights walked from ball to ball through the fuel
+    piles for 4-8 s -- a seven-piece "flight" from 22.2 s to 30.0 s -- ending
+    as misses or as makes credited to the wrong robot. A shot not in a hub
+    2.5 s after launch is now a miss, final, and no later piece joins it.
+  - The not-launched rule timed its 0.3 s from a ball's first sighting, so a
+    ball tracked in a hopper and shot seconds later was thrown away. It is a
+    sliding window now.
+  - 13 of 19 makes were unattributed: a ball leaving a shooter at speed is
+    first detected above the robot, outside its 30% pad. The launch zone
+    reaches 0.8 of a robot's height above it (stitching is still blocked
+    only by the robot's own box, so flights passing over robots rejoin).
+  Robots split across several numbers (1058 as #5, #8, #11) are left split
+  on purpose: `--teams 5=1058,8=1058,11=1058` folds them; merging by guess
+  could mix two robots' shots.
 - **Counting windows keep their length in time on 60 fps video.** Both
   counters measure "missing for N frames", "held for N frames" in frames,
   chosen on 30 fps footage; the harvested broadcasts are 60 fps, so every

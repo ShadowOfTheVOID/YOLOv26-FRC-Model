@@ -1442,6 +1442,36 @@ def test_robot_in_a_pile_is_not_shooting():
           (b60.vanish_frames, b60.reacquire_frames)
           == (2 * b30.vanish_frames, 2 * b30.reacquire_frames))
 
+    bot = _still(1, "blue", BLUE_BOT, 260)
+
+    # A ball carried in the hopper for 2 s and then shot. The first launch
+    # rule timed its 0.3 s from first sighting and threw this shot away.
+    carried = [(f, (134.0, 310.0, 12.0, 12.0)) for f in range(60)]
+    flown = _fly(50, 134.0, 310.0, 600.0, 420.0, 20, start=60)[50]
+    events, c = _play_shots(bot, {50: carried + flown})
+    r = c.per_robot.get(1, {})
+    check("a ball shot after riding in the hopper is still a shot",
+          r.get("shots") == 1 and r.get("missed") == 1)
+
+    # A "flight" that wanders on for seconds, as chains through the qm7 piles
+    # did, and ends in a hub: a miss at 2.5 s, not a make 5 s later.
+    out_ = _fly(51, 134.0, 300.0, 250.0, 380.0, 10)[51]
+    wander = [(10 + i, (250.0 + 3.0 * i, 380.0 - 1.8 * i, 12.0, 12.0))
+              for i in range(150)]
+    events, c = _play_shots(bot, {51: out_ + wander})
+    r = c.per_robot.get(1, {})
+    check("a shot still out of a hub 2.5 s after launch is a miss",
+          r.get("shots") == 1 and r.get("missed") == 1 and r.get("made", 0) == 0
+          and c.expired == 1)
+
+    # First seen half a robot-height above the shooter, going up and in: the
+    # qm7 makes that came out unattributed.
+    above = _fly(52, 140.0, 300.0 - 30.0, 330.0, 130.0, 15)
+    events, c = _play_shots(bot, above)
+    r = c.per_robot.get(1, {})
+    check("a ball first seen just above its shooter is that robot's shot",
+          r.get("made") == 1 and not any(c.unattributed.values()))
+
     # The real thing, fired while driving: still a shot, still a miss.
     events, c = _play_shots(drive, _shot(40, 700, 100, start=10, x0=160.0))
     r = c.per_robot.get(1, {})
