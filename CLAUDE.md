@@ -218,6 +218,17 @@ Blocking scoring at the scrimmage:
   The droplet was being destroyed once that copy was confirmed; a new one is
   ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
   alias in `~/.ssh/config`.
+- Second model trained: `runs/scout26_mi300x/weights/best.pt` (fuel,
+  robot_blue, robot_red; yolo26s, imgsz 960, AMP disabled by Ultralytics'
+  check on the new image). Early-stopped at 62 epochs (0.36 h). Validated
+  (166 val frames, one nhdur match): all P 0.767 R 0.622 mAP50 0.662
+  mAP50-95 0.418; fuel 0.761/0.501/0.581/0.294; robot_blue (322)
+  0.789/0.680/0.699/0.474; robot_red (240) ~0.75/0.69/0.71/0.49 (derived
+  from the class mean; its row was cut off). Against auto-labels that miss
+  ~15% of robots, so recall is agreement with the labeller. Fuel mAP50 is
+  below the fuel-only model's 0.613 on a different val split; keep
+  `fuel26_mi300x` for counting until the two are compared on a real match.
+  Not yet run on video.
 - Relabelled with fuel greying (a75ff5c). 16-frame preview of the written
   labels: ~68 of ~80 visible robots boxed (~85%, from ~60%), all six in 4
   frames, robots in fuel piles boxed (1058 in qm7), no clear false positive
