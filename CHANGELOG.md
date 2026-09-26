@@ -9,7 +9,25 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- **QUICKSTART.md**: from a fresh clone to running the released models --
+  install, download and checksum the weights, preview detections, hub boxes,
+  `run.py count`, `run.py shots` with `--teams`, the speed check -- and what
+  the measured results say to trust. Linked from the top of the README.
+
+### Fixed
+
+- `requirements-detect.txt` allowed `ultralytics>=8.3`, which cannot load
+  YOLO26 weights -- every model this project has released. It needs 8.4.
+
+### Removed
+
+- `deploy/make_release.sh`: its header said three documents call it; none
+  do. Releases come from pushing a tag (`.github/workflows/release.yml`), and
+  `python deploy/package.py release <version>` still builds one locally.
+- `deploy/amd_watch.sh`: marked untested and never run; the MI300X guide
+  copies weights out with `docker cp`, which is what was actually used.
 
 ## v0.3.0 — 2026-09-26
 

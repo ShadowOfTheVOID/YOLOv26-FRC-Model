@@ -2,6 +2,8 @@
 
 Turn FRC match broadcasts into a YOLO training set and a scouting database.
 
+**Just want to run the trained models?** See [QUICKSTART.md](QUICKSTART.md).
+
 Given a TBA API key, it picks match videos you have never pulled before,
 throws away everything that is not the main field camera, crops off the
 burned-in scoreboard, exports sampled frames, and reads the fuel counters off

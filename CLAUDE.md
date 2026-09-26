@@ -144,124 +144,44 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
   follow the same style: why, what was measured, what it does not fix.
 - CI also fails if a TBA key or a `*WITH_KEY*` file is tracked.
 
-## Current work (as of 2026-09-25 — delete this section once stale)
+## Current work (as of 2026-09-26 — delete this section once stale)
 
-**The point of the model is per-robot scouting**: which robot shot, how many
-it made, how many it missed. It must also replace FMS scoring at the
-10-st-throwdown scrimmage, **Saturday 2026-10-10**; scoring is a subset of
-the same pipeline, since per-hub totals fall out of attributed shots.
+**Goal**: per-robot scouting (who shot, made, missed) and replacing FMS
+scoring at the 10-st-throwdown scrimmage, **Saturday 2026-10-10**.
 
-Status of per-robot scouting:
-- `tbavid/shooting.py` (`ShotCounter`) and `run.py shots` are built and
-  tested end to end against a stand-in model (`_FakeModel` in the tests):
-  per-robot made/missed, `--teams` to name tracks, `--annotate` for a video
-  with robot ids drawn on, `--out` for JSON. It refuses a model without robot
-  classes rather than reporting an empty scouting sheet.
-- It needs a model that detects robots (`robot_blue`/`robot_red`); none has
-  been trained yet. The motion heuristic in `autolabel_objects.py` found 1 of
-  6 robots on the first real preview and still missed three after fixes;
-  don't tune it further. `train/autolabel_robots.py` (YOLOE, text prompts,
-  whole frame + 2x tiles) replaced it for robots. Five real nhdur previews:
-  ~16 of 27 robots found (~60%), no frame fully boxed; of 10 misses, 5 show
-  at conf 0.02-0.12 and 5 not at all. False positives (hubs, a box over two
-  robots, alliance wall, blue ladder) are removed by the tall / spans-two /
-  too-big rules; a box inside a more confident one is a duplicate. Fuel is
-  greyed out before YOLOE looks: robots in piles went from invisible to
-  found (14 of 16 on four real frames, from 10). A robot of unknown alliance is painted grey, not a reason to
-  drop the frame (that had cost 176 of 906). `--min-robots` defaults to 2
-  (4 kept nothing usable). The user has ONE training run left -- no
-  relabel-and-retrain round -- so the labels going in are the final ones.
-  Alliance is read from the box's bottom band, so a box that stops above the
-  bumper can read the ramp under it (robot 307 came out red over the red
-  ramp).
-  YOLOE weights come from GitHub releases; huggingface is not needed.
-- It needs video at the camera's native frame rate: ball flights cannot be
-  tracked from the 3 fps exported frames.
-- Tallies are per robot track. Team identity: `run.py shots --annotate`
-  then `--teams` (an operator reads the ids off the video) is what works now.
-  `identify.py` has the voting and assignment design but no bumper scorer.
-  Two scorers were tried on real bumpers from the 16/17 broadcasts (digits
-  ~9 px tall): plain rendered-digit template matching ranked the right number
-  2nd and 4th, and a band-localised version mislocated the number both times
-  (a sponsor mark merged in; grey floor passed as white digits). Don't build
-  on those. A camera placed to see bumpers at the scrimmage is the stronger
-  lever; for broadcast footage, tune a scorer on real bumper crops once a
-  robot model supplies them.
-- Not yet validated against a hand-scored match.
+**Released: v0.3.0.** Two models are release assets (not in git; checksums in
+CHANGELOG.md): `fuel_best.pt` (fuel) and `fuel_withBotbest.pt` (fuel,
+robot_blue, robot_red), both yolo26s at imgsz 960, trained only on the
+2026nhdur broadcast. QUICKSTART.md is how to run them. Validation numbers are
+agreement with the auto-labellers, not with reality.
 
-Blocking scoring at the scrimmage:
-- Done: `count.py` accepts a fuel-only model when hub boxes are given
-  (`--hub-blue/--hub-red` or `--event`), so the first model can count now.
-- Hub active/inactive is not modelled anywhere; the counter credits every ball
-  into a hub. No visible state cue was found on the hubs in four broadcasts
-  (same black box and painted trim in every frame), so auto-labelling state
-  from pixels would be guessing. If state follows the match clock, it belongs
-  in `field.py`'s timeline, not the detector. The rule (what switches state,
-  whether inactive-hub fuel scores) is still to be confirmed with the user.
-- The model has only seen the nhdur broadcast. It must be validated on a
-  recording from the scrimmage's own camera position against a hand count,
-  and benchmarked (`train/benchmark.py`) on the laptop that will run it.
-- Recommend a human scorekeeper in parallel on the day.
+What the qm7 video runs established (see CHANGELOG v0.3.0 for the detail):
+- Robot detection is good: every box checked by eye was a real robot in the
+  right alliance colour. Robots hidden behind people or hubs come back under
+  new numbers (1058 was #5/#8/#11); `--teams` folds them. Merging by position
+  was tried in reasoning and would have given 1058 the number of 611 -- do
+  not merge by guess.
+- **Broadcast-angle counting is not FMS-grade**: the scoreboard showed 74
+  balls in qm7's first 30 s; ShotCounter's hub totals saw 19 and `run.py
+  count` 0. The tracker cannot hold ~15 px balls fired in streams (thousands
+  of broken tracks per 30 s). Threshold tuning will not close that gap.
+- Shot rules that were each measured wrong on real video and fixed: a ball a
+  robot drives away from is not a shot (must travel itself); a ball pushed
+  ahead is not a shot (must also move relative to the robot); a hopper ball
+  shot later still counts (sliding launch window); flights are capped at
+  2.5 s (stitch chains walked through piles for 4-8 s); frame windows scale
+  with fps (sources are 60 fps). Per-robot **misses** remain the least
+  reliable output -- do not present them as scouting data.
+- Hub active/inactive is not modelled; the rule is unconfirmed.
 
-- Released as v0.3.0 (PR #7 merged). The two models are release assets, not
-  in git: `fuel_best.pt` (fuel) and `fuel_withBotbest.pt` (fuel + robots),
-  checksums in CHANGELOG.md.
-- Dataset: `dataset-fuel/` built with `--matches 2026nhdur`, off-camera frames
-  dropped, fuel-only — 721 train / 185 val, 200,252 boxes. Val is a single
-  match, so its mAP says "converged", not "works at a scrimmage".
-- First model trained: `yolo26s`, `--imgsz 960`, no P2, 100 epochs on the
-  MI300X (~27 s an epoch). Validated directly: `best.pt` mAP50 0.613,
-  mAP50-95 0.321, precision 0.666, recall 0.623 (`last.pt` 0.605 / 0.319).
-  Two resumed copies of the run trained into the same folder at once, so its
-  `results.csv` interleaves them -- trust the direct validation, not the csv.
-  Validation labels come from the same colour heuristic, so these numbers
-  measure agreement with the labeller, not with reality.
-- Weights belong at `runs/fuel26_mi300x/weights/best.pt` in the Mac checkout.
-  The droplet was being destroyed once that copy was confirmed; a new one is
-  ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
-  alias in `~/.ssh/config`.
-- Second model trained: `runs/scout26_mi300x/weights/best.pt` (fuel,
-  robot_blue, robot_red; yolo26s, imgsz 960, AMP disabled by Ultralytics'
-  check on the new image). Early-stopped at 62 epochs (0.36 h). Validated
-  (166 val frames, one nhdur match): all P 0.767 R 0.622 mAP50 0.662
-  mAP50-95 0.418; fuel 0.761/0.501/0.581/0.294; robot_blue (322)
-  0.789/0.680/0.699/0.474; robot_red (240) ~0.75/0.69/0.71/0.49 (derived
-  from the class mean; its row was cut off). Against auto-labels that miss
-  ~15% of robots, so recall is agreement with the labeller. Fuel mAP50 is
-  below the fuel-only model's 0.613 on a different val split; keep
-  `fuel26_mi300x` for counting until the two are compared on a real match.
-  First video run (`run.py shots`, qm7, 15 s of auto at 60 fps): robot ids
-  stable for the whole clip, hubs placed right, but the robot plowing the
-  centre pile got 42 shots / 41 misses -- balls it drove away from counted as
-  shots. Fixed: a shot must travel a robot-width itself within 0.3 s. Also
-  one box per robot (duplicates split tallies). The cleaned qm7 video opens
-  with ~6.5 s of crowd shot; a spectator was boxed as a robot there.
-  Rerun with the fix, 30 s: the pile robot went from 42 shots to 2. Robots
-  then lost tracker ids mid-match (4 new ids), fixed by RobotNumbers
-  re-identification. Still open: ~12 unattributed makes in 30 s (launch not
-  seen), and ShotCounter's frame-count constants were set for 30 fps while
-  this video is 60 fps (its windows are half as long in time) -- both now
-  addressed (fps scaling; launch zone 0.8 heights above a robot). Third run,
-  checked frame by frame: every robot box is a real robot, right alliance;
-  a floor display near the referee was once boxed blue. Robots still split
-  (1058 = #5/#8/#11, 611 = #6/#12) when hidden behind people or hubs --
-  folded with --teams, deliberately not merged by guess. Stitch chains of
-  4-8 s were the fake misses: flights now capped at 2.5 s.
-  **Against the broadcast scoreboard (qm7, first 30 s): blue 11, red 63 =
-  74 balls. ShotCounter's hub totals saw 19 (~25%); `run.py count` saw 0**
-  (4,685 tracks too short, ~5,800 broken flights in 30 s -- the tracker
-  cannot hold 15 px balls fired in streams). Broadcast-angle counting is not
-  FMS-replacement grade and threshold tuning will not close 19 -> 74. The
-  recommendation made to the user: a close camera per hub (entry or exit
-  chute) and a line-crossing counter, validated on a recording of a practice
-  hub; human scorekeeper regardless. Awaiting: whether they can record a hub,
-  whether the scoreboard OCR (red 63 at 30 s) is right, live vs recorded.
-  Per-robot misses are the least reliable output; do not present them.
-- Relabelled with fuel greying (a75ff5c). 16-frame preview of the written
-  labels: ~68 of ~80 visible robots boxed (~85%, from ~60%), all six in 4
-  frames, robots in fuel piles boxed (1058 in qm7), no clear false positive
-  or wrong alliance. Misses are mostly robots cut by the frame edge or behind
-  people. Next:
-  `dataset-scout` and a robot-detecting model (the one thing `run.py shots`
-  still lacks); a hand-scored recording from the scrimmage camera
-  position to validate both commands against.
+**Recommended path for the scrimmage** (put to the user, awaiting answers):
+a close camera per hub (entry or exit chute) with a line-crossing counter,
+built and validated on a recording of a practice hub; a human scorekeeper
+regardless. Open questions: can they record a hub, is the scoreboard OCR
+right (red 63 at 30 s), live or recorded counting (the Mac processed 18 fps
+against 60 fps video).
+
+Training/droplet notes: the MI300X guide is `deploy/AMD_DEVCLOUD.md`; the
+scouting dataset recipe is `autolabel_fuel` -> `autolabel_robots` (fuel
+greyed before YOLOE; unknown-alliance robots painted out; `--min-robots` 2)
+-> `subset_classes --classes fuel,robot_blue,robot_red --copy`.
