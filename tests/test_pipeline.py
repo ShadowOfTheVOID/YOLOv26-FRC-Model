@@ -1472,6 +1472,16 @@ def test_robot_in_a_pile_is_not_shooting():
     events, c = _play_shots(fast, pushed)
     check("a ball pushed ahead of a fast robot is not a shot",
           sum(r["shots"] for r in c.per_robot.values()) == 0)
+    # And the reverse at the same speed: still balls the fast robot drives
+    # away from. Relative-only travel counted these (1058: 76 shots, 76 misses).
+    left = {}
+    for i in range(4):
+        bx = 200.0 + 60 * i
+        start = int(max(0, (bx - 180) // 10))
+        left[70 + i] = [(f, (bx, 345.0, 10.0, 10.0)) for f in range(start, start + 40)]
+    events, c = _play_shots(fast, left)
+    check("still balls a fast robot drives away from are not shots",
+          sum(r["shots"] for r in c.per_robot.values()) == 0)
 
     # The real thing, fired while driving: still a shot, still a miss.
     events, c = _play_shots(drive, _shot(40, 700, 100, start=10, x0=160.0))

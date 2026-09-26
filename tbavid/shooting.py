@@ -25,8 +25,8 @@ matter:
     shot the moment its robot drove anywhere. A ball that stays with its robot
     was carried, not shot.
 
-*And it must move itself, fast*: the ball's travel *relative to its robot*
-must reach `min_travel` robot-widths within some `launch_s` window -- a
+*And it must move itself, fast*: the ball's travel *and relative to its robot*
+must each reach `min_travel` robot-widths within some `launch_s` window -- a
 sliding window, because a ball tracked for seconds in a hopper before it is
 shot must still count (the first version measured from first sighting and
 threw those away). Relative, because a robot driving hard into a pile pushes
@@ -474,12 +474,18 @@ class ShotCounter:
                 ball.trail.pop(0)
             t_from, p_from, r_from = ball.trail[0]
             dx, dy = ball.last[0] - p_from[0], ball.last[1] - p_from[1]
+            own = (dx * dx + dy * dy) ** 0.5
+            rel = own
             if r_from is not None and here is not None:
-                # Relative to the robot: a pushed ball moves with it.
-                dx -= here[0] - r_from[0]
-                dy -= here[1] - r_from[1]
-            if (t - t_from <= self.launch_s + 1e-9
-                    and (dx * dx + dy * dy) ** 0.5 >= self.min_travel * ball.width):
+                # Relative to the robot: a pushed ball moves with it. BOTH
+                # must pass -- relative alone let a still ball count as soon
+                # as its robot drove off fast (1058 then 11: 76 shots, 76
+                # misses on the fifth qm7 run), which is the case "own" was
+                # there to stop.
+                rx, ry = dx - (here[0] - r_from[0]), dy - (here[1] - r_from[1])
+                rel = (rx * rx + ry * ry) ** 0.5
+            need = self.min_travel * ball.width
+            if t - t_from <= self.launch_s + 1e-9 and own >= need and rel >= need:
                 ball.launched = True
                 ball.launch_t = t_from
                 if ball.shot is not None and ball.shot.launch_t is None:

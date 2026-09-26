@@ -370,10 +370,12 @@ harvest's output as a source of its own.
     robot's height above it was tried and attributed none of them (still 3
     blue, 10 red); from a broadcast camera "above a robot" is the floor
     behind it. It is off (`launch_up` 0).
-  - A launch is measured relative to the robot. The run after the sliding
-    window credited 1058 with 11 shots and 11 misses while it plowed the
-    pile: a robot at speed pushes balls a robot-width in 0.3 s. A pushed ball
-    moves with its robot; a shot leaves it behind.
+  - A launch must be fast both on its own and relative to its robot. The
+    run after the sliding window credited 1058 with 11 shots and 11 misses
+    while it plowed the pile (a robot at speed pushes balls a robot-width in
+    0.3 s). Relative travel alone then made it far worse -- 76 shots, 76
+    misses -- because a still ball a fast robot drives away from moves fast
+    relative to it. Both tests are required now.
   Robots split across several numbers (1058 as #5, #8, #11) are left split
   on purpose: `--teams 5=1058,8=1058,11=1058` folds them; merging by guess
   could mix two robots' shots.

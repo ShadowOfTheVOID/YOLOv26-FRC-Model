@@ -245,6 +245,16 @@ Blocking scoring at the scrimmage:
   (1058 = #5/#8/#11, 611 = #6/#12) when hidden behind people or hubs --
   folded with --teams, deliberately not merged by guess. Stitch chains of
   4-8 s were the fake misses: flights now capped at 2.5 s.
+  **Against the broadcast scoreboard (qm7, first 30 s): blue 11, red 63 =
+  74 balls. ShotCounter's hub totals saw 19 (~25%); `run.py count` saw 0**
+  (4,685 tracks too short, ~5,800 broken flights in 30 s -- the tracker
+  cannot hold 15 px balls fired in streams). Broadcast-angle counting is not
+  FMS-replacement grade and threshold tuning will not close 19 -> 74. The
+  recommendation made to the user: a close camera per hub (entry or exit
+  chute) and a line-crossing counter, validated on a recording of a practice
+  hub; human scorekeeper regardless. Awaiting: whether they can record a hub,
+  whether the scoreboard OCR (red 63 at 30 s) is right, live vs recorded.
+  Per-robot misses are the least reliable output; do not present them.
 - Relabelled with fuel greying (a75ff5c). 16-frame preview of the written
   labels: ~68 of ~80 visible robots boxed (~85%, from ~60%), all six in 4
   frames, robots in fuel piles boxed (1058 in qm7), no clear false positive
