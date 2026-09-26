@@ -16,8 +16,16 @@ the build rather than publishing an empty release.
   `run.py count`, `run.py shots` with `--teams`, the speed check -- and what
   the measured results say to trust. Linked from the top of the README.
 
+### Changed
+
+- `CLAUDE.md` moved to `.claude/CLAUDE.md`, out of the repo's front page;
+  Claude Code reads project instructions from either place.
+
 ### Fixed
 
+- Release archives now include `QUICKSTART.md` and `requirements-detect.txt`
+  (the packager ships an explicit list, and neither was on it -- the quick
+  start's own install step would have failed from an archive).
 - `requirements-detect.txt` allowed `ultralytics>=8.3`, which cannot load
   YOLO26 weights -- every model this project has released. It needs 8.4.
 
