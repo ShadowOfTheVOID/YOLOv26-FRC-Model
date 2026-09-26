@@ -178,8 +178,15 @@ class BallCounter:
                  reacquire_frames: int = REACQUIRE_FRAMES,
                  reacquire_px: float = REACQUIRE_PX,
                  require_entry: bool = REQUIRE_ENTRY,
-                 pad: float = 0.0):
+                 pad: float = 0.0,
+                 fps: float = 30.0):
         self.hubs = dict(hubs)
+        # Frame-count windows chosen on 30 fps footage; scaled so each keeps
+        # its length in time on a 60 fps source (see shooting.ShotCounter).
+        k = (fps or 30.0) / 30.0
+        min_track_frames, vanish_frames, reacquire_frames = (
+            max(1, round(v * k)) for v in (min_track_frames, vanish_frames,
+                                           reacquire_frames))
         self.min_track_frames = min_track_frames
         self.vanish_frames = vanish_frames
         self.reacquire_frames = reacquire_frames

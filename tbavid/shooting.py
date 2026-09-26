@@ -239,8 +239,19 @@ class ShotCounter:
                  launch_s: float = LAUNCH_S,
                  stitch_frames: int = STITCH_FRAMES,
                  stitch_px: float = STITCH_PX,
-                 robot_memory: int = ROBOT_MEMORY):
+                 robot_memory: int = ROBOT_MEMORY,
+                 fps: float = 30.0):
         self.hubs = dict(hubs)
+        # Every window below is a count of frames, chosen on 30 fps footage.
+        # The first real run was 60 fps broadcast video, where "missing for
+        # 4 frames" meant 0.07 s instead of 0.13 s: flights ended and robots
+        # were forgotten twice as fast as intended. Scaling by the source's
+        # rate keeps each window the same length in time.
+        k = (fps or 30.0) / 30.0
+        min_track_frames, vanish_frames, reacquire_frames, stitch_frames, robot_memory = (
+            max(1, round(v * k)) for v in (min_track_frames, vanish_frames,
+                                           reacquire_frames, stitch_frames,
+                                           robot_memory))
         self.min_track_frames = min_track_frames
         self.vanish_frames = vanish_frames
         self.reacquire_frames = reacquire_frames
@@ -721,7 +732,10 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
         return {"error": reason}
 
     factory = counter_factory or ShotCounter
-    counter: Optional[ShotCounter] = factory(hubs) if hubs else None
+    def make(h):
+        return factory(h, fps=fps) if counter_factory is None and fps else factory(h)
+
+    counter: Optional[ShotCounter] = make(hubs) if hubs else None
     learning: List[Dict[str, Box]] = []
     events: List[Dict] = []
     started = _time.monotonic()
@@ -760,7 +774,7 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
                                      f"in with --hub-blue/--hub-red.",
                             "frames": frame}
                 hubs = found
-                counter = factory(hubs)
+                counter = make(hubs)
         else:
             for e in counter.update(frame, t, robots, balls):
                 events.append(e)

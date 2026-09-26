@@ -1430,6 +1430,18 @@ def test_robot_in_a_pile_is_not_shooting():
     check("nor to anything after the robot has been gone too long",
           set(f) == {5})
 
+    # Windows are frame counts chosen at 30 fps; at 60 fps they must double
+    # or a ball missing for 0.07 s is already "gone".
+    c30, c60 = ShotCounter(HUB), ShotCounter(HUB, fps=60.0)
+    check("frame windows keep their length in time at 60 fps",
+          (c60.vanish_frames, c60.robot_memory, c60.stitch_frames)
+          == (2 * c30.vanish_frames, 2 * c30.robot_memory, 2 * c30.stitch_frames))
+    from tbavid.count import BallCounter
+    b30, b60 = BallCounter(HUB), BallCounter(HUB, fps=60.0)
+    check("and the plain counter's too, since it is the score at a scrimmage",
+          (b60.vanish_frames, b60.reacquire_frames)
+          == (2 * b30.vanish_frames, 2 * b30.reacquire_frames))
+
     # The real thing, fired while driving: still a shot, still a miss.
     events, c = _play_shots(drive, _shot(40, 700, 100, start=10, x0=160.0))
     r = c.per_robot.get(1, {})

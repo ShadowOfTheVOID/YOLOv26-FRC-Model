@@ -365,7 +365,8 @@ def cmd_count(args, cfg):
         return counting.BallCounter(
             found, min_track_frames=args.min_frames,
             reacquire_frames=args.reacquire,
-            require_entry=not args.allow_inside, pad=args.pad)
+            require_entry=not args.allow_inside, pad=args.pad,
+            fps=args.expect_fps or _source_fps(source) or 30.0)
 
     def emit(board):
         """One JSON line per change, for whatever is showing the score.

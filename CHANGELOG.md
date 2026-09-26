@@ -357,6 +357,12 @@ harvest's output as a source of its own.
   when it reappears within 1.5 robot-widths of where it was, same alliance,
   within 3 s: qm7 grew robots 16099, 15856, 16580 and 21187 mid-match, each
   splitting a real robot's tally.
+- **Counting windows keep their length in time on 60 fps video.** Both
+  counters measure "missing for N frames", "held for N frames" in frames,
+  chosen on 30 fps footage; the harvested broadcasts are 60 fps, so every
+  window was half as long -- flights ended and robots were forgotten twice as
+  fast as intended. `run.py shots` and `run.py count` now scale them by the
+  source's frame rate (read from the file, or `--expect-fps` for count).
 - **`run.py shots` crashed at the very end of a run** printing its report,
   after the not-launched rule added an ignore reason the report had no line
   for -- losing every result. It names that reason now and cannot crash on
