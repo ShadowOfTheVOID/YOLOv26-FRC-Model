@@ -341,6 +341,18 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **A robot driving through fuel is no longer a 0-for-41 shooter.** The first
+  scouting model's run on 2026nhdur qm7 credited the robot plowing the centre
+  pile with 42 shots and 41 misses in 15 s of auto. The balls it passed sat
+  still while it drove away -- which "gets clear of the robot" as surely as a
+  launch -- and the tracker gives pile balls new ids constantly, so each one
+  "started at the robot". A shot must now move itself: a robot-width of its
+  own travel inside 0.3 s (continuations of a broken flight measured from
+  where it broke). Rejected balls are counted under `not_launched`.
+- **`run.py shots` keeps one box per robot.** The same model sometimes boxes a
+  robot twice (0.58 and 0.37 on one robot of the held-out match); every box
+  became its own track, splitting that robot's shots. The less confident of
+  two boxes that overlap that much is dropped each frame.
 - **`train.py` no longer dies before epoch 1 on the newer MI300X image.**
   Every dataloader worker failed with "no response from torch_shm_manager":
   the helper program that file_system sharing starts could not load

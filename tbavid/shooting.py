@@ -25,6 +25,17 @@ matter:
     shot the moment its robot drove anywhere. A ball that stays with its robot
     was carried, not shot.
 
+*And it must move itself, fast*: the ball's own travel from where it was
+first seen must reach `min_travel` robot-widths within `launch_s` seconds.
+"Gets clear" alone was measured on real video and failed: a robot driving
+through the centre fuel pile in 2026nhdur qm7 was credited with 42 shots and
+41 misses in 15 seconds of auto. The balls it passed never moved -- the robot
+drove away from them, which clears them just as well as a launch does -- and
+in a pile the tracker hands balls new ids constantly, so every ball it
+touched started a fresh track "at the robot". A shot leaves at several metres
+a second (a robot-width, ~0.9 m, well inside 0.3 s); a ball sitting still, or
+an id sliding to the next ball in a pile, never covers one.
+
 One exception: a ball that starts at a robot and ends in a hub is a shot
 however little it cleared. A robot shooting from against the hub has almost
 no room to clear it, and the hub itself proves the ball left.
@@ -94,6 +105,11 @@ LAUNCH_PAD = 0.3
 # before it has been shot rather than carried.
 MIN_CLEAR = 1.0
 
+# How far, in widths of the shooter's box, the ball itself must travel from
+# where it was first seen, and how soon. See "And it must move itself".
+MIN_TRAVEL = 1.0
+LAUNCH_S = 0.3
+
 # How long a miss is held open for the rest of a broken flight to turn up,
 # and how close to the predicted position it must appear.
 STITCH_FRAMES = 10
@@ -127,7 +143,7 @@ def gap(box: Box, point: Point) -> float:
 class _Ball:
     __slots__ = ("tid", "t0", "first", "last", "prev", "last_frame", "prev_frame",
                  "seen", "missing", "shooter", "shooter_alliance", "cleared",
-                 "started_in", "shot")
+                 "started_in", "shot", "width", "launched")
 
     def __init__(self, tid: int, frame: int, t: float, point: Point,
                  shooter: Optional[int], shooter_alliance: Optional[str],
@@ -147,6 +163,8 @@ class _Ball:
         self.cleared = 0.0              # furthest it got from the shooter's box
         self.started_in = started_in    # hub it was first seen inside, if any
         self.shot: Optional["_Shot"] = None
+        self.width = 0.0                # shooter's box width at launch
+        self.launched = False           # moved min_travel widths inside launch_s
 
     def velocity(self) -> Point:
         dt = self.last_frame - self.prev_frame
@@ -163,7 +181,7 @@ class _Ball:
 
 class _Shot:
     """One ball's flight from a robot, across however many track pieces."""
-    __slots__ = ("robot", "alliance", "t0", "seen", "pieces", "confirmed")
+    __slots__ = ("robot", "alliance", "t0", "seen", "pieces", "confirmed", "width")
 
     def __init__(self, robot: Optional[int], alliance: Optional[str], t0: float):
         self.robot = robot
@@ -174,6 +192,7 @@ class _Shot:
         # False until the ball has been seen clear of its robot (or in a hub).
         # Until then it may be a ball being carried.
         self.confirmed = False
+        self.width = 0.0            # shooter's box width at launch
 
 
 class _Held:
@@ -216,6 +235,8 @@ class ShotCounter:
                  reacquire_px: float = REACQUIRE_PX,
                  launch_pad: float = LAUNCH_PAD,
                  min_clear: float = MIN_CLEAR,
+                 min_travel: float = MIN_TRAVEL,
+                 launch_s: float = LAUNCH_S,
                  stitch_frames: int = STITCH_FRAMES,
                  stitch_px: float = STITCH_PX,
                  robot_memory: int = ROBOT_MEMORY):
@@ -226,6 +247,8 @@ class ShotCounter:
         self.reacquire_px = reacquire_px
         self.launch_pad = launch_pad
         self.min_clear = min_clear
+        self.min_travel = min_travel
+        self.launch_s = launch_s
         self.stitch_frames = stitch_frames
         self.stitch_px = stitch_px
         self.robot_memory = robot_memory
@@ -238,7 +261,7 @@ class ShotCounter:
         self.into_hub: Dict[str, int] = {a: 0 for a in hubs}
         # Why balls did NOT become an outcome, so a count that looks wrong can
         # be read rather than guessed at.
-        self.ignored: Dict[str, int] = {"too_short": 0, "carried": 0,
+        self.ignored: Dict[str, int] = {"too_short": 0, "carried": 0, "not_launched": 0,
                                         "not_from_robot": 0, "started_inside": 0}
         self.stitched = 0
         self.reacquired = 0
@@ -265,7 +288,7 @@ class ShotCounter:
                 ball.last, ball.last_frame = point, frame
                 ball.seen += 1
                 ball.missing = 0
-            self._measure_clearance(self.balls[tid])
+            self._measure_clearance(self.balls[tid], t)
 
         for tid in list(self.balls):
             ball = self.balls[tid]
@@ -333,8 +356,13 @@ class ShotCounter:
                 ball.shooter = held.shot.robot
                 ball.shooter_alliance = held.shot.alliance
                 # A confirmed shot already left its robot; a "maybe" carries on
-                # measuring from where its first piece got to.
+                # measuring from where its first piece got to -- and must still
+                # be seen to move itself, from where that piece vanished, or a
+                # new id on a ball sitting in a pile would pass for the rest of
+                # a flight.
                 ball.cleared = float("inf") if held.shot.confirmed else held.cleared
+                ball.width = held.shot.width
+                ball.first, ball.t0 = held.point, held.t
             else:
                 # An unattributed ball that passed over a hub. It is still an
                 # unattributed ball; it just has not gone in yet.
@@ -344,8 +372,11 @@ class ShotCounter:
 
         # 3. A new ball.
         alliance = self.robots[at_robot][0] if at_robot is not None else None
-        self.balls[tid] = _Ball(tid, frame, t, point, at_robot, alliance,
-                                hub_of(self.hubs, point))
+        ball = _Ball(tid, frame, t, point, at_robot, alliance,
+                     hub_of(self.hubs, point))
+        if at_robot is not None:
+            ball.width = max(self.robots[at_robot][1][2], 1.0)
+        self.balls[tid] = ball
 
     def _reclaim(self, point: Point, frame: int,
                  at_robot: Optional[int]) -> Optional[_Held]:
@@ -372,9 +403,13 @@ class ShotCounter:
                 self.stitched += 1
         return best
 
-    def _measure_clearance(self, ball: _Ball) -> None:
+    def _measure_clearance(self, ball: _Ball, t: float) -> None:
         if ball.shooter is None or ball.cleared == float("inf"):
             return
+        if not ball.launched and ball.width and t - ball.t0 <= self.launch_s:
+            dx, dy = ball.last[0] - ball.first[0], ball.last[1] - ball.first[1]
+            if (dx * dx + dy * dy) ** 0.5 >= self.min_travel * ball.width:
+                ball.launched = True
         entry = self.robots.get(ball.shooter)
         if entry is None:
             return
@@ -389,10 +424,16 @@ class ShotCounter:
         shot = ball.shot
         if shot is None and ball.shooter is not None:
             shot = _Shot(ball.shooter, ball.shooter_alliance, ball.t0)
+            shot.width = ball.width
 
         if shot is not None:
             shot.seen += ball.seen
             if not shot.confirmed:
+                if hub is None and ball.cleared >= self.min_clear and not ball.launched:
+                    # Clear of the robot without having moved: the robot left
+                    # it. A pushed or passed-over ball, not a shot.
+                    self.ignored["not_launched"] += 1
+                    return
                 if ball.cleared >= self.min_clear or hub is not None:
                     shot.confirmed = True
                 else:
@@ -527,6 +568,39 @@ ROBOT_CLASSES = {"robot_blue": "blue", "robot_red": "red"}
 MIN_TRACKING_FPS = 15.0
 
 
+SAME_ROBOT = 0.5      # IoU above this, or one box this far inside the other
+
+
+def one_box_per_robot(robots: Dict[int, Tuple[str, Box, float]]
+                      ) -> Dict[int, Tuple[str, Box]]:
+    """Drop the less confident of two robot boxes that are the same robot.
+
+    The first scouting model's check on a held-out match boxed some robots
+    twice -- 0.56 and 0.33 on one, 0.58 and 0.37 on another, 0.27 and 0.30 on
+    a third, each pair overlapping almost entirely. The tracker gives every
+    box its own id, so one robot's shots would be split across two tracks and
+    each would look like half a shooter. Kept per frame, before the counter
+    sees them: whichever box is more confident this frame stands for the
+    robot.
+    """
+    def overlap(a: Box, b: Box) -> Tuple[float, float]:
+        ix = max(0.0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+        iy = max(0.0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+        inter = ix * iy
+        small = min(a[2] * a[3], b[2] * b[3]) or 1.0
+        union = a[2] * a[3] + b[2] * b[3] - inter or 1.0
+        return inter / union, inter / small
+
+    order = sorted(robots.items(), key=lambda kv: -kv[1][2])
+    kept: Dict[int, Tuple[str, Box]] = {}
+    for tid, (alliance, box, _cf) in order:
+        if any(max(iou, cover) >= SAME_ROBOT and (iou >= SAME_ROBOT or cover >= 0.8)
+               for iou, cover in (overlap(box, k[1]) for k in kept.values())):
+            continue
+        kept[tid] = (alliance, box)
+    return kept
+
+
 def model_can_shoot(names: Dict[int, str],
                     hubs: Optional[Dict[str, Box]]) -> Optional[str]:
     """Why this model cannot attribute shots, or None when it can."""
@@ -593,10 +667,10 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
     for result in model.track(source=source, stream=True, persist=True,
                               tracker=tracker, conf=conf, verbose=False):
         t = frame / fps if fps else _time.monotonic() - started
-        robots: Dict[int, Tuple[str, Box]] = {}
+        found: Dict[int, Tuple[str, Box, float]] = {}
         balls: Dict[int, Box] = {}
         seen_hubs: Dict[str, Box] = {}
-        for x1, y1, x2, y2, _cf, cls_index, tid in _boxes_of(result):
+        for x1, y1, x2, y2, cf, cls_index, tid in _boxes_of(result):
             name = names.get(int(cls_index))
             if name is None:
                 continue
@@ -604,9 +678,11 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
             if name == CLS_FUEL and tid is not None:
                 balls[int(tid)] = box
             elif name in ROBOT_CLASSES and tid is not None:
-                robots[int(tid)] = (ROBOT_CLASSES[name], box)
+                found[int(tid)] = (ROBOT_CLASSES[name], box, float(cf))
             elif name.startswith("hub_"):
                 seen_hubs[name.split("_", 1)[1]] = box
+
+        robots = one_box_per_robot(found)
 
         if counter is None:
             if seen_hubs:

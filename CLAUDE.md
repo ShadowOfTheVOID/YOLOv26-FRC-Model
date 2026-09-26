@@ -228,7 +228,12 @@ Blocking scoring at the scrimmage:
   ~15% of robots, so recall is agreement with the labeller. Fuel mAP50 is
   below the fuel-only model's 0.613 on a different val split; keep
   `fuel26_mi300x` for counting until the two are compared on a real match.
-  Not yet run on video.
+  First video run (`run.py shots`, qm7, 15 s of auto at 60 fps): robot ids
+  stable for the whole clip, hubs placed right, but the robot plowing the
+  centre pile got 42 shots / 41 misses -- balls it drove away from counted as
+  shots. Fixed: a shot must travel a robot-width itself within 0.3 s. Also
+  one box per robot (duplicates split tallies). The cleaned qm7 video opens
+  with ~6.5 s of crowd shot; a spectator was boxed as a robot there.
 - Relabelled with fuel greying (a75ff5c). 16-frame preview of the written
   labels: ~68 of ~80 visible robots boxed (~85%, from ~60%), all six in 4
   frames, robots in fuel piles boxed (1058 in qm7), no clear false positive

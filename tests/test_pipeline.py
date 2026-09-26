@@ -1361,6 +1361,54 @@ def _frames_of(names, robots, balls, n):
     return frames
 
 
+def test_robot_in_a_pile_is_not_shooting():
+    """A robot driving through fuel was credited with 42 shots and 41 misses.
+
+    Measured on 2026nhdur qm7 with the first scouting model: the robot plowing
+    the centre pile in auto. The balls it passed sat still while it drove away
+    -- clear of the robot, so "shots" -- and each missed its hub. A shot has to
+    move itself, fast: a robot-width inside 0.3 s. These paths are that case,
+    in miniature, next to one real shot from the same moving robot.
+    """
+    drive = {1: [(f, ("blue", (100.0 + 5 * f, 300.0, 80.0, 60.0))) for f in range(70)]}
+    pile = {}
+    for i in range(5):
+        bx = 190.0 + 50 * i                      # balls on the floor in its path
+        start = int(max(0, (bx - 180) // 5))     # a fresh id as the robot reaches it
+        pile[20 + i] = [(f, (bx, 345.0, 10.0, 10.0)) for f in range(start, start + 40)]
+    events, c = _play_shots(drive, pile)
+    shots = sum(r["shots"] for r in c.per_robot.values())
+    check("balls a robot drives away from are not its shots", shots == 0)
+    # The last ball is still beside the robot when the clip ends: carried.
+    check("and are counted as not launched, so it can be read",
+          c.ignored.get("not_launched", 0) == 4 and c.ignored["carried"] == 1)
+
+    # Pushed along at robot speed: 1.5 px a frame against an 80 px robot is
+    # about half a width per second at 30 fps -- a shove, not a launch.
+    shoved = {30: [(f, (185.0 + 1.5 * (f - 5), 345.0, 10.0, 10.0)) for f in range(5, 70)]}
+    events, c = _play_shots(_still(1, "blue", (100.0, 300.0, 80.0, 60.0), 80), shoved)
+    check("a ball rolled away slowly is not a shot",
+          sum(r["shots"] for r in c.per_robot.values()) == 0)
+
+    # One robot boxed twice (0.58 and 0.37 on the held-out match) must be one
+    # track to the counter, or its shots split between two "robots".
+    from tbavid.shooting import one_box_per_robot
+    kept = one_box_per_robot({5: ("blue", (623.0, 348.0, 60.0, 47.0), 0.58),
+                              9: ("blue", (626.0, 352.0, 55.0, 40.0), 0.37),
+                              7: ("red", (487.0, 410.0, 73.0, 85.0), 0.44)})
+    check("two boxes on one robot become one, the confident one",
+          set(kept) == {5, 7})
+    kept = one_box_per_robot({1: ("blue", (100.0, 300.0, 80.0, 60.0), 0.5),
+                              2: ("blue", (150.0, 300.0, 80.0, 60.0), 0.4)})
+    check("robots side by side are both kept", set(kept) == {1, 2})
+
+    # The real thing, fired while driving: still a shot, still a miss.
+    events, c = _play_shots(drive, _shot(40, 700, 100, start=10, x0=160.0))
+    r = c.per_robot.get(1, {})
+    check("a real shot from a moving robot still counts",
+          r.get("shots") == 1 and r.get("missed", 0) + r.get("wrong_hub", 0) == 1)
+
+
 def test_models_that_can_count_and_shoot():
     """What each command demands of a model -- and no more than it needs.
 
@@ -2022,7 +2070,7 @@ def main() -> int:
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
                test_serving_export, test_live_counter, test_live_rows,
                test_detect_rows, test_detect_writes, test_api_stays_stdlib,
-               test_ball_counting, test_shot_attribution,
+               test_ball_counting, test_shot_attribution, test_robot_in_a_pile_is_not_shooting,
                test_models_that_can_count_and_shoot, test_hub_geometry, test_scrimmage_scoreboard,
                test_nothing_to_verify_against, test_counting_model_dataset,
                test_robot_autolabel_rules,
