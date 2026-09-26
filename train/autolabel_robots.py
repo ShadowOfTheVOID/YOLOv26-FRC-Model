@@ -48,6 +48,23 @@ Lower-confidence boxes were tried as paint-out regions for the robots YOLOE
 misses outright, and rejected: on the five previews they covered 3 of 10
 missed robots and, on one frame, 30% of the picture.
 
+Fuel is greyed out before YOLOE looks. A robot sitting in a pile of fuel, or
+with a full hopper, stopped looking like a robot to it: in the user's preview
+robot 1058 in the middle of the central pile had no box at all while fuel
+boxes covered it. With every fuel-coloured pixel set to grey first, measured
+at --conf 0.1 on four real frames with 16 robots marked:
+
+    as it was:     10 of 16 found; 1058 in the pile not found at all
+    fuel greyed:   14 of 16; 1058 at 0.40, a red robot 0.41 -> 0.91,
+                   a robot at the bottom edge 0.15 -> 0.44
+    extra prompts ("robot covered in yellow balls", "machine full of
+                   balls"), no greying: no better than as it was
+
+Two of those frames were previews with label outlines drawn in yellow, which
+greying also removes, so their "as it was" is pessimistic; the two clean
+frames alone went from 6 of 9 to 8 of 9. Only the proposal sees the greyed
+copy: alliance is read from the real pixels, where the bumper still is.
+
 Alliance comes from the bottom band of the box, where the bumper is: a hue
 vote among pixels saturated enough to have a hue at all. Measured: 7314 blue
 0.52 / red 0.00, 49/25 red 0.48 / 0.00. The fixed saturation >= 120 gate the
@@ -97,6 +114,9 @@ DECOYS = ("person", "chair", "hub")
 TALL = 1.3          # h/w above this is not a robot: the hubs came out 1.0-2.3
 HOLDS = 0.8         # a box with two others this far inside it spans two robots
 BIG = 3.0           # area over this many times the other robots' median
+DUP = 0.8           # a box this far inside another robot box is the same robot
+# autolabel_fuel.py's HSV_LO / HSV_HI, repeated so this imports without cv2
+FUEL_LO, FUEL_HI = (18, 90, 90), (38, 255, 255)
 HUE_SAT, HUE_VAL = 60, 30
 BLUE_HUE = (95, 130)
 RED_HUE = (10, 165)  # red is <= 10 or >= 165 on OpenCV's 0-180 hue
@@ -150,7 +170,14 @@ def screen(dets: list, field_top: int = 0) -> list:
     came out 3.7x and passed as a robot, in the one frame of the first five
     real previews that the gate kept. Against the robots alone it is 4.4x.
     Real robots in those frames differ by at most ~1.7x near to far, so the
-    limit is 3x, not 4x.
+    limit is 3x, not 4x. One other robot is enough to compare with: a frame
+    with one robot found let the top of the red hub (182 x 215 px, 3.4x the
+    blue robot beside it) through as a robot of unknown alliance, and it was
+    painted grey.
+
+    With fuel greyed out YOLOE also returns parts of robots: a 75 x 48 box
+    wholly inside robot 11136's own. Of two robot boxes where one lies inside
+    the other, the less confident is a duplicate, not a second robot.
     """
     first = []
     for d in dets:
@@ -170,10 +197,22 @@ def screen(dets: list, field_top: int = 0) -> list:
             others = [(o[2] - o[0]) * (o[3] - o[1]) for o, w in first
                       if w is None and o is not d]
             area = (d[2] - d[0]) * (d[3] - d[1])
-            if len(others) >= 2 and area > BIG * float(np.median(others)):
+            if others and area > BIG * float(np.median(others)):
                 why = "too big"
         out.append((d, why))
+    alive = [d for d, why in out if why is None]
+    for i, (d, why) in enumerate(out):
+        if why is None and any(
+                o is not d and o[4] > d[4]
+                and (inside(d, o) >= DUP or inside(o, d) >= DUP) for o in alive):
+            out[i] = (d, "duplicate")
     return out
+
+
+def fuel_mask(hsv: np.ndarray) -> np.ndarray:
+    """True where a pixel is fuel-coloured, by autolabel_fuel.py's gate."""
+    lo, hi = np.array(FUEL_LO), np.array(FUEL_HI)
+    return ((hsv >= lo) & (hsv <= hi)).all(axis=-1)
 
 
 def alliance(hsv_band: np.ndarray):
@@ -296,6 +335,15 @@ def propose(model, img, conf: float, imgsz: int = 1280, tiles: bool = True) -> l
     return merge(dets)
 
 
+def grey_fuel(img, hsv):
+    """A copy with every fuel-coloured pixel (grown by one) set to grey."""
+    import cv2
+    mask = cv2.dilate(fuel_mask(hsv).astype(np.uint8), np.ones((3, 3), np.uint8))
+    out = img.copy()
+    out[mask > 0] = PAINT
+    return out
+
+
 def label_frame(model, img, args):
     """(labelled, rejected, unknown boxes, field_top, reason) for one image."""
     import cv2
@@ -304,8 +352,9 @@ def label_frame(model, img, args):
         from autolabel_objects import field_line
         field_top = field_line(img)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    seen = grey_fuel(img, hsv) if args.grey_fuel else img
     labelled, rejected, unknown = [], [], []
-    for d, why in screen(propose(model, img, args.conf, args.imgsz, args.tiles), field_top):
+    for d, why in screen(propose(model, seen, args.conf, args.imgsz, args.tiles), field_top):
         if why:
             rejected.append((d, why))
             continue
@@ -387,6 +436,9 @@ def main() -> int:
     ap.add_argument("--no-tiles", dest="tiles", action="store_false",
                     help="whole frame only: ~4x faster, finds fewer robots")
     ap.add_argument("--no-field-line", dest="field_line", action="store_false")
+    ap.add_argument("--no-grey-fuel", dest="grey_fuel", action="store_false",
+                    help="let YOLOE see the fuel. It then missed robots "
+                         "sitting in piles of it (10 of 16 found, against 14)")
     ap.add_argument("--min-robots", type=int, default=2,
                     help="a frame with fewer is moved out. 4 kept 1 of the "
                          "first 5 real previews (and that one was wrong); "

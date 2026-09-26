@@ -1647,6 +1647,29 @@ def test_robot_autolabel_rules():
     check("a box ending above the field line is the stands",
           screen([blue], field_top=320)[0][1] == "above field")
 
+    # The red hub's top, painted as a robot in the user's preview: only one
+    # other robot in the frame, and one is enough to compare with.
+    hub_top, r2648 = (1253, 85, 1435, 300, 0.2), (943, 155, 1063, 252, 0.4)
+    why = {d: r for d, r in screen([hub_top, r2648])}
+    check("a hub top 3.4x the only robot is too big", why[hub_top] == "too big"
+          and why[r2648] is None)
+    near, far = (1175, 322, 1300, 380, 0.4), (1527, 211, 1608, 263, 0.5)
+    check("but a near robot 1.7x a far one is not",
+          all(r is None for _, r in screen([near, far])))
+    # With fuel greyed YOLOE also boxes parts of robots.
+    part = (456, 285, 531, 333, 0.15)
+    why = {d: r for d, r in screen([blue2[:4] + (0.17,), part, red_a, blue])}
+    check("a box inside a more confident robot box is a duplicate",
+          why[part] == "duplicate" and why[blue2[:4] + (0.17,)] is None)
+    check("and so is a less confident box around a confident one",
+          dict(screen([(400, 270, 545, 365, 0.1), blue2, red_a]))[(400, 270, 545, 365, 0.1)]
+          == "duplicate")
+
+    from autolabel_robots import fuel_mask
+    hsv = np.array([[[28, 200, 220], [28, 40, 200], [115, 200, 150], [20, 120, 60]]], np.uint8)
+    check("fuel is greyed; floor, bumpers and shadowed fuel below the gate are not",
+          fuel_mask(hsv).tolist() == [[True, False, False, False]])
+
     dup = (1490, 286, 1615, 347, 0.23)       # same robot from another tile
     check("NMS keeps the confident copy",
           merge([dup, red_a, blue]) == [blue, red_a])

@@ -341,6 +341,21 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **Robots in piles of fuel are found: fuel is greyed out before YOLOE
+  looks.** In the first label preview robot 1058, in the middle of the
+  central pile, had no box and fuel boxes all over it -- the model would
+  have learned that a robot in fuel is background, exactly when `run.py
+  shots` needs it. With fuel-coloured pixels (autolabel_fuel.py's gate) set
+  to grey first, four real frames with 16 robots marked went from 10 found
+  to 14 at `--conf 0.1`; 1058 from nothing to 0.40, a red robot from 0.41
+  to 0.91. The two clean frames alone: 6 of 9 to 8 of 9. Alliance is still
+  read from the real pixels. Extra prompts ("robot covered in yellow
+  balls") were tried and added nothing. `--no-grey-fuel` turns it off.
+- **The red hub is no longer painted out as a robot.** "Too big" needed two
+  other robots to compare with; a frame with one let the hub's top (3.4x the
+  robot beside it) through as a robot of unknown alliance. One is enough
+  now. A box inside a more confident robot box (fuel greying made YOLOE box
+  parts of robots too) is dropped as a duplicate.
 - **A robot of unknown alliance is painted out instead of costing its
   frame.** On the 906 nhdur frames, 176 were dropped for one robot whose
   bumper colour could not be read -- a fifth of the dataset, for one box

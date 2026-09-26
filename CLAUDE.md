@@ -162,7 +162,9 @@ Status of per-robot scouting:
   ~16 of 27 robots found (~60%), no frame fully boxed; of 10 misses, 5 show
   at conf 0.02-0.12 and 5 not at all. False positives (hubs, a box over two
   robots, alliance wall, blue ladder) are removed by the tall / spans-two /
-  too-big rules. A robot of unknown alliance is painted grey, not a reason to
+  too-big rules; a box inside a more confident one is a duplicate. Fuel is
+  greyed out before YOLOE looks: robots in piles went from invisible to
+  found (14 of 16 on four real frames, from 10). A robot of unknown alliance is painted grey, not a reason to
   drop the frame (that had cost 176 of 906). `--min-robots` defaults to 2
   (4 kept nothing usable). The user has ONE training run left -- no
   relabel-and-retrain round -- so the labels going in are the final ones.
@@ -213,9 +215,9 @@ Blocking scoring at the scrimmage:
   The droplet was being destroyed once that copy was confirmed; a new one is
   ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
   alias in `~/.ssh/config`.
-- Dry run on the 906 nhdur frames with painting (e9d7d4f): 748 kept, 2,206
-  robot boxes (~2.9 a frame), 157 frames with a robot painted out; 133 moved
-  for too few robots, 25 for too many of one alliance. Next: write them,
+- Written once with e9d7d4f (748 frames, ~2,200 robot boxes); the user's
+  preview then showed robots in fuel piles unboxed, so fuel greying was added
+  and the labels must be redone: `--restore`, then write again. Next: that,
   `dataset-scout` and a robot-detecting model (the one thing `run.py shots`
   still lacks); a hand-scored recording from the scrimmage camera
   position to validate both commands against.
