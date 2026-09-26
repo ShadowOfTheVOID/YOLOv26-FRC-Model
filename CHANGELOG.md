@@ -341,6 +341,12 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **`train.py` no longer dies before epoch 1 on the newer MI300X image.**
+  Every dataloader worker failed with "no response from torch_shm_manager":
+  the helper program that file_system sharing starts could not load
+  librocm-openblas.so.0, which the torch 2.12+rocm7.14 image keeps in the
+  venv at `_rocm_sdk_core/lib/host-math/lib` where only Python's torch finds
+  it. `train.py` now puts that directory on `LD_LIBRARY_PATH` for the helper.
 - **Robots in piles of fuel are found: fuel is greyed out before YOLOE
   looks.** In the first label preview robot 1058, in the middle of the
   central pile, had no box and fuel boxes all over it -- the model would

@@ -91,6 +91,31 @@ def share_by_file() -> None:
         return
     import torch.multiprocessing as mp
     mp.set_sharing_strategy("file_system")
+    find_shm_manager_libs()
+
+
+def find_shm_manager_libs() -> None:
+    """Let torch_shm_manager find the ROCm libraries the trainer already has.
+
+    file_system sharing runs torch/bin/torch_shm_manager as a separate
+    program. On the second MI300X droplet's image (torch 2.12+rocm7.14) it
+    could not load librocm-openblas.so.0 -- the library ships inside the
+    venv at _rocm_sdk_core/lib/host-math/lib, which Python's torch finds and
+    a separately started binary does not -- so every dataloader worker died
+    with "no response from torch_shm_manager" before epoch 1. Putting that
+    directory on LD_LIBRARY_PATH here is inherited by the helper when the
+    workers start it.
+    """
+    import glob
+    import os
+    import site
+    roots = site.getsitepackages() + [site.getusersitepackages()]
+    dirs = sorted({os.path.dirname(p) for root in roots for p in glob.glob(
+        os.path.join(root, "_rocm_sdk_*", "lib", "**", "librocm-openblas.so*"),
+        recursive=True)})
+    if dirs:
+        current = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ":".join(dirs + ([current] if current else []))
 
 
 def batch_arg(text: str):
