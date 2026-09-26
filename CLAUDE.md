@@ -203,7 +203,9 @@ Blocking scoring at the scrimmage:
   and benchmarked (`train/benchmark.py`) on the laptop that will run it.
 - Recommend a human scorekeeper in parallel on the day.
 
-- Branch `claude/exciting-gauss-cyri8u`, pushed, not merged.
+- Released as v0.3.0 (PR #7 merged). The two models are release assets, not
+  in git: `fuel_best.pt` (fuel) and `fuel_withBotbest.pt` (fuel + robots),
+  checksums in CHANGELOG.md.
 - Dataset: `dataset-fuel/` built with `--matches 2026nhdur`, off-camera frames
   dropped, fuel-only — 721 train / 185 val, 200,252 boxes. Val is a single
   match, so its mAP says "converged", not "works at a scrimmage".

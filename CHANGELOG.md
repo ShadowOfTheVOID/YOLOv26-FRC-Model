@@ -9,9 +9,41 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
-Three things: a whole event day can be harvested from one stream, the crop
-knows which broadcast it is looking at, and the scouting app can read this
-harvest's output as a source of its own.
+Nothing yet.
+
+## v0.3.0 — 2026-09-26
+
+The first release with trained models. It adds counting fuel into hubs,
+per-robot shot scouting (`run.py shots`), robot labelling without hand
+labels, and training on an AMD MI300X. It covers everything since v0.2.0;
+v0.2.1 was tagged without notes.
+
+### Models (attached to this release, not in the source archives)
+
+| file | classes | trained on | validation (one held-out nhdur match) |
+| --- | --- | --- | --- |
+| `fuel_best.pt` | fuel | 721 frames, 2026nhdur, 100 epochs | mAP50 0.613, mAP50-95 0.321, P 0.666, R 0.623 |
+| `fuel_withBotbest.pt` | fuel, robot_blue, robot_red | 659 frames, 2026nhdur, early-stopped at 62 epochs | fuel mAP50 0.581; robot_blue 0.699; robot_red ~0.71 |
+
+Both are YOLO26s at `--imgsz 960`. Check the downloads with `sha256sum`:
+
+```
+202429d3e8a7640e444e8053b229998b363f698469274829a069dd015994b5f3  fuel_best.pt
+0c5267368787e054f9fbd57c49078726306ca3370b7185752c3c2229dfffd14e  fuel_withBotbest.pt
+```
+
+What the numbers do and do not mean:
+
+- Validation labels come from the same automatic labellers the models were
+  trained on, so the scores measure agreement with the labellers, not with
+  reality. Both models have only seen one event's broadcast (2026nhdur).
+- On a real match video (nhdur qm7, first 30 s) the broadcast scoreboard
+  showed 74 balls scored; the shot counter's hub totals saw 19. Counting from
+  a broadcast camera angle is **not** a replacement for FMS scoring. Use a
+  close camera per hub, and a human scorekeeper.
+- Robot detection is good: every robot box checked by eye on qm7 was a real
+  robot in the right alliance colour. Per-robot **misses** are the least
+  reliable output and should not be used as scouting data yet.
 
 ### Added
 
@@ -211,6 +243,12 @@ harvest's output as a source of its own.
   or a mistake, and `device: cpu` scrolled past as one line. It now names the
   GPU and its memory, reports the HIP version, and on a CPU fallback says
   which of the two causes it is looking at.
+- **`train.py --batch` takes a fraction or `-1`, plus `--workers`, `--cache`
+  and `--no-amp`.** `--batch 0.70` fills 70% of a card whose memory you have
+  not measured; `--workers 32 --cache ram` is what stops a fast GPU idling
+  while eight cores decode JPEGs; `--no-amp` is the fix for the NaN-loss and
+  zero-mAP symptom AMP produces on some ROCm builds.
+
 ### Fixed
 
 - **`autolabel_objects.py` deleted every fuel box it found.** Without
@@ -597,14 +635,6 @@ harvest's output as a source of its own.
   the default gate, and `--preview-frame` to preview a specific frame instead
   of the middle one. The preview now separates gated boxes (red) from
   recovered ones (orange) and counts the heaps it skipped.
-
-### Added
-
-- **`train.py --batch` takes a fraction or `-1`, plus `--workers`, `--cache`
-  and `--no-amp`.** `--batch 0.70` fills 70% of a card whose memory you have
-  not measured; `--workers 32 --cache ram` is what stops a fast GPU idling
-  while eight cores decode JPEGs; `--no-amp` is the fix for the NaN-loss and
-  zero-mAP symptom AMP produces on some ROCm builds.
 
 ## v0.2.0 — 2026-09-16
 
