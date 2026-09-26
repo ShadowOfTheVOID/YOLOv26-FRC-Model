@@ -1402,6 +1402,34 @@ def test_robot_in_a_pile_is_not_shooting():
                               2: ("blue", (150.0, 300.0, 80.0, 60.0), 0.4)})
     check("robots side by side are both kept", set(kept) == {1, 2})
 
+    # The report after a real run crashed on the new reason and lost every
+    # result; each ignore reason must have a line.
+    ev, c = _play_shots(drive, pile)
+    check("the report names the not-launched balls",
+          any("never moved itself" in line for line in c.report()))
+
+    # Robots losing their tracker id: qm7 had 16099, 15856, 16580, 21187
+    # appear mid-match, each a new "robot" with its own tally.
+    from tbavid.shooting import RobotNumbers
+    rn = RobotNumbers()
+    a = rn.assign({1283: ("blue", (100.0, 300.0, 80.0, 60.0)),
+                   2615: ("red", (500.0, 300.0, 80.0, 60.0))}, 0.0)
+    b = rn.assign({1283: ("blue", (105.0, 300.0, 80.0, 60.0))}, 0.5)
+    c2 = rn.assign({1283: ("blue", (110.0, 300.0, 80.0, 60.0)),
+                    16580: ("red", (540.0, 310.0, 80.0, 60.0))}, 1.5)
+    check("robots are numbered 1, 2 in the order they appear",
+          set(a) == {1, 2} and a[1][0] == "blue")
+    check("a new tracker id where a lost robot was keeps that robot's number",
+          set(c2) == {1, 2} and rn.recovered == 1)
+    d = rn.assign({21187: ("blue", (900.0, 300.0, 80.0, 60.0))}, 2.0)
+    check("a new id far from any lost robot is a new robot", set(d) == {3})
+    e = rn.assign({30000: ("blue", (500.0, 300.0, 80.0, 60.0))}, 2.2)
+    check("a lost red robot's number is not given to a blue one",
+          set(e) == {4})
+    f = rn.assign({40000: ("red", (540.0, 310.0, 80.0, 60.0))}, 9.0)
+    check("nor to anything after the robot has been gone too long",
+          set(f) == {5})
+
     # The real thing, fired while driving: still a shot, still a miss.
     events, c = _play_shots(drive, _shot(40, 700, 100, start=10, x0=160.0))
     r = c.per_robot.get(1, {})

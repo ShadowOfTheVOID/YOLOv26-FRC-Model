@@ -585,6 +585,9 @@ def cmd_shots(args, cfg):
 
     counter = result["counter"]
     print("\n" + "\n".join(counter.report()))
+    if result.get("robots_recovered"):
+        print(f"  {result['robots_recovered']} robot(s) kept their number "
+              f"after the tracker lost them")
     by_team = counter.by_team(teams) if teams else {}
     if by_team:
         print("\nby team:")
@@ -604,6 +607,7 @@ def cmd_shots(args, cfg):
             "unattributed": counter.unattributed,
             "ignored": counter.ignored,
             "stitched": counter.stitched, "reacquired": counter.reacquired,
+            "robots_recovered": result.get("robots_recovered", 0),
         }
         Path(args.out).write_text(json.dumps(payload, indent=2))
         print(f"wrote {args.out}")

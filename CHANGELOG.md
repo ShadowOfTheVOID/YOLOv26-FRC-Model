@@ -353,6 +353,14 @@ harvest's output as a source of its own.
   The tracker numbers every object it follows, fuel included, so robot 1307
   was labelled "R1283" in the first annotated video and read as a misread
   team number. Nothing reads bumpers; `--teams 1=1307` maps the new numbers.
+  A robot the tracker loses and finds again under a new id keeps its number
+  when it reappears within 1.5 robot-widths of where it was, same alliance,
+  within 3 s: qm7 grew robots 16099, 15856, 16580 and 21187 mid-match, each
+  splitting a real robot's tally.
+- **`run.py shots` crashed at the very end of a run** printing its report,
+  after the not-launched rule added an ignore reason the report had no line
+  for -- losing every result. It names that reason now and cannot crash on
+  an unnamed one.
 - **`run.py shots` keeps one box per robot.** The same model sometimes boxes a
   robot twice (0.58 and 0.37 on one robot of the held-out match); every box
   became its own track, splitting that robot's shots. The less confident of

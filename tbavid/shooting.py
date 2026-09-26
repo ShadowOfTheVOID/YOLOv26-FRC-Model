@@ -542,10 +542,13 @@ class ShotCounter:
         named = {"too_short": "too few frames to be a ball",
                  "carried": "started at a robot but never left it",
                  "not_from_robot": "not launched by a robot, ended outside a hub",
-                 "started_inside": "already in a hub when first seen"}
+                 "started_inside": "already in a hub when first seen",
+                 "not_launched": "left behind by a robot, never moved itself"}
         for key, n in self.ignored.items():
             if n:
-                lines.append(f"  ignored: {n} {named[key]}")
+                # .get: a reason added without a line here once crashed the
+                # whole report after a full run, losing every result.
+                lines.append(f"  ignored: {n} {named.get(key, key)}")
         if self.stitched:
             lines.append(f"  {self.stitched} broken flight(s) rejoined")
         if self.reacquired:
@@ -599,6 +602,67 @@ def one_box_per_robot(robots: Dict[int, Tuple[str, Box, float]]
             continue
         kept[tid] = (alliance, box)
     return kept
+
+
+REID_S = 3.0          # how long a lost robot's number is kept for it
+REID_WIDTHS = 1.5     # how near, in robot widths, it must reappear
+
+
+class RobotNumbers:
+    """Tracker ids in, robot numbers 1, 2, 3 ... out, stable across id breaks.
+
+    Two failures from the first real run, fixed in one place:
+
+      * The tracker's ids count every object it follows, fuel included, so
+        robot 1307 was labelled "R1283" and read as a misread team number.
+        Robots are numbered from 1 in the order they appear instead.
+      * Twenty seconds into qm7 robots started coming back under new ids --
+        16099, 15856, 16580, 21187 -- whenever the tracker lost one for a
+        moment, and each new id started a fresh tally, splitting one robot's
+        shots across several "robots". A new id that appears within
+        `reid_widths` of where a missing robot of the same alliance was last
+        seen, within `reid_s`, gets that robot's number back.
+
+    Two robots of one alliance crossing while both lose their ids can swap
+    numbers; nothing here can tell them apart.
+    """
+
+    def __init__(self, reid_s: float = REID_S, reid_widths: float = REID_WIDTHS):
+        self.reid_s = reid_s
+        self.reid_widths = reid_widths
+        self.of: Dict[int, int] = {}                       # tracker id -> number
+        self.last: Dict[int, Tuple[str, Box, float]] = {}  # number -> last sighting
+        self.recovered = 0
+
+    def assign(self, robots: Dict[int, Tuple[str, Box]], t: float
+               ) -> Dict[int, Tuple[str, Box]]:
+        out: Dict[int, Tuple[str, Box]] = {}
+        for tid, v in robots.items():
+            if tid in self.of and self.of[tid] not in out:
+                out[self.of[tid]] = v
+        for tid, (alliance, box) in robots.items():
+            if tid in self.of:
+                continue
+            cx, cy = centre(box)
+            best, best_d = None, None
+            for num, (a, old, seen) in self.last.items():
+                if num in out or a != alliance or t - seen > self.reid_s:
+                    continue
+                ox, oy = centre(old)
+                d = ((cx - ox) ** 2 + (cy - oy) ** 2) ** 0.5
+                if d <= self.reid_widths * max(box[2], old[2]) and (best_d is None or d < best_d):
+                    best, best_d = num, d
+            if best is None:
+                best = len(self.last) + 1
+                while best in self.last or best in out:
+                    best += 1
+            else:
+                self.recovered += 1
+            self.of[tid] = best
+            out[best] = (alliance, box)
+        for num, (alliance, box) in out.items():
+            self.last[num] = (alliance, box, t)
+        return out
 
 
 def model_can_shoot(names: Dict[int, str],
@@ -663,7 +727,7 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
     started = _time.monotonic()
     frame = 0
     t = 0.0
-    numbering: Dict[int, int] = {}
+    numbering = RobotNumbers()
 
     for result in model.track(source=source, stream=True, persist=True,
                               tracker=tracker, conf=conf, verbose=False):
@@ -683,13 +747,7 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
             elif name.startswith("hub_"):
                 seen_hubs[name.split("_", 1)[1]] = box
 
-        # Robots are numbered 1, 2, 3 in the order they first appear. The
-        # tracker's own ids count every object it has followed, fuel included
-        # -- a robot in the first real run was "R1283" with 1307 on its bumper,
-        # and read as a misread team number. Small numbers are not mistaken for
-        # teams, and are what --teams maps.
-        robots = {numbering.setdefault(tid, len(numbering) + 1): v
-                  for tid, v in one_box_per_robot(found).items()}
+        robots = numbering.assign(one_box_per_robot(found), t)
 
         if counter is None:
             if seen_hubs:
@@ -723,7 +781,8 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
         if on_event:
             on_event(e)
     return {"events": events, "counter": counter, "frames": frame,
-            "hubs": {a: list(b) for a, b in (hubs or {}).items()}}
+            "hubs": {a: list(b) for a, b in (hubs or {}).items()},
+            "robots_recovered": numbering.recovered}
 
 
 def parse_teams(text: str) -> Dict[int, int]:

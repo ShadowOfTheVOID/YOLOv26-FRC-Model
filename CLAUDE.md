@@ -234,6 +234,11 @@ Blocking scoring at the scrimmage:
   shots. Fixed: a shot must travel a robot-width itself within 0.3 s. Also
   one box per robot (duplicates split tallies). The cleaned qm7 video opens
   with ~6.5 s of crowd shot; a spectator was boxed as a robot there.
+  Rerun with the fix, 30 s: the pile robot went from 42 shots to 2. Robots
+  then lost tracker ids mid-match (4 new ids), fixed by RobotNumbers
+  re-identification. Still open: ~12 unattributed makes in 30 s (launch not
+  seen), and ShotCounter's frame-count constants were set for 30 fps while
+  this video is 60 fps (its windows are half as long in time).
 - Relabelled with fuel greying (a75ff5c). 16-frame preview of the written
   labels: ~68 of ~80 visible robots boxed (~85%, from ~60%), all six in 4
   frames, robots in fuel piles boxed (1058 in qm7), no clear false positive
