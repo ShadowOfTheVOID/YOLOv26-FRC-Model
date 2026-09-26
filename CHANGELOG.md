@@ -349,6 +349,10 @@ harvest's output as a source of its own.
   "started at the robot". A shot must now move itself: a robot-width of its
   own travel inside 0.3 s (continuations of a broken flight measured from
   where it broke). Rejected balls are counted under `not_launched`.
+- **Robots are numbered #1, #2, #3 in `run.py shots`, not by tracker id.**
+  The tracker numbers every object it follows, fuel included, so robot 1307
+  was labelled "R1283" in the first annotated video and read as a misread
+  team number. Nothing reads bumpers; `--teams 1=1307` maps the new numbers.
 - **`run.py shots` keeps one box per robot.** The same model sometimes boxes a
   robot twice (0.58 and 0.37 on one robot of the held-out match); every box
   became its own track, splitting that robot's shots. The less confident of

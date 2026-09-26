@@ -555,7 +555,7 @@ def cmd_shots(args, cfg):
                           colour.get(alliance, (255, 255, 255)), 2)
             # The id is what --teams needs. Watching this video once, with the
             # match roster to hand, is how track ids become team numbers.
-            cv2.putText(out, f"R{tid}" + (f" {teams[tid]}" if tid in teams else ""),
+            cv2.putText(out, f"#{tid}" + (f" = {teams[tid]}" if tid in teams else ""),
                         (int(x), max(int(y) - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX,
                         0.6, colour.get(alliance, (255, 255, 255)), 2)
         for (x, y, w, h) in balls.values():
@@ -563,7 +563,7 @@ def cmd_shots(args, cfg):
                           (0, 220, 255), 1)
         if counter is not None:
             for row, (tid, st) in enumerate(sorted(counter.per_robot.items())):
-                cv2.putText(out, f"R{tid}: {st['made']}/{st['shots']} made",
+                cv2.putText(out, f"#{tid}: {st['made']}/{st['shots']} made",
                             (10, 24 + 22 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                             colour.get(st["alliance"], (255, 255, 255)), 2)
         if state["flash"] and t - state["flash"][0] < 1.5:

@@ -663,6 +663,7 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
     started = _time.monotonic()
     frame = 0
     t = 0.0
+    numbering: Dict[int, int] = {}
 
     for result in model.track(source=source, stream=True, persist=True,
                               tracker=tracker, conf=conf, verbose=False):
@@ -682,7 +683,13 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
             elif name.startswith("hub_"):
                 seen_hubs[name.split("_", 1)[1]] = box
 
-        robots = one_box_per_robot(found)
+        # Robots are numbered 1, 2, 3 in the order they first appear. The
+        # tracker's own ids count every object it has followed, fuel included
+        # -- a robot in the first real run was "R1283" with 1307 on its bumper,
+        # and read as a misread team number. Small numbers are not mistaken for
+        # teams, and are what --teams maps.
+        robots = {numbering.setdefault(tid, len(numbering) + 1): v
+                  for tid, v in one_box_per_robot(found).items()}
 
         if counter is None:
             if seen_hubs:

@@ -1458,6 +1458,17 @@ def test_models_that_can_count_and_shoot():
     check("with fps given, shot times are match time, not processing time",
           len(events) == 2 and min(e["t"] for e in events) > 0.5)
 
+    # The tracker's ids count fuel too: the first real run labelled robot 1307
+    # "R1283", and it was read as a misread team number. Robots are numbered
+    # from 1 in the order they appear, whatever id the tracker gave them.
+    bots = _still(1283, "blue", BLUE_BOT, 80)
+    bots.update(_still(2615, "red", RED_BOT, 80))
+    model = _FakeModel(five, _frames_of(five, bots, _shot(10, 344, 144), 80))
+    out = run_shots(model, None, hubs=HUB, fps=30.0)
+    check("robots are numbered 1, 2, ... not by tracker id",
+          "error" not in out and set(out["counter"].per_robot) == {1}
+          and out["counter"].per_robot[1]["alliance"] == "blue")
+
     model = _FakeModel(fuel_only, _frames_of(fuel_only, {}, balls, 80))
     out = run_shots(model, None, hubs=HUB, fps=30.0)
     check("run_shots with a fuel-only model refuses rather than reporting nothing",
