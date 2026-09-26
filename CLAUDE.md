@@ -215,9 +215,11 @@ Blocking scoring at the scrimmage:
   The droplet was being destroyed once that copy was confirmed; a new one is
   ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
   alias in `~/.ssh/config`.
-- Written once with e9d7d4f (748 frames, ~2,200 robot boxes); the user's
-  preview then showed robots in fuel piles unboxed, so fuel greying was added
-  and the labels must be redone: `--restore`, then write again. Next: that,
+- Relabelled with fuel greying (a75ff5c). 16-frame preview of the written
+  labels: ~68 of ~80 visible robots boxed (~85%, from ~60%), all six in 4
+  frames, robots in fuel piles boxed (1058 in qm7), no clear false positive
+  or wrong alliance. Misses are mostly robots cut by the frame edge or behind
+  people. Next:
   `dataset-scout` and a robot-detecting model (the one thing `run.py shots`
   still lacks); a hand-scored recording from the scrimmage camera
   position to validate both commands against.
