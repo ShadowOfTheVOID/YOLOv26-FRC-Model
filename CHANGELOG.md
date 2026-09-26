@@ -341,6 +341,11 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **`autolabel_robots.py --dry-run` reported "(0 robot boxes)"** and "would
+  labelled": it never counted boxes in a dry run. It does now. Labels written
+  by a real run were never affected. First full dry run on the 906 nhdur
+  frames: 591 kept at `--min-robots 2`; 176 dropped for a robot of unknown
+  alliance, 120 for too few robots, 19 for more than three of one alliance.
 - **Robot labelling: the blue ladder no longer passes as a robot, and the
   gate keeps frames.** On the first five real previews the "too big" rule
   compared each box with a median that included the two hubs (~56,000 and

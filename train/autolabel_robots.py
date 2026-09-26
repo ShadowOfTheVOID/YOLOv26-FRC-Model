@@ -377,6 +377,7 @@ def main() -> int:
         if args.dry_run:
             kept += reason is None
             moved += reason is not None
+            boxes += len(labelled) if reason is None else 0
             continue
         if reason:
             dest = args.skipped / src.parent.name
@@ -407,9 +408,9 @@ def main() -> int:
         print(f"  rejected, {why}: {n}")
     if already:
         print(f"{already} frames already had robot boxes and were left alone")
-    verb = "would" if args.dry_run else ""
+    verb = "would be" if args.dry_run else "were"
     print(f"\n{kept} frames {verb} labelled ({boxes} robot boxes), "
-          f"{moved} {verb} moved to {args.skipped}".replace("  ", " "))
+          f"{moved} {verb} moved to {args.skipped}")
     return 0
 
 

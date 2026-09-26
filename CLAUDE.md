@@ -212,7 +212,8 @@ Blocking scoring at the scrimmage:
   The droplet was being destroyed once that copy was confirmed; a new one is
   ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
   alias in `~/.ssh/config`.
-- Next: `autolabel_robots.py --dry-run` on the Mac for the yield, then
+- Dry run on the 906 nhdur frames: 591 pass at `--min-robots 2` (176 unknown
+  alliance, 120 too few, 19 too many of one alliance). Next: write them,
   `dataset-scout` and a robot-detecting model (the one thing `run.py shots`
   still lacks); a hand-scored recording from the scrimmage camera
   position to validate both commands against.
