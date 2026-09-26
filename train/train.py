@@ -41,6 +41,100 @@ def dataset_root(data_yaml: Path) -> Path:
     return Path(data_yaml).resolve().parent
 
 
+def repoint_dataset(data_yaml: Path) -> None:
+    """Point the yaml's `path:` at wherever the dataset actually is now.
+
+    prepare_dataset.py and subset_classes.py write an absolute `path:`, because
+    Ultralytics resolves a relative one against its own datasets directory
+    rather than the yaml's -- so a dataset built on a Mac says
+    `path: /Users/.../dataset-fuel`, and on any other machine Ultralytics
+    stops with "images not found" after the GPU has already been set up.
+    The Colab and Kaggle notebooks each rewrote the line themselves; nothing
+    else did, and the first run on an AMD droplet hit exactly that.
+
+    The yaml's own directory is the right answer whenever it holds the images,
+    so use it. Rewritten in place and said out loud, so the file on disk
+    matches what was trained.
+    """
+    text = data_yaml.read_text()
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith("path:"):
+            continue
+        current = Path(line.split(":", 1)[1].strip())
+        here = data_yaml.resolve().parent
+        if current.exists() or not (here / "images").is_dir():
+            return
+        lines[i] = f"path: {here}"
+        data_yaml.write_text("\n".join(lines) + "\n")
+        print(f"  dataset moved: {current} -> {here} (rewrote {data_yaml.name})")
+        return
+
+
+def share_by_file() -> None:
+    """Pass dataloader tensors between processes by file, not by descriptor.
+
+    PyTorch's default on Linux hands each tensor a worker produces to the
+    trainer as an open file descriptor. A batch here is a lot of tensors --
+    one measured batch carried 6,454 fuel labels across 16 images -- and 16
+    workers each keep several batches in flight, so a busy batch pushes the
+    process past the container's open-file limit (often 1024). What that
+    looks like is not an error about files: it is "received 0 items of
+    ancdata" and "Pin memory thread exited unexpectedly", four epochs into a
+    run that was fine, on the MI300X droplet.
+
+    The file_system strategy shares through /dev/shm instead, which the limit
+    does not touch. Linux only; macOS already uses its own mechanism.
+    """
+    import platform
+    if platform.system() != "Linux":
+        return
+    import torch.multiprocessing as mp
+    mp.set_sharing_strategy("file_system")
+    find_shm_manager_libs()
+
+
+def find_shm_manager_libs() -> None:
+    """Let torch_shm_manager find the ROCm libraries the trainer already has.
+
+    file_system sharing runs torch/bin/torch_shm_manager as a separate
+    program. On the second MI300X droplet's image (torch 2.12+rocm7.14) it
+    could not load librocm-openblas.so.0 -- the library ships inside the
+    venv at _rocm_sdk_core/lib/host-math/lib, which Python's torch finds and
+    a separately started binary does not -- so every dataloader worker died
+    with "no response from torch_shm_manager" before epoch 1. Putting that
+    directory on LD_LIBRARY_PATH here is inherited by the helper when the
+    workers start it. Fixing that one exposed two more it could not load,
+    libamdhip64.so.7 and librocprofiler-sdk.so.1, from other folders of the
+    same package, so every library folder under _rocm_sdk_* and torch/lib
+    goes on the path, not just the first one found missing.
+    """
+    import glob
+    import os
+    import site
+    roots = site.getsitepackages() + [site.getusersitepackages()]
+    patterns = [os.path.join("_rocm_sdk_*", "**", "*.so*"),
+                os.path.join("torch", "lib", "*.so*")]
+    dirs = sorted({os.path.dirname(p) for root in roots for pat in patterns
+                   for p in glob.glob(os.path.join(root, pat), recursive=True)})
+    if not any("_rocm_sdk_" in d for d in dirs):
+        return          # not a ROCm wheel; nothing to help find
+    if dirs:
+        current = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ":".join(dirs + ([current] if current else []))
+
+
+def batch_arg(text: str):
+    """`--batch 32`, `--batch 0.70`, `--batch -1`.
+
+    Ultralytics reads a float in (0, 1) as a fraction of GPU memory to fill
+    and -1 as "work it out", which is how you use a card whose memory you
+    have not measured against. argparse with type=int rejected both.
+    """
+    value = float(text)
+    return int(value) if value.is_integer() else value
+
+
 def pick_device() -> str:
     import torch
     if torch.cuda.is_available():
@@ -48,6 +142,44 @@ def pick_device() -> str:
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def describe_device(device: str) -> None:
+    """Say which chip this is about to run on, and shout if it is the CPU.
+
+    ROCm reports AMD hardware through `torch.cuda`, so an MI300X and an H100
+    both come back as device "0" and nothing in the log distinguishes a
+    192 GB accelerator from a fallback. The failure that matters is quieter
+    still: `pip install ultralytics` inside a ROCm image pulls torch from
+    PyPI, which is the CUDA build, and it overwrites the ROCm one. Then
+    `torch.cuda.is_available()` is False, this picks "cpu", and a run that
+    should take an hour takes a week without ever saying why. Print the name
+    so the first ten lines of output answer "am I on the GPU".
+    """
+    import torch
+    if device == "cpu":
+        print("  WARNING: training on the CPU.")
+        if getattr(torch.version, "hip", None):
+            print("           This is a ROCm build of torch but no GPU is "
+                  "visible -- check `rocm-smi`, and that the container was "
+                  "started with --device=/dev/kfd --device=/dev/dri.")
+        else:
+            print(f"           torch {torch.__version__} has no GPU support "
+                  f"(cuda={torch.version.cuda}, hip=None). On an AMD box this "
+                  f"usually means a PyPI wheel replaced the ROCm one; see "
+                  f"deploy/AMD_DEVCLOUD.md.")
+        return
+    if device == "mps":
+        return
+    for idx in [d for d in device.split(",") if d.strip().isdigit()]:
+        try:
+            name = torch.cuda.get_device_name(int(idx))
+            mem = torch.cuda.get_device_properties(int(idx)).total_memory
+        except Exception:
+            continue
+        print(f"  gpu {idx}: {name} ({mem / 1024**3:.0f} GB)")
+    if getattr(torch.version, "hip", None):
+        print(f"  ROCm/HIP {torch.version.hip}")
 
 
 def warn_if_slow(device: str, imgsz: int, batch: int, n_train: int) -> None:
@@ -78,7 +210,24 @@ def main() -> int:
                          "from --model's pretrained weights")
     ap.add_argument("--imgsz", type=int, default=960)
     ap.add_argument("--epochs", type=int, default=100)
-    ap.add_argument("--batch", type=int, default=4)
+    ap.add_argument("--batch", type=batch_arg, default=4,
+                    help="images per step. An integer, or a fraction of GPU "
+                         "memory (0.70), or -1 to autodetect. 4 suits an 8 GB "
+                         "laptop; a 192 GB MI300X wants far more -- see "
+                         "deploy/AMD_DEVCLOUD.md for why bigger is not always "
+                         "better on a dataset this small")
+    ap.add_argument("--workers", type=int, default=8,
+                    help="dataloader workers. The default keeps a laptop "
+                         "responsive; on a many-core GPU box JPEG decoding "
+                         "becomes the bottleneck and this is what fixes it")
+    ap.add_argument("--cache", default="",
+                    help="'ram' or 'disk' to cache decoded images. 'ram' is "
+                         "the single biggest speedup on a box with memory to "
+                         "spare (~1.4 GB per 1000 frames at 1920x504)")
+    ap.add_argument("--no-amp", dest="amp", action="store_false",
+                    help="disable mixed precision. Reach for this if the loss "
+                         "goes NaN or mAP stays at zero -- a known ROCm "
+                         "symptom, and it costs speed rather than accuracy")
     ap.add_argument("--device", default=None)
     ap.add_argument("--name", default="fuel26")
     ap.add_argument("--resume", action="store_true")
@@ -99,6 +248,8 @@ def main() -> int:
                  ", then train/subset_classes.py"))
         return 1
 
+    repoint_dataset(args.data)
+
     # Off the yaml's own directory, not ROOT/dataset: pointed at a derived set
     # this used to count the five-class one's labels and report a healthy
     # number while training against nothing.
@@ -114,8 +265,10 @@ def main() -> int:
     print(f"{len(non_empty)} labelled frames of {len(labels)} label files")
 
     from ultralytics import YOLO
+    share_by_file()
     device = args.device or pick_device()
     print(f"device: {device}")
+    describe_device(device)
     n_train = len(list((ROOT / "dataset" / "images" / "train").glob("*.jpg")))
     warn_if_slow(device, f"{args.imgsz}{'-p2' if args.p2 else ''}", args.batch, n_train)
 
@@ -135,6 +288,9 @@ def main() -> int:
         name=args.name,
         resume=args.resume,
         project=str(ROOT / "runs"),
+        workers=args.workers,
+        cache=args.cache or False,
+        amp=args.amp,
         # Small-object settings. The default scale=0.5 can shrink a 17px ball
         # to 8px, below what even the P2 head resolves well; mosaic helps early
         # but is closed before the final epochs so the model finishes on real

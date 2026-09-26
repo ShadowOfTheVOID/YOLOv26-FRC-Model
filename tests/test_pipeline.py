@@ -30,6 +30,7 @@ from tbavid.db import build, connect, export_for_serving, summary, write_live
 from tbavid.live import Counter as LiveCounter
 from tbavid.count import (BallCounter, health, hub_of, hubs_from_db,
                           learn_hubs)
+from tbavid.shooting import ShotCounter
 from tbavid.detect import (CLASSES, alliance_of, frame_path, model_source,
                            rows_from_boxes, write_rows)
 from tbavid.field import AUTO, ENDED, IDLE, TELEOP, Match
@@ -1140,6 +1141,429 @@ def test_ball_counting():
           any("too few frames" in l for l in c.report()))
 
 
+def _still(tid, alliance, box, frames):
+    """A robot standing in one place for the given frames."""
+    return {tid: [(f, (alliance, box)) for f in range(frames)]}
+
+
+def _play_shots(robots, balls, **kw):
+    """Run robot and ball paths through a ShotCounter. Returns (events, counter)."""
+    c = ShotCounter(HUB, **kw)
+    frames = [f for p in list(robots.values()) + list(balls.values()) for f, _ in p]
+    last = max(frames) if frames else 0
+    events = []
+    for frame in range(last + 30):
+        r = {tid: v for tid, path in robots.items() for f, v in path if f == frame}
+        b = {tid: box for tid, path in balls.items() for f, box in path if f == frame}
+        events += c.update(frame, frame / 30.0, r, b)
+    events += c.flush(last + 40, (last + 40) / 30.0)
+    return events, c
+
+
+# A blue robot standing below-left of the blue hub (300..400 x 100..200).
+BLUE_BOT = (100.0, 300.0, 80.0, 60.0)
+RED_BOT = (500.0, 300.0, 80.0, 60.0)
+
+
+def _shot(tid, x1, y1, n=20, start=0, x0=134.0, y0=300.0, keep=None):
+    """A ball leaving the blue robot's top edge for (x1, y1), top-left coords.
+
+    `keep` drops frames from the flight, to make a track the detector broke.
+    """
+    path = _fly(tid, x0, y0, x1, y1, n, start=start)[tid]
+    if keep is not None:
+        path = [(f, b) for i, (f, b) in enumerate(path) if keep(i)]
+    return {tid: path}
+
+
+def test_shot_attribution():
+    """Who shot, and did it go in -- including the misses count.py cannot see.
+
+    Every case here is a way per-robot scouting numbers go wrong without anyone
+    noticing: a ball in a hopper counted as a shot every time its robot drove,
+    an intake counted as a make, a pass-over counted as in, and -- the one the
+    first detector's 0.62 per-frame recall makes routine -- a flight the tracker
+    broke in two, read as a miss by its shooter plus a make by nobody.
+    """
+    bot = _still(1, "blue", BLUE_BOT, 80)
+
+    events, c = _play_shots(bot, _shot(10, 344, 144))
+    s = c.per_robot.get(1, {})
+    check("a shot from a robot into its hub is a make for that robot",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (1, 1, 0))
+    check("and says which robot, alliance and outcome",
+          [(e["robot"], e["alliance"], e["outcome"]) for e in events]
+          == [(1, "blue", "made")])
+
+    _, c = _play_shots(bot, _shot(11, 600, 420))
+    s = c.per_robot.get(1, {})
+    check("a shot that lands away from any hub is a miss -- which count.py never sees",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (1, 0, 1))
+
+    # A ball riding in a hopper while its robot drives 200 px. It travels far
+    # from where it started, but never gets clear of the robot it is in.
+    driving = {1: [(f, ("blue", (100.0 + 5 * f, 300.0, 80.0, 60.0))) for f in range(40)]}
+    carried = {12: [(f, (134.0 + 5 * f, 310.0, 12.0, 12.0)) for f in range(40)]}
+    _, c = _play_shots(driving, carried)
+    check("a ball carried in a moving robot is not a shot",
+          not c.per_robot and c.ignored["carried"] == 1)
+
+    # A ball on the floor rolled into a robot's intake: ends at a robot, not a hub.
+    intake = {13: [(f, (400.0 - 8 * f, 350.0, 12.0, 12.0)) for f in range(30)]}
+    _, c = _play_shots(bot, intake)
+    check("a ball picked up off the floor is neither a shot nor a make",
+          not c.per_robot and sum(c.hub_totals().values()) == 0)
+
+    # Seen for the first time mid-air -- launch hidden behind another robot.
+    # Nobody gets the credit, but the hub still has the ball.
+    _, c = _play_shots(bot, _fly(14, 240, 150, 344, 144, 12))
+    check("a make with no visible shooter is unattributed, not lost",
+          not c.per_robot and c.unattributed["blue"] == 1
+          and c.hub_totals()["blue"] == 1)
+
+    # The flight broken for 3 frames: the old track is still 'missing' when the
+    # new id appears where the ball was heading.
+    short = _shot(15, 344, 144, keep=lambda i: not 10 <= i <= 12)
+    short = {15: [(f, b) for f, b in short[15] if f < 10],
+             16: [(f, b) for f, b in short[15] if f > 12]}
+    _, c = _play_shots(bot, short)
+    s = c.per_robot.get(1, {})
+    check("a flight the tracker broke briefly is still one make",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (1, 1, 0)
+          and c.unattributed["blue"] == 0 and c.stitched == 1)
+
+    # Broken for long enough that the first piece had already ended as a miss.
+    longer = _shot(17, 344, 144, n=24)
+    longer = {17: [(f, b) for f, b in longer[17] if f < 8],
+              18: [(f, b) for f, b in longer[17] if f > 14]}
+    _, c = _play_shots(bot, longer)
+    s = c.per_robot.get(1, {})
+    check("...and a longer break takes back the miss it had looked like",
+          (s.get("made"), s.get("missed")) == (1, 0) and c.unattributed["blue"] == 0)
+
+    # Into the hub region, then out the other side: it passed over.
+    over = _shot(19, 344, 144)
+    over.update(_fly(20, 360, 144, 620, 144, 15, start=24))
+    _, c = _play_shots(bot, over)
+    s = c.per_robot.get(1, {})
+    check("a shot that passes over the hub and lands beyond it is a miss",
+          (s.get("made"), s.get("missed")) == (0, 1) and c.reacquired == 1)
+
+    # Two robots; the ball starts at the red one and goes in the blue hub.
+    both = dict(bot)
+    both.update(_still(2, "red", RED_BOT, 80))
+    events, c = _play_shots(both, _shot(21, 344, 144, x0=534.0))
+    check("the ball is credited to the robot it left, not the nearest one later",
+          2 in c.per_robot and 1 not in c.per_robot)
+    check("and a red robot scoring in the blue hub is recorded as that, not a make",
+          c.per_robot[2]["wrong_hub"] == 1 and c.per_robot[2]["made"] == 0
+          and c.hub_totals()["blue"] == 1)
+
+    # Shooting from against the hub: almost no room to clear the robot, but the
+    # hub proves the ball left it.
+    close = _still(3, "blue", (300.0, 212.0, 80.0, 60.0), 40)
+    _, c = _play_shots(close, {22: [(f, (330.0, 206.0 - 8 * f, 12.0, 12.0))
+                                    for f in range(8)]})
+    check("a shot from against the hub still counts, though it barely cleared",
+          c.per_robot.get(3, {}).get("made") == 1)
+
+    # Tracks fold into teams, and an unassigned one is kept, not dropped.
+    two = _shot(23, 344, 144)
+    two.update(_shot(24, 600, 420, start=30))
+    _, c = _play_shots(_still(1, "blue", BLUE_BOT, 80), two)
+    teams = c.by_team({1: 254})
+    check("by_team folds a robot's tracks into its team",
+          teams[254]["shots"] == 2 and teams[254]["made"] == 1
+          and teams[254]["missed"] == 1)
+    check("the report reads per robot, with accuracy",
+          any("2 shots, 1 made, 1 missed" in l and "50%" in l for l in c.report()))
+
+    # The ordinary case on a real field: a ball rides in the hopper while the
+    # robot drives, then is shot. One track, one shot -- the carrying is not a
+    # second one, and the drive does not make it a shot early.
+    drive = {4: [(f, ("blue", (60.0 + 3 * f, 300.0, 80.0, 60.0))) for f in range(60)]}
+    ride = [(f, (94.0 + 3 * f, 310.0, 12.0, 12.0)) for f in range(20)]
+    x, y = ride[-1][1][0], ride[-1][1][1]
+    ride += [(20 + i, (x + (344 - x) * i / 14, y + (144 - y) * i / 14, 12.0, 12.0))
+             for i in range(1, 15)]
+    _, c = _play_shots(drive, {25: ride})
+    s = c.per_robot.get(4, {})
+    check("a ball carried and then shot is one shot, and a make",
+          (s.get("shots"), s.get("made")) == (1, 1) and c.ignored["carried"] == 0)
+
+    # Scouting and scoring must never disagree about what went in. The same
+    # balls through BallCounter and ShotCounter give the same per-hub totals,
+    # whoever shot them and whether a shooter was seen at all.
+    both = dict(_still(1, "blue", BLUE_BOT, 90))
+    both.update(_still(2, "red", RED_BOT, 90))
+    balls = _shot(26, 344, 144)                            # blue robot, made
+    balls.update(_fly(27, 240, 150, 344, 144, 12, start=30))   # nobody, made
+    balls.update(_shot(28, 344, 150, x0=534.0, start=50))  # red robot, blue hub
+    balls.update(_shot(29, 600, 420, start=20))            # blue robot, missed
+    _, shots = _play_shots(both, balls)
+    _, scores = _play(balls)
+    check("per-hub totals from shots agree with the scoring counter",
+          shots.hub_totals() == scores.totals
+          and shots.hub_totals()["blue"] == 3)
+
+
+class _Rows(list):
+    def tolist(self):
+        return list(self)
+
+
+class _FakeBoxes:
+    def __init__(self, rows):
+        self.xyxy = _Rows([list(r[:4]) for r in rows])
+        self.conf = _Rows([r[4] for r in rows])
+        self.cls = _Rows([r[5] for r in rows])
+        self.id = _Rows([r[6] for r in rows]) if rows else None
+
+    def __len__(self):
+        return len(self.xyxy)
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self.boxes = _FakeBoxes(rows)
+        self.orig_img = None
+
+
+class _FakeModel:
+    """Stands in for an ultralytics model: class names, and a track() that
+    yields scripted per-frame detections. Everything but the network runs."""
+
+    def __init__(self, names, frames):
+        self.names = names
+        self.frames = frames
+
+    def track(self, **kw):
+        for rows in self.frames:
+            yield _FakeResult(rows)
+
+
+def _frames_of(names, robots, balls, n):
+    """Robot and ball paths as per-frame detection rows for a _FakeModel."""
+    index = {v: k for k, v in names.items()}
+    frames = []
+    for f in range(n):
+        rows = []
+        for tid, path in robots.items():
+            for ff, (alliance, (x, y, w, h)) in path:
+                if ff == f:
+                    rows.append((x, y, x + w, y + h, 0.9,
+                                 index[f"robot_{alliance}"], tid))
+        for tid, path in balls.items():
+            for ff, (x, y, w, h) in path:
+                if ff == f:
+                    rows.append((x, y, x + w, y + h, 0.9, index["fuel"], tid))
+        frames.append(rows)
+    return frames
+
+
+def test_robot_in_a_pile_is_not_shooting():
+    """A robot driving through fuel was credited with 42 shots and 41 misses.
+
+    Measured on 2026nhdur qm7 with the first scouting model: the robot plowing
+    the centre pile in auto. The balls it passed sat still while it drove away
+    -- clear of the robot, so "shots" -- and each missed its hub. A shot has to
+    move itself, fast: a robot-width inside 0.3 s. These paths are that case,
+    in miniature, next to one real shot from the same moving robot.
+    """
+    drive = {1: [(f, ("blue", (100.0 + 5 * f, 300.0, 80.0, 60.0))) for f in range(70)]}
+    pile = {}
+    for i in range(5):
+        bx = 190.0 + 50 * i                      # balls on the floor in its path
+        start = int(max(0, (bx - 180) // 5))     # a fresh id as the robot reaches it
+        pile[20 + i] = [(f, (bx, 345.0, 10.0, 10.0)) for f in range(start, start + 40)]
+    events, c = _play_shots(drive, pile)
+    shots = sum(r["shots"] for r in c.per_robot.values())
+    check("balls a robot drives away from are not its shots", shots == 0)
+    # The last ball is still beside the robot when the clip ends: carried.
+    check("and are counted as not launched, so it can be read",
+          c.ignored.get("not_launched", 0) == 4 and c.ignored["carried"] == 1)
+
+    # Pushed along at robot speed: 1.5 px a frame against an 80 px robot is
+    # about half a width per second at 30 fps -- a shove, not a launch.
+    shoved = {30: [(f, (185.0 + 1.5 * (f - 5), 345.0, 10.0, 10.0)) for f in range(5, 70)]}
+    events, c = _play_shots(_still(1, "blue", (100.0, 300.0, 80.0, 60.0), 80), shoved)
+    check("a ball rolled away slowly is not a shot",
+          sum(r["shots"] for r in c.per_robot.values()) == 0)
+
+    # One robot boxed twice (0.58 and 0.37 on the held-out match) must be one
+    # track to the counter, or its shots split between two "robots".
+    from tbavid.shooting import one_box_per_robot
+    kept = one_box_per_robot({5: ("blue", (623.0, 348.0, 60.0, 47.0), 0.58),
+                              9: ("blue", (626.0, 352.0, 55.0, 40.0), 0.37),
+                              7: ("red", (487.0, 410.0, 73.0, 85.0), 0.44)})
+    check("two boxes on one robot become one, the confident one",
+          set(kept) == {5, 7})
+    kept = one_box_per_robot({1: ("blue", (100.0, 300.0, 80.0, 60.0), 0.5),
+                              2: ("blue", (150.0, 300.0, 80.0, 60.0), 0.4)})
+    check("robots side by side are both kept", set(kept) == {1, 2})
+
+    # The report after a real run crashed on the new reason and lost every
+    # result; each ignore reason must have a line.
+    ev, c = _play_shots(drive, pile)
+    check("the report names the not-launched balls",
+          any("never moved itself" in line for line in c.report()))
+
+    # Robots losing their tracker id: qm7 had 16099, 15856, 16580, 21187
+    # appear mid-match, each a new "robot" with its own tally.
+    from tbavid.shooting import RobotNumbers
+    rn = RobotNumbers()
+    a = rn.assign({1283: ("blue", (100.0, 300.0, 80.0, 60.0)),
+                   2615: ("red", (500.0, 300.0, 80.0, 60.0))}, 0.0)
+    b = rn.assign({1283: ("blue", (105.0, 300.0, 80.0, 60.0))}, 0.5)
+    c2 = rn.assign({1283: ("blue", (110.0, 300.0, 80.0, 60.0)),
+                    16580: ("red", (540.0, 310.0, 80.0, 60.0))}, 1.5)
+    check("robots are numbered 1, 2 in the order they appear",
+          set(a) == {1, 2} and a[1][0] == "blue")
+    check("a new tracker id where a lost robot was keeps that robot's number",
+          set(c2) == {1, 2} and rn.recovered == 1)
+    d = rn.assign({21187: ("blue", (900.0, 300.0, 80.0, 60.0))}, 2.0)
+    check("a new id far from any lost robot is a new robot", set(d) == {3})
+    e = rn.assign({30000: ("blue", (500.0, 300.0, 80.0, 60.0))}, 2.2)
+    check("a lost red robot's number is not given to a blue one",
+          set(e) == {4})
+    f = rn.assign({40000: ("red", (540.0, 310.0, 80.0, 60.0))}, 9.0)
+    check("nor to anything after the robot has been gone too long",
+          set(f) == {5})
+
+    # Windows are frame counts chosen at 30 fps; at 60 fps they must double
+    # or a ball missing for 0.07 s is already "gone".
+    c30, c60 = ShotCounter(HUB), ShotCounter(HUB, fps=60.0)
+    check("frame windows keep their length in time at 60 fps",
+          (c60.vanish_frames, c60.robot_memory, c60.stitch_frames)
+          == (2 * c30.vanish_frames, 2 * c30.robot_memory, 2 * c30.stitch_frames))
+    from tbavid.count import BallCounter
+    b30, b60 = BallCounter(HUB), BallCounter(HUB, fps=60.0)
+    check("and the plain counter's too, since it is the score at a scrimmage",
+          (b60.vanish_frames, b60.reacquire_frames)
+          == (2 * b30.vanish_frames, 2 * b30.reacquire_frames))
+
+    bot = _still(1, "blue", BLUE_BOT, 260)
+
+    # A ball carried in the hopper for 2 s and then shot. The first launch
+    # rule timed its 0.3 s from first sighting and threw this shot away.
+    carried = [(f, (134.0, 310.0, 12.0, 12.0)) for f in range(60)]
+    flown = _fly(50, 134.0, 310.0, 600.0, 420.0, 20, start=60)[50]
+    events, c = _play_shots(bot, {50: carried + flown})
+    r = c.per_robot.get(1, {})
+    check("a ball shot after riding in the hopper is still a shot",
+          r.get("shots") == 1 and r.get("missed") == 1)
+
+    # A "flight" that wanders on for seconds, as chains through the qm7 piles
+    # did, and ends in a hub: a miss at 2.5 s, not a make 5 s later.
+    out_ = _fly(51, 134.0, 300.0, 250.0, 380.0, 10)[51]
+    wander = [(10 + i, (250.0 + 3.0 * i, 380.0 - 1.8 * i, 12.0, 12.0))
+              for i in range(150)]
+    events, c = _play_shots(bot, {51: out_ + wander})
+    r = c.per_robot.get(1, {})
+    check("a shot still out of a hub 2.5 s after launch is a miss",
+          r.get("shots") == 1 and r.get("missed") == 1 and r.get("made", 0) == 0
+          and c.expired == 1)
+
+    # 1058 driving hard through the qm7 pile: a ball pushed ahead at robot
+    # speed covers a robot-width in 0.3 s but never leaves the robot behind.
+    fast = {1: [(f, ("blue", (100.0 + 10 * f, 300.0, 80.0, 60.0))) for f in range(60)]}
+    pushed = {60: [(f, (185.0 + 10 * f, 330.0, 12.0, 12.0)) for f in range(40)]
+                  + [(40 + i, (585.0 + 2 * i, 330.0, 12.0, 12.0)) for i in range(20)]}
+    events, c = _play_shots(fast, pushed)
+    check("a ball pushed ahead of a fast robot is not a shot",
+          sum(r["shots"] for r in c.per_robot.values()) == 0)
+    # And the reverse at the same speed: still balls the fast robot drives
+    # away from. Relative-only travel counted these (1058: 76 shots, 76 misses).
+    left = {}
+    for i in range(4):
+        bx = 200.0 + 60 * i
+        start = int(max(0, (bx - 180) // 10))
+        left[70 + i] = [(f, (bx, 345.0, 10.0, 10.0)) for f in range(start, start + 40)]
+    events, c = _play_shots(fast, left)
+    check("still balls a fast robot drives away from are not shots",
+          sum(r["shots"] for r in c.per_robot.values()) == 0)
+
+    # The real thing, fired while driving: still a shot, still a miss.
+    events, c = _play_shots(drive, _shot(40, 700, 100, start=10, x0=160.0))
+    r = c.per_robot.get(1, {})
+    check("a real shot from a moving robot still counts",
+          r.get("shots") == 1 and r.get("missed", 0) + r.get("wrong_hub", 0) == 1)
+
+
+def test_models_that_can_count_and_shoot():
+    """What each command demands of a model -- and no more than it needs.
+
+    count.py used to refuse any model without hub classes, even with both hub
+    boxes handed to it. The first trained model is fuel-only, so that refusal
+    was all that stood between it and a working counter.
+    """
+    from tbavid.count import model_can_count, run_source
+    from tbavid.shooting import model_can_shoot, parse_teams, run_shots
+
+    fuel_only = {0: "fuel"}
+    five = dict(enumerate(CLASSES))
+
+    check("a fuel-only model can count once it is handed the hub boxes",
+          model_can_count(fuel_only, HUB) is None)
+    check("...and without them it says to pass the boxes, not just no",
+          "--hub-blue" in (model_can_count(fuel_only, None) or ""))
+    check("a model with no fuel class cannot count at all",
+          "no fuel class" in (model_can_count({0: "robot_blue"}, HUB) or ""))
+    check("a model with hub classes can still learn the hubs itself",
+          model_can_count(five, None) is None)
+
+    # The whole counting loop, fed by the stand-in: a fuel-only model and two
+    # drawn boxes, which is the scrimmage set-up.
+    model = _FakeModel(fuel_only,
+                       _frames_of(fuel_only, {}, _fly(1, 50, 150, 348, 150, 20), 60))
+    out = run_source(model, None, lambda h: BallCounter(h), hubs=HUB)
+    check("run_source counts with a fuel-only model and given hubs",
+          "error" not in out and out["counter"].totals["blue"] == 1)
+
+    check("shots refuse a model with no robot classes, and say why",
+          "robot classes" in (model_can_shoot(fuel_only, HUB) or ""))
+    check("the five-class model can attribute shots",
+          model_can_shoot(five, HUB) is None)
+
+    bot = _still(1, "blue", BLUE_BOT, 80)
+    balls = _shot(10, 344, 144)
+    balls.update(_shot(11, 600, 420, start=30))
+    model = _FakeModel(five, _frames_of(five, bot, balls, 80))
+    events = []
+    out = run_shots(model, None, hubs=HUB, fps=30.0, on_event=events.append)
+    s = out["counter"].per_robot.get(1, {}) if "error" not in out else {}
+    check("run_shots attributes a make and a miss to the robot, end to end",
+          (s.get("shots"), s.get("made"), s.get("missed")) == (2, 1, 1))
+    # Wall-clock time would be milliseconds here; match time is the frame
+    # over the source rate, and a shot ~20 frames in is ~0.7 s into the match.
+    check("with fps given, shot times are match time, not processing time",
+          len(events) == 2 and min(e["t"] for e in events) > 0.5)
+
+    # The tracker's ids count fuel too: the first real run labelled robot 1307
+    # "R1283", and it was read as a misread team number. Robots are numbered
+    # from 1 in the order they appear, whatever id the tracker gave them.
+    bots = _still(1283, "blue", BLUE_BOT, 80)
+    bots.update(_still(2615, "red", RED_BOT, 80))
+    model = _FakeModel(five, _frames_of(five, bots, _shot(10, 344, 144), 80))
+    out = run_shots(model, None, hubs=HUB, fps=30.0)
+    check("robots are numbered 1, 2, ... not by tracker id",
+          "error" not in out and set(out["counter"].per_robot) == {1}
+          and out["counter"].per_robot[1]["alliance"] == "blue")
+
+    model = _FakeModel(fuel_only, _frames_of(fuel_only, {}, balls, 80))
+    out = run_shots(model, None, hubs=HUB, fps=30.0)
+    check("run_shots with a fuel-only model refuses rather than reporting nothing",
+          "robot classes" in out.get("error", ""))
+
+    check("--teams reads several track ids per team",
+          parse_teams("3=254, 7=254,5=1678") == {3: 254, 7: 254, 5: 1678})
+    try:
+        parse_teams("3:254")
+        check("a malformed --teams is refused", False)
+    except ValueError:
+        check("a malformed --teams is refused", True)
+
+
 def test_hub_geometry():
     """Where the hub is, learned or recorded."""
     check("a point in the hub names its alliance",
@@ -1322,6 +1746,126 @@ def test_nothing_to_verify_against():
 
     check("health reaches the consumer in the same payload as the score",
           "health" in m.state())
+
+
+def test_robot_autolabel_rules():
+    """The rules that turn YOLOE's robot proposals into labels, or drop a frame.
+
+    Boxes are the ones measured on the real 2026nhdur frame. What matters most
+    is the gate: a frame with robots found but not all labelled teaches the
+    detector that the rest are floor, so it must be dropped whole.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    from autolabel_robots import (alliance, has_robots, merge, screen, verdict,
+                                  yolo_lines)
+
+    red_a = (1488, 285, 1616, 346, 0.51)
+    red_b = (1526, 211, 1626, 264, 0.34)
+    both = (1494, 212, 1628, 347, 0.44)       # spans the two red robots
+    hub = (1251, 12, 1437, 340, 0.30)         # the red hub, h/w 1.8
+    wall = (1650, 30, 1915, 315, 0.14)        # alliance wall and ladder
+    blue = (307, 238, 425, 304, 0.69)
+    blue2 = (414, 285, 531, 353, 0.13)
+    why = {d: r for d, r in screen([red_a, red_b, both, hub, wall, blue, blue2])}
+    check("real robots pass", all(why[d] is None for d in (red_a, red_b, blue, blue2)))
+    check("the hub is too tall to be a robot", why[hub] == "tall")
+    check("a box around two robots is not a robot", why[both] == "spans two")
+    check("the wall is ~10x the frame's robots", why[wall] == "too big")
+    check("size needs others to compare with", screen([wall])[0][1] is None)
+    # The KEEP frame from the first real previews: two hubs, the blue ladder
+    # around robot 1307, and three real robots. With the hubs in the median
+    # the ladder passed; it must be judged against robots only.
+    hub_b, hub_r = (493, 10, 690, 425, 0.22), (1265, 10, 1440, 330, 0.25)
+    ladder = (170, 147, 343, 348, 0.3)
+    r1307, r7674 = (267, 227, 343, 307, 0.12), (380, 205, 493, 275, 0.68)
+    r1058 = (1575, 283, 1688, 367, 0.50)
+    why = {d: r for d, r in screen([hub_b, hub_r, ladder, r1307, r7674, r1058])}
+    check("the ladder is too big once the hubs are out of the median",
+          why[ladder] == "too big")
+    check("and the near and far robots beside it are kept",
+          all(why[d] is None for d in (r1307, r7674, r1058)))
+    check("a box ending above the field line is the stands",
+          screen([blue], field_top=320)[0][1] == "above field")
+
+    # The red hub's top, painted as a robot in the user's preview: only one
+    # other robot in the frame, and one is enough to compare with.
+    hub_top, r2648 = (1253, 85, 1435, 300, 0.2), (943, 155, 1063, 252, 0.4)
+    why = {d: r for d, r in screen([hub_top, r2648])}
+    check("a hub top 3.4x the only robot is too big", why[hub_top] == "too big"
+          and why[r2648] is None)
+    near, far = (1175, 322, 1300, 380, 0.4), (1527, 211, 1608, 263, 0.5)
+    check("but a near robot 1.7x a far one is not",
+          all(r is None for _, r in screen([near, far])))
+    # With fuel greyed YOLOE also boxes parts of robots.
+    part = (456, 285, 531, 333, 0.15)
+    why = {d: r for d, r in screen([blue2[:4] + (0.17,), part, red_a, blue])}
+    check("a box inside a more confident robot box is a duplicate",
+          why[part] == "duplicate" and why[blue2[:4] + (0.17,)] is None)
+    check("and so is a less confident box around a confident one",
+          dict(screen([(400, 270, 545, 365, 0.1), blue2, red_a]))[(400, 270, 545, 365, 0.1)]
+          == "duplicate")
+
+    from autolabel_robots import fuel_mask
+    hsv = np.array([[[28, 200, 220], [28, 40, 200], [115, 200, 150], [20, 120, 60]]], np.uint8)
+    check("fuel is greyed; floor, bumpers and shadowed fuel below the gate are not",
+          fuel_mask(hsv).tolist() == [[True, False, False, False]])
+
+    dup = (1490, 286, 1615, 347, 0.23)       # same robot from another tile
+    check("NMS keeps the confident copy",
+          merge([dup, red_a, blue]) == [blue, red_a])
+
+    def band(hue, sat, val, n=100, grey=0):
+        px = [(hue, sat, val)] * n + [(0, 10, 120)] * grey
+        return np.array(px, np.uint8).reshape(-1, 1, 3)
+    check("a blue bumper is blue", alliance(band(115, 180, 150))[0] == "robot_blue")
+    check("red wraps round the hue circle",
+          alliance(band(175, 180, 150))[0] == "robot_red"
+          and alliance(band(4, 180, 150))[0] == "robot_red")
+    # Robot 69: a navy bumper that compression turns grey-black. Guessing
+    # would put a blue robot in the red class for the whole match.
+    check("a crushed navy bumper is unknown, not guessed",
+          alliance(band(118, 40, 40))[0] is None)
+    check("a few coloured pixels on grey floor decide nothing",
+          alliance(band(115, 180, 150, n=3, grey=97))[0] is None)
+    mixed = np.concatenate([band(115, 180, 150, n=40), band(2, 180, 150, n=30)])
+    check("a blue robot beside a red ramp is not a clear call",
+          alliance(mixed)[0] is None)
+
+    four = [("robot_blue", blue), ("robot_blue", blue2),
+            ("robot_red", red_a), ("robot_red", red_b)]
+    check("four readable robots is a training frame", verdict(four, 0, 4) is None)
+    check("an unreadable robot no longer drops the frame -- it is painted out",
+          verdict(four, 1, 4) is None)
+    check("and it counts towards --min-robots",
+          verdict(four[:1], 1, 2) is None and verdict(four[:1], 0, 2) is not None)
+    check("two found drops the frame", verdict(four[:2], 0, 4) is not None)
+    check("four of one alliance means one is not a robot",
+          verdict([("robot_red", red_a)] * 4, 0, 4) is not None)
+
+    line = yolo_lines([("robot_red", (100, 50, 300, 150, 0.5))], 1000, 500)[0]
+    check("labels are class, centre and size, normalised",
+          line == "2 0.200000 0.200000 0.200000 0.200000")
+    # Painting out a robot of unknown alliance: grey where it was, the
+    # labelled robot it overlaps left intact, and its fuel boxes gone with it.
+    from autolabel_robots import PAINT, drop_covered, paint, strip_robots
+    img = np.full((100, 200, 3), 50, np.uint8)
+    out = paint(img, [(10, 10, 60, 60, 0.3)], [(40, 40, 90, 90, 0.5)])
+    check("the unknown robot is painted grey", (out[20, 20] == PAINT).all())
+    check("the labelled robot it overlaps is not", (out[50, 50] == 50).all())
+    check("the source image is not modified", (img[20, 20] == 50).all())
+    check("boxes off the edge are clipped, not an error",
+          (paint(img, [(-5, -5, 250, 30, 0.1)], [])[0, 199] == PAINT).all())
+    fuel = "0 0.100000 0.200000 0.02 0.02\n0 0.800000 0.800000 0.02 0.02\n"
+    check("fuel centred in a painted robot goes, fuel elsewhere stays",
+          drop_covered(fuel, [(10, 10, 60, 60, 0.3)], 200, 100)
+          == "0 0.800000 0.800000 0.02 0.02\n")
+    check("--restore strips robots and keeps fuel and hubs",
+          strip_robots("0 .5 .5 .1 .1\n1 .2 .2 .1 .1\n2 .3 .3 .1 .1\n4 .9 .9 .2 .2\n")
+          == "0 .5 .5 .1 .1\n4 .9 .9 .2 .2\n")
+    check("fuel-only labels have no robots",
+          not has_robots("0 .5 .5 .1 .1\n0 .2 .2 .1 .1\n"))
+    check("a second run sees the robots it wrote",
+          has_robots("0 .5 .5 .1 .1\n" + line + "\n"))
 
 
 def test_counting_model_dataset():
@@ -1618,8 +2162,10 @@ def main() -> int:
                test_packaging, test_no_unbound_globals, test_sharding, test_db,
                test_serving_export, test_live_counter, test_live_rows,
                test_detect_rows, test_detect_writes, test_api_stays_stdlib,
-               test_ball_counting, test_hub_geometry, test_scrimmage_scoreboard,
+               test_ball_counting, test_shot_attribution, test_robot_in_a_pile_is_not_shooting,
+               test_models_that_can_count_and_shoot, test_hub_geometry, test_scrimmage_scoreboard,
                test_nothing_to_verify_against, test_counting_model_dataset,
+               test_robot_autolabel_rules,
                test_model_must_name_its_classes):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")

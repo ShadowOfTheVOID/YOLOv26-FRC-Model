@@ -96,6 +96,7 @@ Output lands in these folders:
 | `live` | scout a live feed: read the scoreboard as it happens, keep no video |
 | `detect` | run a trained `.pt` over harvested frames and record what it found |
 | `count` | count scored fuel from the detector; `--scoreboard` makes it the scoreboard at a scrimmage |
+| `shots` | per-robot shots from a model over match video: who shot, how many went in, how many missed |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |
 | `reprocess` | re-run crop/render/scoreboard on already-downloaded sources |
@@ -575,8 +576,9 @@ is dropping dead-time stills.
 ## Training
 
 See **[train/README.md](train/README.md)**. Fuel boxes are auto-labelled by
-colour (56k in ~3s); robots and hubs are proposed by
-`train/autolabel_objects.py` and need review.
+colour (56k in ~3s); robots by an open-vocabulary model in
+`train/autolabel_robots.py`, which drops frames it cannot label fully; hubs
+are replayed from recorded geometry by `train/autolabel_objects.py`.
 
 ## Where to run it
 
@@ -585,6 +587,10 @@ GPU (73 h on an 8 GB M2), host the API anywhere. See
 **[deploy/SETUP.md](deploy/SETUP.md)** for click-by-click Colab and Replit
 setup, [deploy/README.md](deploy/README.md) for the reasoning, and
 [`deploy/colab_train.ipynb`](deploy/colab_train.ipynb) for the notebook.
+[deploy/AMD_DEVCLOUD.md](deploy/AMD_DEVCLOUD.md) covers an AMD Instinct
+MI300X on the AMD Developer Cloud, which is a different machine entirely --
+192 GB of memory changes which settings are worth using, and not in the
+direction you would guess.
 
 ## Known limitations
 

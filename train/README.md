@@ -47,6 +47,11 @@ in the stalls while looking fine on the average.
 .venv-train/bin/python train/train.py            # yolo26n first; add --p2 later
 ```
 
+Not on this machine: [deploy/SETUP.md](../deploy/SETUP.md) for Colab and
+Kaggle, [deploy/AMD_DEVCLOUD.md](../deploy/AMD_DEVCLOUD.md) for an AMD
+Instinct MI300X, where the useful settings are different enough to be worth
+their own page.
+
 `--per-match 80` matters more than it looks. At 3 fps a match yields ~480
 frames that are largely near-duplicates, and trimming to 80 spread-out ones
 took a 100-epoch run on an 8 GB M2 from ~27 h to ~5.5 h with no real loss of
@@ -91,8 +96,19 @@ layouts.
 
 ## What still needs a human
 
-Only `fuel` is auto-labelled. `robot_blue`, `robot_red`, `hub_blue`, `hub_red`
-need annotation — but far less than it looks:
+`fuel` is auto-labelled by colour. Robots have an automatic path too, with
+limits: `autolabel_robots.py` asks an open-vocabulary model for them and keeps
+only frames where it found most of them (see its docstring for the measured
+recall). Run it after `autolabel_fuel.py`, then derive the scouting set:
+
+```bash
+.venv-train/bin/python train/autolabel_robots.py --preview previews/robots   # look
+.venv-train/bin/python train/autolabel_robots.py --dry-run                   # count
+.venv-train/bin/python train/autolabel_robots.py                             # write
+python3 train/subset_classes.py --classes fuel,robot_blue,robot_red --out dataset-scout
+```
+
+Everything else needs annotation — but far less than it looks:
 
 - **The hubs are static.** The camera is fixed within a match, so the two hub
   boxes are identical across all 532 frames. Annotate once, replicate.

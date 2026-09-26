@@ -42,6 +42,11 @@ keep the archive between sessions without Drive.
 | dataset between sessions | Datasets | Google Drive |
 | storage that persists | `/kaggle/working`, ~20 GB | Drive, 15 GB free |
 
+Neither, if you have an AMD Developer Cloud account: an MI300X is a bigger
+machine than either free tier offers and it does not disconnect.
+[AMD_DEVCLOUD.md](AMD_DEVCLOUD.md) is that path, and step 1 of it is step 1 of
+this one -- the portable dataset below is what you upload there too.
+
 Use Colab if you are already living in Drive and want to poke at things
 interactively. Use Kaggle for anything you want to start and walk away from.
 Check the current quota figures yourself — both platforms change them.

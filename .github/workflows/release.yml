@@ -64,7 +64,9 @@ jobs:
             echo
             echo '## Artifacts'
             echo
-            echo 'Source only — no videos, frames, database or model weights.'
+            echo 'Source only — no videos, frames or database. Model weights, when a'
+            echo 'release has them, are attached to it by hand; their checksums are in'
+            echo 'the notes above.'
             echo 'Verify with `sha256sum -c SHA256SUMS`.'
             echo
             echo '| file | sha256 |'
