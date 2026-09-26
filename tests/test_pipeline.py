@@ -1671,7 +1671,10 @@ def test_robot_autolabel_rules():
     four = [("robot_blue", blue), ("robot_blue", blue2),
             ("robot_red", red_a), ("robot_red", red_b)]
     check("four readable robots is a training frame", verdict(four, 0, 4) is None)
-    check("one unreadable robot drops the frame", verdict(four, 1, 4) is not None)
+    check("an unreadable robot no longer drops the frame -- it is painted out",
+          verdict(four, 1, 4) is None)
+    check("and it counts towards --min-robots",
+          verdict(four[:1], 1, 2) is None and verdict(four[:1], 0, 2) is not None)
     check("two found drops the frame", verdict(four[:2], 0, 4) is not None)
     check("four of one alliance means one is not a robot",
           verdict([("robot_red", red_a)] * 4, 0, 4) is not None)
@@ -1679,6 +1682,23 @@ def test_robot_autolabel_rules():
     line = yolo_lines([("robot_red", (100, 50, 300, 150, 0.5))], 1000, 500)[0]
     check("labels are class, centre and size, normalised",
           line == "2 0.200000 0.200000 0.200000 0.200000")
+    # Painting out a robot of unknown alliance: grey where it was, the
+    # labelled robot it overlaps left intact, and its fuel boxes gone with it.
+    from autolabel_robots import PAINT, drop_covered, paint, strip_robots
+    img = np.full((100, 200, 3), 50, np.uint8)
+    out = paint(img, [(10, 10, 60, 60, 0.3)], [(40, 40, 90, 90, 0.5)])
+    check("the unknown robot is painted grey", (out[20, 20] == PAINT).all())
+    check("the labelled robot it overlaps is not", (out[50, 50] == 50).all())
+    check("the source image is not modified", (img[20, 20] == 50).all())
+    check("boxes off the edge are clipped, not an error",
+          (paint(img, [(-5, -5, 250, 30, 0.1)], [])[0, 199] == PAINT).all())
+    fuel = "0 0.100000 0.200000 0.02 0.02\n0 0.800000 0.800000 0.02 0.02\n"
+    check("fuel centred in a painted robot goes, fuel elsewhere stays",
+          drop_covered(fuel, [(10, 10, 60, 60, 0.3)], 200, 100)
+          == "0 0.800000 0.800000 0.02 0.02\n")
+    check("--restore strips robots and keeps fuel and hubs",
+          strip_robots("0 .5 .5 .1 .1\n1 .2 .2 .1 .1\n2 .3 .3 .1 .1\n4 .9 .9 .2 .2\n")
+          == "0 .5 .5 .1 .1\n4 .9 .9 .2 .2\n")
     check("fuel-only labels have no robots",
           not has_robots("0 .5 .5 .1 .1\n0 .2 .2 .1 .1\n"))
     check("a second run sees the robots it wrote",

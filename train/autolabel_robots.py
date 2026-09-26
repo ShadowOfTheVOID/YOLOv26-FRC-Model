@@ -23,9 +23,9 @@ and the boxes that swallow two others are removed, what is left are robots.
 That decides how the output is used. A frame where it found most of the robots
 is a good training frame; a frame where it found two of six would teach the
 detector that the other four are floor. So frames are GATED, not labelled
-partially: below --min-robots, or with a robot whose alliance cannot be read,
-the whole frame is moved out of the dataset to dataset/skipped/robots/, image
-and label together, and `--restore` puts every one back.
+partially: below --min-robots, the whole frame is moved out of the dataset to
+dataset/skipped/robots/, image and label together, and `--restore` puts every
+one back.
 
 The first five real previews (nhdur, ~27 robots hand-counted) settled how
 strict that can be. YOLOE found ~16 of 27 robots (~60%); no frame had all of
@@ -33,17 +33,27 @@ its robots boxed, and at --min-robots 4 the gate kept one frame of five -- the
 one where the blue ladder had passed as a robot. Of the 10 robots it missed,
 5 appear at conf 0.02-0.12 and 5 not at all, so no lower threshold closes the
 gap. A gate that keeps nothing trains nothing, so the default is 2: frames
-still carry unlabelled robots, and the bootstrap in train/README.md, not this
-script, is what recovers them. Unknown alliance still drops the frame (2 of
-the 5), because a wrong class is worse than a missing frame.
+still carry unlabelled robots.
+
+A robot whose alliance cannot be read is PAINTED OUT (flat grey, the colour
+Ultralytics pads with) rather than dropping its frame. It was found; only its
+class is unknown. Guessing a class is worse than no label, and leaving it
+unboxed teaches that a robot is floor, but a grey patch is neither. On the
+906 nhdur frames dropping them cost 176 frames (a fifth of the dataset) for
+one robot each. Fuel boxes centred inside a painted robot are removed with
+it. Painted frames' originals, image and label, are kept under
+dataset/skipped/robots/original/ and `--restore` puts them back.
+
+Lower-confidence boxes were tried as paint-out regions for the robots YOLOE
+misses outright, and rejected: on the five previews they covered 3 of 10
+missed robots and, on one frame, 30% of the picture.
 
 Alliance comes from the bottom band of the box, where the bumper is: a hue
 vote among pixels saturated enough to have a hue at all. Measured: 7314 blue
 0.52 / red 0.00, 49/25 red 0.48 / 0.00. The fixed saturation >= 120 gate the
 motion heuristic uses read robot 69's navy bumper as no colour at all; its
 pixels have median saturation 8-93 and value 25-89, and no threshold separates
-that from the grey floor. Such a robot has unknown alliance, and the gate
-drops its frame rather than guessing.
+that from the grey floor. Such a robot has unknown alliance and is painted out.
 
     # look first: draws kept boxes in alliance colour, rejects in grey with why
     .venv-train/bin/python train/autolabel_robots.py --preview previews/robots
@@ -57,9 +67,8 @@ already have a robot box, so a second run adds nothing twice. Run
 drop_offcamera.py and autolabel_fuel.py first.
 
 What it does not fix: robots it misses in frames that pass the gate are still
-unlabelled. The detector trained on these labels will find more of them than
-YOLOE did, and relabelling with it (the bootstrap in train/README.md) is the
-next round.
+unlabelled, ~40% of them on the previews. A detector trained on these labels
+learns robots from the 60% and is taught, wrongly, that the rest are floor.
 """
 from __future__ import annotations
 
@@ -185,15 +194,17 @@ def alliance(hsv_band: np.ndarray):
 
 
 def verdict(labelled: list, unknown: int, min_robots: int):
-    """Why this frame cannot be a training frame, or None if it can."""
-    if unknown:
-        return f"{unknown} robot(s) of unknown alliance"
+    """Why this frame cannot be a training frame, or None if it can.
+
+    Robots of unknown alliance count towards --min-robots: they are painted
+    out, so they are not left in the frame as floor.
+    """
     for cls in ("robot_blue", "robot_red"):
         n = sum(c == cls for c, _ in labelled)
         if n > MAX_PER_ALLIANCE:
             return f"{n} {cls} -- one of them is not a robot"
-    if len(labelled) < min_robots:
-        return (f"{len(labelled)} robot(s) found, under --min-robots "
+    if len(labelled) + unknown < min_robots:
+        return (f"{len(labelled) + unknown} robot(s) found, under --min-robots "
                 f"{min_robots}; the rest would be labelled floor")
     return None
 
@@ -202,6 +213,49 @@ def yolo_lines(labelled: list, W: int, H: int) -> list:
     return [f"{CLASSES[c]} {(x1+x2)/2/W:.6f} {(y1+y2)/2/H:.6f} "
             f"{(x2-x1)/W:.6f} {(y2-y1)/H:.6f}"
             for c, (x1, y1, x2, y2, _) in labelled]
+
+
+PAINT = 114   # Ultralytics' letterbox grey
+
+
+def paint(img: np.ndarray, boxes: list, keep: list) -> np.ndarray:
+    """Grey out `boxes`, then put back every pixel inside the `keep` boxes.
+
+    A robot of unknown alliance often overlaps a labelled one; painting the
+    overlap would leave a labelled robot with a grey hole in it.
+    """
+    out = img.copy()
+    H, W = img.shape[:2]
+
+    def px(d):
+        return (max(int(d[0]), 0), max(int(d[1]), 0),
+                min(int(round(d[2])), W), min(int(round(d[3])), H))
+    for d in boxes:
+        x1, y1, x2, y2 = px(d)
+        out[y1:y2, x1:x2] = PAINT
+    for d in keep:
+        x1, y1, x2, y2 = px(d)
+        out[y1:y2, x1:x2] = img[y1:y2, x1:x2]
+    return out
+
+
+def drop_covered(label_text: str, boxes: list, W: int, H: int) -> str:
+    """Label lines whose box centre is not inside any painted box."""
+    kept = []
+    for line in label_text.splitlines():
+        f = line.split()
+        if len(f) < 5:
+            continue
+        cx, cy = float(f[1]) * W, float(f[2]) * H
+        if not any(d[0] <= cx <= d[2] and d[1] <= cy <= d[3] for d in boxes):
+            kept.append(line)
+    return "\n".join(kept) + ("\n" if kept else "")
+
+
+def strip_robots(label_text: str) -> str:
+    kept = [line for line in label_text.splitlines()
+            if line.split()[:1] not in (["1"], ["2"])]
+    return "\n".join(kept) + ("\n" if kept else "")
 
 
 def has_robots(label_text: str) -> bool:
@@ -243,14 +297,14 @@ def propose(model, img, conf: float, imgsz: int = 1280, tiles: bool = True) -> l
 
 
 def label_frame(model, img, args):
-    """(labelled, rejected, unknown, field_top, reason) for one image."""
+    """(labelled, rejected, unknown boxes, field_top, reason) for one image."""
     import cv2
     field_top = 0
     if args.field_line:
         from autolabel_objects import field_line
         field_top = field_line(img)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    labelled, rejected, unknown = [], [], 0
+    labelled, rejected, unknown = [], [], []
     for d, why in screen(propose(model, img, args.conf, args.imgsz, args.tiles), field_top):
         if why:
             rejected.append((d, why))
@@ -259,16 +313,16 @@ def label_frame(model, img, args):
         band = hsv[max(y1, int(y2 - 0.4 * (y2 - y1))):y2, max(x1, 0):x2]
         cls, _, _ = alliance(band)
         if cls is None:
-            unknown += 1
-            rejected.append((d, "alliance?"))
+            unknown.append(d)
         else:
             labelled.append((cls, d))
-    return labelled, rejected, unknown, field_top, verdict(labelled, unknown, args.min_robots)
+    return (labelled, rejected, unknown, field_top,
+            verdict(labelled, len(unknown), args.min_robots))
 
 
-def draw(img, labelled, rejected, field_top, reason):
+def draw(img, labelled, rejected, unknown, field_top, reason):
     import cv2
-    out = img.copy()
+    out = paint(img, unknown, [d for _, d in labelled])
     if field_top:
         cv2.line(out, (0, field_top), (out.shape[1], field_top), (255, 255, 255), 1)
     for (d, why) in rejected:
@@ -288,15 +342,34 @@ def draw(img, labelled, rejected, field_top, reason):
 
 
 def restore(skipped: Path) -> int:
-    n = 0
+    """Undo every run: frames moved aside, frames painted, robot lines added.
+
+    Robot lines (classes 1 and 2) are stripped from every label file, so this
+    also removes robot boxes written by autolabel_objects.py. Fuel and hub
+    lines are untouched.
+    """
+    moved = painted = stripped = 0
     for split in ("train", "val"):
         for img in sorted((skipped / split).glob("*.jpg")):
             img.rename(DATASET / "images" / split / img.name)
             lab = skipped / split / f"{img.stem}.txt"
             if lab.exists():
                 lab.rename(DATASET / "labels" / split / lab.name)
-            n += 1
-    print(f"restored {n} frames from {skipped}")
+            moved += 1
+        orig = skipped / "original" / split
+        for img in sorted(orig.glob("*.jpg")):
+            img.replace(DATASET / "images" / split / img.name)
+            lab = orig / f"{img.stem}.txt"
+            if lab.exists():
+                lab.replace(DATASET / "labels" / split / lab.name)
+            painted += 1
+        for lab in (DATASET / "labels" / split).glob("*.txt"):
+            text = lab.read_text()
+            if has_robots(text):
+                lab.write_text(strip_robots(text))
+                stripped += 1
+    print(f"restored {moved} moved frames and {painted} painted frames; "
+          f"removed robot boxes from {stripped} label files")
     return 0
 
 
@@ -328,7 +401,8 @@ def main() -> int:
                     help="label nothing, move nothing; report what would happen")
     ap.add_argument("--skipped", type=Path, default=DATASET / "skipped" / "robots")
     ap.add_argument("--restore", action="store_true",
-                    help="move every frame this script set aside back into the dataset")
+                    help="undo every run: frames moved aside or painted go back, "
+                         "and robot boxes are removed from every label file")
     args = ap.parse_args()
 
     if args.restore:
@@ -346,7 +420,7 @@ def main() -> int:
 
     model = load(args.weights)
     counts, reasons = {}, {}
-    kept = moved = boxes = already = 0
+    kept = moved = boxes = already = painted = 0
     for i, src in enumerate(images):
         img = cv2.imread(str(src))
         if img is None:
@@ -354,22 +428,25 @@ def main() -> int:
         H, W = img.shape[:2]
         lab = DATASET / "labels" / src.parent.name / f"{src.stem}.txt"
         existing = lab.read_text() if lab.exists() else ""
-        if not args.preview and has_robots(existing):
+        # A painted frame with no readable robot gets no robot line, so the
+        # saved original is the other sign it was done. Without this check a
+        # second run would save the painted copy over the real original.
+        done_before = (args.skipped / "original" / src.parent.name / src.name).exists()
+        if not args.preview and (has_robots(existing) or done_before):
             already += 1
             continue
         labelled, rejected, unknown, field_top, reason = label_frame(model, img, args)
-        n = len(labelled) + unknown
+        n = len(labelled) + len(unknown)
         counts[n] = counts.get(n, 0) + 1
         if reason:
-            key = ("unknown alliance" if "unknown" in reason else
-                   "too many of one alliance" if "not a robot" in reason else
+            key = ("too many of one alliance" if "not a robot" in reason else
                    "too few robots")
             reasons[key] = reasons.get(key, 0) + 1
         if args.preview:
             args.preview.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(args.preview / f"{src.stem}.jpg"),
-                        draw(img, labelled, rejected, field_top, reason))
-            print(f"{src.name}: {len(labelled)} robots, {unknown} unknown -- "
+                        draw(img, labelled, rejected, unknown, field_top, reason))
+            print(f"{src.name}: {len(labelled)} robots, {len(unknown)} painted out -- "
                   f"{reason or 'keep'}")
             continue
         if (i + 1) % 50 == 0:
@@ -378,6 +455,7 @@ def main() -> int:
             kept += reason is None
             moved += reason is not None
             boxes += len(labelled) if reason is None else 0
+            painted += bool(unknown) and reason is None
             continue
         if reason:
             dest = args.skipped / src.parent.name
@@ -387,6 +465,20 @@ def main() -> int:
                 lab.rename(dest / lab.name)
             moved += 1
             continue
+        if unknown:
+            # Keep the original, then write the painted copy as a NEW file.
+            # Renaming first matters: prepare_dataset.py without --copy makes
+            # these symlinks into data/frames/, and writing through one would
+            # paint the harvested frame itself.
+            orig = args.skipped / "original" / src.parent.name
+            orig.mkdir(parents=True, exist_ok=True)
+            src.rename(orig / src.name)
+            if lab.exists():
+                (orig / lab.name).write_text(existing)
+            cv2.imwrite(str(src), paint(img, unknown, [d for _, d in labelled]),
+                        [cv2.IMWRITE_JPEG_QUALITY, 95])
+            existing = drop_covered(existing, unknown, W, H)
+            painted += 1
         if existing and not existing.endswith("\n"):
             existing += "\n"
         lines = yolo_lines(labelled, W, H)
@@ -409,8 +501,9 @@ def main() -> int:
     if already:
         print(f"{already} frames already had robot boxes and were left alone")
     verb = "would be" if args.dry_run else "were"
-    print(f"\n{kept} frames {verb} labelled ({boxes} robot boxes), "
-          f"{moved} {verb} moved to {args.skipped}")
+    print(f"\n{kept} frames {verb} labelled ({boxes} robot boxes; {painted} with "
+          f"a robot of unknown alliance painted out), {moved} {verb} moved to "
+          f"{args.skipped}")
     return 0
 
 

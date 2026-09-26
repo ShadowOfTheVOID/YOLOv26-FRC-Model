@@ -341,6 +341,19 @@ harvest's output as a source of its own.
   stdlib-only rule for the API path, what the fuel labeller can and cannot
   label and why, and the pitfalls of the MI300X droplet — with a dated
   "current work" section meant to be deleted once it goes stale.
+- **A robot of unknown alliance is painted out instead of costing its
+  frame.** On the 906 nhdur frames, 176 were dropped for one robot whose
+  bumper colour could not be read -- a fifth of the dataset, for one box
+  each. That robot is now filled with flat grey (Ultralytics' pad colour),
+  fuel boxes centred in it are removed, and the frame is kept: neither a
+  guessed class nor a robot left as "floor". Originals go to
+  `dataset/skipped/robots/original/`; the painted copy is written as a new
+  file, so a symlinked dataset never paints the harvested frame. `--restore`
+  now undoes everything: moved frames, painted frames, and robot lines in
+  every label file. Checked end to end on real frames, symlink included:
+  after `--restore` every image hashes as before. Painting the
+  lower-confidence boxes as well, for robots YOLOE misses, was measured and
+  not adopted: it covered 3 of 10 misses and 30% of one frame.
 - **`autolabel_robots.py --dry-run` reported "(0 robot boxes)"** and "would
   labelled": it never counted boxes in a dry run. It does now. Labels written
   by a real run were never affected. First full dry run on the 906 nhdur

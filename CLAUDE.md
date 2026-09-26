@@ -162,9 +162,10 @@ Status of per-robot scouting:
   ~16 of 27 robots found (~60%), no frame fully boxed; of 10 misses, 5 show
   at conf 0.02-0.12 and 5 not at all. False positives (hubs, a box over two
   robots, alliance wall, blue ladder) are removed by the tall / spans-two /
-  too-big rules. Gate: unknown alliance drops the frame; `--min-robots`
-  defaults to 2 (4 kept nothing usable). Labels will be noisy -- a weak first
-  robot model, improved by relabelling with it, is the realistic outcome.
+  too-big rules. A robot of unknown alliance is painted grey, not a reason to
+  drop the frame (that had cost 176 of 906). `--min-robots` defaults to 2
+  (4 kept nothing usable). The user has ONE training run left -- no
+  relabel-and-retrain round -- so the labels going in are the final ones.
   Alliance is read from the box's bottom band, so a box that stops above the
   bumper can read the ramp under it (robot 307 came out red over the red
   ramp).
@@ -212,8 +213,8 @@ Blocking scoring at the scrimmage:
   The droplet was being destroyed once that copy was confirmed; a new one is
   ~15 minutes of setup from `deploy/AMD_DEVCLOUD.md`. `ssh mi300x` is the
   alias in `~/.ssh/config`.
-- Dry run on the 906 nhdur frames: 591 pass at `--min-robots 2` (176 unknown
-  alliance, 120 too few, 19 too many of one alliance). Next: write them,
+- Dry run on the 906 nhdur frames: 591 passed at `--min-robots 2` (176 unknown
+  alliance, now painted instead, 120 too few, 19 too many). Next: write them,
   `dataset-scout` and a robot-detecting model (the one thing `run.py shots`
   still lacks); a hand-scored recording from the scrimmage camera
   position to validate both commands against.
