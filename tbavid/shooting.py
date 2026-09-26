@@ -25,10 +25,15 @@ matter:
     shot the moment its robot drove anywhere. A ball that stays with its robot
     was carried, not shot.
 
-*And it must move itself, fast*: the ball's own travel must reach
-`min_travel` robot-widths within some `launch_s` window -- a sliding window,
-because a ball tracked for seconds in a hopper before it is shot must still
-count (the first version measured from first sighting and threw those away).
+*And it must move itself, fast*: the ball's travel *relative to its robot*
+must reach `min_travel` robot-widths within some `launch_s` window -- a
+sliding window, because a ball tracked for seconds in a hopper before it is
+shot must still count (the first version measured from first sighting and
+threw those away). Relative, because a robot driving hard into a pile pushes
+balls ahead of it at robot speed, about a robot-width in 0.3 s: measured on
+its own, the third qm7 run credited 1058 with 11 shots and 11 misses while it
+plowed the centre pile. A pushed ball moves with the robot; a shot leaves it
+behind at several times its speed.
 "Gets clear" alone was measured on real video and failed: a robot driving
 through the centre fuel pile in 2026nhdur qm7 was credited with 42 shots and
 41 misses in 15 seconds of auto. The balls it passed never moved -- the robot
@@ -41,11 +46,11 @@ an id sliding to the next ball in a pile, never covers one.
 One exception: a ball that starts at a robot and ends in a hub is a shot
 however little it cleared.
 
-*Starts at a robot* includes the space just above it (`launch_up` of its
-height): on qm7 most makes came out unattributed -- 13 of 19 -- because a ball
-leaving a shooter at speed is first detected above the box, not inside the
-30% pad around it. Only the pad around the box itself blocks stitching, so a
-flight passing over a robot can still be rejoined.
+`launch_up` can extend *starts at a robot* above the box. It is 0: set to
+0.8 of a robot's height to catch balls first detected above their shooter
+(13 of 19 qm7 makes were unattributed), it attributed none of them -- the
+count stayed 3 blue, 10 red -- and from a broadcast camera "above a robot" in
+the image is mostly the floor behind it, full of fuel it can knock.
 
 ## How long a flight can last
 
@@ -127,7 +132,7 @@ MIN_TRAVEL = 1.0
 LAUNCH_S = 0.3
 
 # How far above a robot, in its heights, a ball first seen there started at it.
-LAUNCH_UP = 0.8
+LAUNCH_UP = 0.0
 
 # Longest a shot may be in the air before it is a miss. See "How long a
 # flight can last".
@@ -188,7 +193,7 @@ class _Ball:
         self.shot: Optional["_Shot"] = None
         self.width = 0.0                # shooter's box width at launch
         self.launched = False           # moved min_travel widths inside launch_s
-        self.trail = [(t, point)]       # recent (t, point), launch_s long
+        self.trail = [(t, point, None)]  # recent (t, point, robot centre)
         self.launch_t: Optional[float] = None
 
     def velocity(self) -> Point:
@@ -414,7 +419,7 @@ class ShotCounter:
                 # a flight.
                 ball.cleared = float("inf") if held.shot.confirmed else held.cleared
                 ball.width = held.shot.width
-                ball.trail = [(held.t, held.point), (t, point)]
+                ball.trail = [(held.t, held.point, None), (t, point, None)]
             else:
                 # An unattributed ball that passed over a hub. It is still an
                 # unattributed ball; it just has not gone in yet.
@@ -459,12 +464,20 @@ class ShotCounter:
         if ball.shooter is None or ball.cleared == float("inf"):
             return
         if not ball.launched and ball.width:
+            entry = self.robots.get(ball.shooter)
+            here = centre(entry[1]) if entry is not None else None
             if ball.trail[-1][0] != t:
-                ball.trail.append((t, ball.last))
+                ball.trail.append((t, ball.last, here))
+            else:
+                ball.trail[-1] = (t, ball.last, here)
             while len(ball.trail) > 2 and t - ball.trail[1][0] >= self.launch_s:
                 ball.trail.pop(0)
-            t_from, p_from = ball.trail[0]
+            t_from, p_from, r_from = ball.trail[0]
             dx, dy = ball.last[0] - p_from[0], ball.last[1] - p_from[1]
+            if r_from is not None and here is not None:
+                # Relative to the robot: a pushed ball moves with it.
+                dx -= here[0] - r_from[0]
+                dy -= here[1] - r_from[1]
             if (t - t_from <= self.launch_s + 1e-9
                     and (dx * dx + dy * dy) ** 0.5 >= self.min_travel * ball.width):
                 ball.launched = True

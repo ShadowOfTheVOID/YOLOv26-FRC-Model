@@ -366,10 +366,14 @@ harvest's output as a source of its own.
   - The not-launched rule timed its 0.3 s from a ball's first sighting, so a
     ball tracked in a hopper and shot seconds later was thrown away. It is a
     sliding window now.
-  - 13 of 19 makes were unattributed: a ball leaving a shooter at speed is
-    first detected above the robot, outside its 30% pad. The launch zone
-    reaches 0.8 of a robot's height above it (stitching is still blocked
-    only by the robot's own box, so flights passing over robots rejoin).
+  - 13 of 19 makes were unattributed. A launch zone reaching 0.8 of a
+    robot's height above it was tried and attributed none of them (still 3
+    blue, 10 red); from a broadcast camera "above a robot" is the floor
+    behind it. It is off (`launch_up` 0).
+  - A launch is measured relative to the robot. The run after the sliding
+    window credited 1058 with 11 shots and 11 misses while it plowed the
+    pile: a robot at speed pushes balls a robot-width in 0.3 s. A pushed ball
+    moves with its robot; a shot leaves it behind.
   Robots split across several numbers (1058 as #5, #8, #11) are left split
   on purpose: `--teams 5=1058,8=1058,11=1058` folds them; merging by guess
   could mix two robots' shots.

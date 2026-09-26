@@ -1464,13 +1464,14 @@ def test_robot_in_a_pile_is_not_shooting():
           r.get("shots") == 1 and r.get("missed") == 1 and r.get("made", 0) == 0
           and c.expired == 1)
 
-    # First seen half a robot-height above the shooter, going up and in: the
-    # qm7 makes that came out unattributed.
-    above = _fly(52, 140.0, 300.0 - 30.0, 330.0, 130.0, 15)
-    events, c = _play_shots(bot, above)
-    r = c.per_robot.get(1, {})
-    check("a ball first seen just above its shooter is that robot's shot",
-          r.get("made") == 1 and not any(c.unattributed.values()))
+    # 1058 driving hard through the qm7 pile: a ball pushed ahead at robot
+    # speed covers a robot-width in 0.3 s but never leaves the robot behind.
+    fast = {1: [(f, ("blue", (100.0 + 10 * f, 300.0, 80.0, 60.0))) for f in range(60)]}
+    pushed = {60: [(f, (185.0 + 10 * f, 330.0, 12.0, 12.0)) for f in range(40)]
+                  + [(40 + i, (585.0 + 2 * i, 330.0, 12.0, 12.0)) for i in range(20)]}
+    events, c = _play_shots(fast, pushed)
+    check("a ball pushed ahead of a fast robot is not a shot",
+          sum(r["shots"] for r in c.per_robot.values()) == 0)
 
     # The real thing, fired while driving: still a shot, still a miss.
     events, c = _play_shots(drive, _shot(40, 700, 100, start=10, x0=160.0))
