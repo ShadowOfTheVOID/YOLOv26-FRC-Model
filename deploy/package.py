@@ -32,9 +32,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Explicit allowlist. A denylist would eventually miss something, and the thing
 # it misses is the file with the key in it.
-INCLUDE = ["run.py", "serve.py", "config.json", "requirements.txt", "README.md",
+INCLUDE = ["run.py", "serve.py", "config.json", "requirements.txt",
+           "requirements-detect.txt", "README.md",
            "start.command", "start.sh", "start.bat",
-           "SCOUTING.md", "DATA.md", "CHANGELOG.md", "LICENSE",
+           "SCOUTING.md", "DATA.md", "CHANGELOG.md", "LICENSE", "QUICKSTART.md",
            "tbavid", "train", "tests", "deploy", "docs"]
 
 EXCLUDE_DIRS = {"__pycache__", ".git", ".venv", ".venv-train", "dist",

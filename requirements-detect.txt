@@ -13,4 +13,5 @@
 # On a CPU-only box install torch from the CPU index first, or pip pulls the
 # CUDA build and several gigabytes with it:
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
-ultralytics>=8.3
+# YOLO26 weights (every released model) need 8.4; 8.3 cannot load them.
+ultralytics>=8.4

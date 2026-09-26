@@ -47,6 +47,11 @@ What the numbers do and do not mean:
 
 ### Added
 
+- **QUICKSTART.md**: from a fresh clone to running the released models --
+  install, download and checksum the weights, preview detections, hub boxes,
+  `run.py count`, `run.py shots` with `--teams`, the speed check -- and what
+  the measured results say to trust. Linked from the top of the README.
+
 - **`run.py detect` — a trained `.pt` finally has somewhere to go.** Until now
   `ultralytics` appeared in exactly one file, on the training side: a finished
   model loaded nowhere, the `detections` table was written by nothing, and
@@ -250,6 +255,12 @@ What the numbers do and do not mean:
   zero-mAP symptom AMP produces on some ROCm builds.
 
 ### Fixed
+
+- Release archives now include `QUICKSTART.md` and `requirements-detect.txt`
+  (the packager ships an explicit list, and neither was on it -- the quick
+  start's own install step would have failed from an archive).
+- `requirements-detect.txt` allowed `ultralytics>=8.3`, which cannot load
+  YOLO26 weights -- every model this project has released. It needs 8.4.
 
 - **`autolabel_objects.py` deleted every fuel box it found.** Without
   `--append` it rewrote each label file from scratch, and the documented
@@ -635,6 +646,19 @@ What the numbers do and do not mean:
   the default gate, and `--preview-frame` to preview a specific frame instead
   of the middle one. The preview now separates gated boxes (red) from
   recovered ones (orange) and counts the heaps it skipped.
+
+### Changed
+
+- `CLAUDE.md` moved to `.claude/CLAUDE.md`, out of the repo's front page;
+  Claude Code reads project instructions from either place.
+
+### Removed
+
+- `deploy/make_release.sh`: its header said three documents call it; none
+  do. Releases come from pushing a tag (`.github/workflows/release.yml`), and
+  `python deploy/package.py release <version>` still builds one locally.
+- `deploy/amd_watch.sh`: marked untested and never run; the MI300X guide
+  copies weights out with `docker cp`, which is what was actually used.
 
 ## v0.2.0 — 2026-09-16
 
