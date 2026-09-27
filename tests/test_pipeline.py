@@ -2152,6 +2152,314 @@ def test_serving_export():
         check("exporting a database that is not there is refused", True)
 
 
+class _FakeClock:
+    def __init__(self, t=100.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+class _FakeSock:
+    """Collects what the sender sends; hands back queued replies."""
+    def __init__(self, fail=False):
+        self.sent = []
+        self.replies = []
+        self.fail = fail
+
+    def sendto(self, data, addr):
+        if self.fail:
+            raise OSError("Network is unreachable")
+        self.sent.append((data, addr))
+
+    def recvfrom(self, n):
+        if not self.replies:
+            raise BlockingIOError
+        return self.replies.pop(0), ("10.0.100.5", 8411)
+
+
+def test_hub_feed_protocol():
+    """The counter's half of bioarena's Hub FUEL Counter Feed (spec 4 and 5).
+
+    bioarena makes the AUTO winner call at T+23.000 s from whatever counts it
+    holds then, so a ball that is waiting for the next heartbeat instead of
+    being sent does not decide the winner. And bioarena drops anything that
+    breaks its acceptance rules, silently from the counter's side -- so the
+    sender is held to them here with the same rules the receiver applies.
+    """
+    import json
+    from tbavid import hubfeed as HF
+
+    clock, sock = _FakeClock(), _FakeSock()
+    s = HF.FeedSender(("10.0.100.5", 8411), session="c1f3a9d2", sock=sock,
+                      clock=clock)
+    check("the first heartbeat goes out at once", s.heartbeat())
+    first = json.loads(sock.sent[-1][0])
+    check("the datagram carries both hubs, v 1, session and seq",
+          first == {"v": 1, "session": "c1f3a9d2", "seq": 1, "red": 0,
+                    "blue": 0} and sock.sent[-1][1] == ("10.0.100.5", 8411))
+    clock.t += 0.05
+    check("no heartbeat before 100 ms", not s.heartbeat() and len(sock.sent) == 1)
+
+    # THE latency rule: a score goes out on the frame it was confirmed, not
+    # at the next heartbeat, and age_ms runs from the frame's CAPTURE time --
+    # here 38 ms before the send -- not from when the code got to it.
+    s.score("red", 1, captured_at=clock.t - 0.038)
+    msg = json.loads(sock.sent[-1][0])
+    check("a score is sent immediately, between heartbeats",
+          len(sock.sent) == 2 and msg["red"] == 1 and msg["seq"] == 2)
+    check("age_ms is measured from the capture timestamp", msg["age_ms"] == 38)
+    s.score("blue", 3, captured_at=clock.t)
+    msg = json.loads(sock.sent[-1][0])
+    check("a clump scores several at once, and red is carried along",
+          (msg["red"], msg["blue"], msg["seq"]) == (1, 3, 3))
+    s.score("blue", 0, clock.t)
+    s.score("blue", -2, clock.t)
+    check("a count can never be sent going down",
+          len(sock.sent) == 3 and s.counts["blue"] == 3)
+    try:
+        s.score("green", 1, clock.t)
+        check("an unknown hub is refused", False)
+    except ValueError:
+        check("an unknown hub is refused", True)
+    check("every datagram fits bioarena's 512-byte limit",
+          len(HF.encode("x" * 32, 2 ** 40, 10 ** 6, 10 ** 6, 10 ** 6,
+                        "y" * 200)) <= 512)
+    try:
+        HF.FeedSender(session="bad session!", sock=sock)
+        check("a session outside [A-Za-z0-9_-]{1,32} is refused", False)
+    except ValueError:
+        check("a session outside [A-Za-z0-9_-]{1,32} is refused", True)
+    check("sessions are fresh per start",
+          HF.new_session() != HF.new_session()
+          and HF.SESSION_RE.match(HF.new_session()) is not None)
+
+    # A cable out on the field must not stop the counting: the counts are
+    # cumulative, so the next datagram that gets through carries them all.
+    down = HF.FeedSender(sock=_FakeSock(fail=True), clock=clock)
+    down.score("red", 2, clock.t)
+    check("a send error is recorded, not raised",
+          down.send_errors == 1 and down.counts["red"] == 2)
+
+    # The reply is shown, never depended on (spec 4.4).
+    check("no reply means not linked", not s.linked())
+    clock.t += 0.004
+    sock.replies.append(json.dumps({"v": 1, "seq": 3,
+                                    "match_state": "AUTO_PERIOD"}).encode())
+    sock.replies.append(b"not json")
+    check("replies are read without blocking, junk skipped",
+          s.poll_replies() == 1 and s.linked())
+    check("and the echoed seq gives the round trip", s.rtt_ms == 4.0)
+    clock.t += 1.5
+    check("the link goes down after a second of silence", not s.linked())
+    check("targets parse with or without a port",
+          HF.parse_target("10.0.100.5") == ("10.0.100.5", 8411)
+          and HF.parse_target("127.0.0.1:9000") == ("127.0.0.1", 9000))
+
+
+def test_hub_feed_receiver_rules():
+    """bioarena's acceptance rules (spec 4.5) and restart arithmetic (6.2).
+
+    `Receiver` is the stand-in `run.py hubfeed-listen` runs before the field
+    computer exists. If it accepted what bioarena drops, the link would look
+    fine on the bench and score nothing at the field.
+    """
+    import json
+    from tbavid import hubfeed as HF
+
+    clock = _FakeClock()
+    rx = HF.Receiver("10.0.100.21", clock=clock)
+
+    def d(**kw):
+        m = {"v": 1, "session": "aa", "seq": 1, "red": 0, "blue": 0}
+        m.update(kw)
+        return json.dumps(m).encode()
+
+    ok = "10.0.100.21"
+    check("a datagram from another address is dropped (a robot's VLAN)",
+          rx.accept(d(), "10.1.14.5") == (False, "unknown source"))
+    check("v other than 1 is dropped", rx.accept(d(v=2), ok)[0] is False)
+    check("a missing field is dropped",
+          rx.accept(json.dumps({"v": 1, "session": "aa", "seq": 1,
+                                "red": 0}).encode(), ok)[0] is False)
+    check("junk is dropped", rx.accept(b"{", ok)[0] is False)
+    check("oversize is dropped", rx.accept(b" " * 600, ok)[0] is False)
+    check("the first good one is accepted", rx.accept(d(), ok)[0])
+    check("and the counter is online", rx.online())
+    check("a duplicate seq is dropped",
+          rx.accept(d(), ok) == (False, "duplicate or reordered"))
+    rx.accept(d(seq=5, red=4, blue=1, age_ms=40), ok)
+    check("a reordered (older) seq is dropped",
+          rx.accept(d(seq=4, red=3, blue=1), ok)[0] is False)
+    check("a count going backwards is dropped",
+          rx.accept(d(seq=6, red=2, blue=1), ok) == (False, "count went backwards"))
+    check("age_ms is read from datagrams where a count rose", rx.age_ms == 40)
+    rx.accept(d(seq=7, red=4, blue=1, age_ms=900), ok)
+    check("and not from heartbeats", rx.age_ms == 40)
+
+    # Match boundaries are bioarena's: ResetMatch baselines the running totals.
+    rx.reset_match()
+    rx.accept(d(seq=8, red=6, blue=1), ok)
+    check("match counts are relative to ResetMatch",
+          rx.match_counts() == {"red": 2, "blue": 0})
+    # A counter restarted mid-match loses only what it missed while down.
+    ok_, what = rx.accept(d(session="bb", seq=1, red=1, blue=0), ok)
+    check("a new session is a restart, not a drop",
+          ok_ and what == "hub counter restarted" and rx.restarts == 1)
+    check("and what the old session scored this match is kept",
+          rx.match_counts() == {"red": 3, "blue": 0})
+    check("a new session may start its seq anywhere, even lower",
+          rx.accept(d(session="bb", seq=2, red=1, blue=2), ok)[0]
+          and rx.match_counts() == {"red": 3, "blue": 2})
+    rx.reset_match()
+    check("a restart before ResetMatch carries nothing into the next match",
+          rx.match_counts() == {"red": 0, "blue": 0})
+    status = rx.status()
+    check("the reply echoes seq and has the spec's fields",
+          status["seq"] == 2 and {"match_state", "shift", "hub_active",
+                                  "match_count", "credited",
+                                  "auto_count"} <= set(status))
+    clock.t += 1.01
+    check("a second with nothing accepted is offline", not rx.online())
+
+    # End to end: whatever the sender produces, the receiver accepts.
+    sock = _FakeSock()
+    s = HF.FeedSender(sock=sock, clock=clock)
+    rx2 = HF.Receiver()
+    s.heartbeat()
+    s.score("blue", 2, clock.t)
+    s.score("red", 1, clock.t)
+    clock.t += 0.2
+    s.heartbeat()
+    results = [rx2.accept(data, "10.0.100.21") for data, _ in sock.sent]
+    check("everything the sender sends, bioarena's rules accept",
+          all(r[0] for r in results)
+          and rx2.match_counts() == {"red": 1, "blue": 2})
+
+
+def test_hub_crossing_counter():
+    """The live hub counter: yellow area across the funnel outline.
+
+    Ported from experiments/area_hub_count.py because it is the only counter
+    here that commits on the frame the ball crosses; BallCounter holds every
+    score 400 ms, twice the feed's p99 budget. These fix the rules, not the
+    accuracy -- the accuracy is measured on a real hub or not at all.
+    """
+    from tbavid import hubcount as HC
+
+    square = [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)]
+    check("point in polygon",
+          HC.point_in_poly(square, (150, 150))
+          and not HC.point_in_poly(square, (250, 150))
+          and not HC.point_in_poly(square, (150, 99)))
+    try:
+        HC.parse_poly("1,2,3,4")
+        check("an outline needs three points", False)
+    except ValueError:
+        check("an outline needs three points", True)
+    check("outlines parse", HC.parse_poly("1,2, 3,4,5,6") ==
+          [(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)])
+
+    def fly(counter, path, area=280.0):
+        return [counter.update([(x, y, area)]) for x, y in path]
+
+    # A ball dropping into the mouth: counted on the frame it crosses, which
+    # is the latency the spec asks for -- not when it vanishes below.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    rises = fly(c, [(150, 40), (150, 60), (150, 80), (150, 105), (150, 130)])
+    rises.append(c.update([]))
+    check("a ball into the hub counts on the crossing frame",
+          rises == [0, 0, 0, 1, 0, 0] and c.reported == 1)
+
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110)], area=3 * 280.0)
+    check("a drum shooter's clump of three counts three", c.reported == 3)
+
+    # A ball across the mouth -- or off the hood -- goes in and comes out.
+    # The feed may not go down, so it is reported on entry and the exit is
+    # owed against the next ball in, which is then not reported again.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(x, 150) for x in range(60, 241, 20)])
+    check("a pass-over is reported once, its exit owed",
+          c.reported == 1 and c.net == 0 and c.owed == 1)
+    rises = fly(c, [(150, 60), (150, 85), (150, 110)])
+    check("and the next real ball settles it without a second report",
+          sum(rises) == 0 and c.reported == 1 and c.owed == 0)
+    fly(c, [(170, 60), (170, 85), (170, 110)])
+    check("after which balls count again", c.reported == 2)
+
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 150), (152, 152), (151, 160)])
+    check("a ball first seen already inside did not cross in", c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110)], area=20.0)
+    check("a speck under the size floor is ignored", c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 20), (150, 40), (150, 60), (150, 80)])
+    check("a ball that never reaches the mouth is not counted", c.reported == 0)
+
+    # Two balls side by side do not steal each other's crossings.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    for y in (60, 85, 110):
+        c.update([(130, y, 280.0), (170, y, 280.0)])
+    check("two balls in together count two", c.reported == 2)
+
+    # Sizes scale off the ball: a close camera has much bigger balls.
+    small = HC.region_of(square, 272.0, 1920, 1080)
+    big = HC.region_of(square, 272.0 * 16, 1920, 1080)
+    check("the search margin is the experiment's 60 px at its ball size",
+          small == (40, 40, 260, 260))
+    check("and four times wider for a ball four times wider",
+          big == (0, 0, 440, 440))
+    check("a region never leaves the frame",
+          HC.region_of(square, 272.0 * 16, 300, 300)[2:] == (300, 300))
+    try:
+        HC.CrossingCounter(square, 0)
+        check("a zero ball area is refused", False)
+    except ValueError:
+        check("a zero ball area is refused", True)
+
+    # age_ms must run from capture: a V4L2 buffer stamp is on the same clock
+    # as time.monotonic(), a file position is not.
+    check("a plausible driver capture stamp is used",
+          HC.frame_time(1000_000.0 - 30.0, 1000.0) == 1000.0 - 0.030)
+    check("a file position is not mistaken for one",
+          HC.frame_time(5000.0, 1000.0) == 1000.0
+          and HC.frame_time(0.0, 1000.0) == 1000.0)
+
+    h = HC.Health()
+    for i in range(31):
+        h.frame(10.0 + i / 30.0, 10.0 + i / 30.0 + 0.012)
+    check("health measures the camera's rate and the lag",
+          round(h.fps()) == 30 and round(h.lag_ms()) == 12)
+    check("the info line fits bioarena's 64 characters",
+          len(HC.info_line({"0": h, "1": h, "2": h},
+                           {"red": c, "blue": c})) <= 64)
+
+
+def test_hub_feed_needs_no_opencv_to_load():
+    """The sender is stdlib only: it runs on whatever laptop is wired into the
+    field switch, and CI has no cv2. hubcount keeps cv2 inside functions."""
+    import ast
+    root = Path(__file__).resolve().parent.parent
+    third = {"numpy", "requests", "ultralytics", "torch", "cv2", "PIL"}
+    tree = ast.parse((root / "tbavid" / "hubfeed.py").read_text())
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found |= {a.name.split(".")[0] for a in node.names} & third
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found |= {node.module.split(".")[0]} & third
+    check("hubfeed.py imports no third-party package", not found)
+    top = ast.parse((root / "tbavid" / "hubcount.py").read_text()).body
+    check("hubcount.py imports cv2 and numpy only inside functions",
+          not any(isinstance(n, (ast.Import, ast.ImportFrom)) and
+                  ({a.name.split(".")[0] for a in n.names} & {"cv2", "numpy"}
+                   if isinstance(n, ast.Import) else
+                   (n.module or "").split(".")[0] in {"cv2", "numpy"})
+                  for n in top))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -2166,7 +2474,9 @@ def main() -> int:
                test_models_that_can_count_and_shoot, test_hub_geometry, test_scrimmage_scoreboard,
                test_nothing_to_verify_against, test_counting_model_dataset,
                test_robot_autolabel_rules,
-               test_model_must_name_its_classes):
+               test_model_must_name_its_classes, test_hub_feed_protocol,
+               test_hub_feed_receiver_rules, test_hub_crossing_counter,
+               test_hub_feed_needs_no_opencv_to_load):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

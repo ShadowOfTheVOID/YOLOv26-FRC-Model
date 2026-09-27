@@ -175,6 +175,19 @@ What the qm7 video runs established (see CHANGELOG v0.3.0 for the detail):
   reliable output -- do not present them as scouting data.
 - Hub active/inactive is not modelled; the rule is unconfirmed.
 
+**Scrimmage scoring runs through bioarena** (Team 841's cheesy-arena fork).
+Its "Hub FUEL Counter Feed" spec is the contract: UDP JSON to
+10.0.100.5:8411, cumulative red/blue per session, never decreasing, sent on
+change plus a 100 ms heartbeat, `age_ms` from capture; the AUTO winner is
+decided at T+23.000 s so camera-to-count must stay under ~200 ms p99.
+`run.py hubfeed` (`tbavid/hubfeed.py` stdlib sender + `Receiver` stand-in,
+`tbavid/hubcount.py` the area-crossing counter from
+`experiments/area_hub_count.py`) implements it; `deploy/HUB_FEED.md` is the
+runbook. Plumbing is tested; counting is unvalidated on a practice-field
+camera -- the spec's 20-ball acceptance test comes before bioarena's
+`counted` mode. Do not swap in `BallCounter`: its 400 ms hold breaks the
+budget.
+
 **Recommended path for the scrimmage** (put to the user, awaiting answers):
 a close camera per hub (entry or exit chute) with a line-crossing counter,
 built and validated on a recording of a practice hub; a human scorekeeper

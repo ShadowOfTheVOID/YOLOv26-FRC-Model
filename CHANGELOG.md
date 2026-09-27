@@ -9,6 +9,30 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Added
+
+- **`run.py hubfeed` — feed hub fuel counts to bioarena** (`tbavid/hubfeed.py`,
+  `tbavid/hubcount.py`, `deploy/HUB_FEED.md`), for the 2026-10-10 scrimmage.
+  Implements the counter's side of Team 841's "Hub FUEL Counter Feed" spec:
+  UDP to 10.0.100.5:8411, both hubs' cumulative counts in one JSON datagram,
+  a fresh session per start, sent the moment a count rises and every 100 ms
+  otherwise, `age_ms` from the frame's capture time (the V4L2 driver stamp on
+  Linux). The heartbeat stops when a camera stops delivering frames, so
+  bioarena shows OFFLINE rather than frozen counts. `run.py hubfeed-listen`
+  stands in for bioarena with its acceptance rules, to check the link before
+  the field computer exists; the tests hold the sender to the same rules.
+  The counting is `experiments/area_hub_count.py` made live, because
+  `run.py count` holds each score 400 ms (twice the spec's p99 budget) and
+  needs detector tracks that lost the balls on broadcasts. Its signed
+  in/out crossings are reported as a high-water mark, since the feed may
+  never go down: a ball in and back out is reported until the next ball in
+  absorbs it. Its thresholds are scaled by the measured one-ball area and
+  **none is validated on a practice-field camera** -- on broadcasts it was
+  93-95% on the match it was fitted to and 120-137% blind. Only a synthetic
+  video has been run end to end. The spec's 20-ball field acceptance test is
+  the first real measurement; leave bioarena's AUTO winner off `counted`
+  until it passes.
+
 ### Experimental
 
 - `experiments/area_hub_count.py`: counts fuel into each hub from the yellow

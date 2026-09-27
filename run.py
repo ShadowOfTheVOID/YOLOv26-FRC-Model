@@ -715,6 +715,54 @@ def cmd_live(args, cfg):
     return 0
 
 
+def cmd_hubfeed(args, cfg):
+    """Count fuel into each hub from a camera and feed bioarena over UDP."""
+    from tbavid import hubcount, hubfeed
+
+    polys, hubs = {}, {}
+    for hub in ("red", "blue"):
+        text = getattr(args, hub)
+        if not text:
+            continue
+        try:
+            polys[hub] = hubcount.parse_poly(text)
+        except ValueError as e:
+            raise SystemExit(f"--{hub}: {e}")
+        hubs[hub] = (getattr(args, f"{hub}_source") or args.source, polys[hub])
+    if args.measure:
+        hubcount.measure(args.source, polys, args.measure, args.still,
+                         args.cam_fps, args.cam_size)
+        return 0
+    if not hubs:
+        raise SystemExit("give at least one hub outline: --red X,Y,... and/or "
+                         "--blue X,Y,... (a half field has one hub). Find them "
+                         "with --measure 5 --still still.png")
+    if args.ball_area <= 0:
+        raise SystemExit("--ball-area is required: every crossing is divided "
+                         "by it. Measure it on this camera with --measure 5.")
+    try:
+        target = hubfeed.parse_target(args.target)
+    except ValueError:
+        raise SystemExit(f"--target wants HOST or HOST:PORT (got {args.target!r})")
+    sender = hubfeed.FeedSender(target)
+    print(f"session {sender.session}: sending to udp {target[0]}:{target[1]}, "
+          f"counting {', '.join(f'{h} from {s}' for h, (s, _) in hubs.items())}"
+          f"; ball = {args.ball_area:.0f} px. Ctrl-C to stop.")
+    hubcount.run(sender, hubs, args.ball_area, fps=args.cam_fps,
+                 size=args.cam_size, realtime=args.realtime, log_path=args.log)
+    print(f"stopped: red {sender.counts['red']}, blue {sender.counts['blue']} "
+          f"in session {sender.session}")
+    return 0
+
+
+def cmd_hubfeed_listen(args, cfg):
+    """Stand in for bioarena: accept the feed and print what it would see."""
+    from tbavid import hubfeed
+
+    hubfeed.listen(args.port, args.bind, args.counter)
+    return 0
+
+
 def cmd_stream(args, cfg):
     """Read a whole event-day stream instead of one upload per match."""
     if not (args.url or args.file):
@@ -1054,6 +1102,51 @@ def main(argv=None):
     p.add_argument("--for", dest="for_s", type=float, default=0.0,
                    help="stop after this many seconds (0 = until the stream ends)")
     p.set_defaults(func=cmd_live)
+
+    p = sub.add_parser("hubfeed",
+                       help="count fuel into each hub from a camera and feed "
+                            "the counts to bioarena (UDP, the Hub FUEL Counter "
+                            "Feed spec)")
+    p.add_argument("--source", default="0",
+                   help="camera index (0), a video file, or a stream URL")
+    p.add_argument("--red", metavar="X,Y,...",
+                   help="red hub's funnel-mouth outline, full-frame pixels")
+    p.add_argument("--blue", metavar="X,Y,...",
+                   help="blue hub's outline. A hub not given always reads 0.")
+    p.add_argument("--red-source", dest="red_source",
+                   help="a separate camera for the red hub (default --source)")
+    p.add_argument("--blue-source", dest="blue_source",
+                   help="a separate camera for the blue hub")
+    p.add_argument("--ball-area", dest="ball_area", type=float, default=0.0,
+                   help="pixel area of one ball under the colour gate; "
+                        "measure it with --measure")
+    p.add_argument("--target", default="10.0.100.5:8411",
+                   help="bioarena's HOST:PORT (default 10.0.100.5:8411)")
+    p.add_argument("--cam-fps", dest="cam_fps", type=float, default=0.0,
+                   help="ask the camera for this frame rate (60 halves the "
+                        "wait for the next frame)")
+    p.add_argument("--cam-size", dest="cam_size", default="",
+                   help="ask the camera for WxH, e.g. 1280x720")
+    p.add_argument("--measure", type=float, default=0.0, metavar="SECONDS",
+                   help="commissioning: measure one ball's area near the "
+                        "outlines for this long, print it, and exit")
+    p.add_argument("--still", default="",
+                   help="with --measure, save the first frame here (outlines "
+                        "drawn) to read the hub outlines off")
+    p.add_argument("--realtime", action="store_true",
+                   help="play a video file at its own frame rate, as a "
+                        "camera would deliver it")
+    p.add_argument("--log", help="append every count to this CSV")
+    p.set_defaults(func=cmd_hubfeed)
+
+    p = sub.add_parser("hubfeed-listen",
+                       help="stand in for bioarena: receive the hub counter "
+                            "feed and print it, to check the link")
+    p.add_argument("--port", type=int, default=8411)
+    p.add_argument("--bind", default="0.0.0.0")
+    p.add_argument("--counter", help="accept only this source address, as "
+                                     "bioarena does")
+    p.set_defaults(func=cmd_hubfeed_listen)
 
     p = sub.add_parser("stream",
                        help="pull one whole event-day stream and cut every "

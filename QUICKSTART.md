@@ -71,6 +71,10 @@ $PY run.py count --weights models/fuel_best.pt --source match.mp4 \
 scorekeeper (clock, JSON score feed, referee corrections); see
 `run.py count --help`.
 
+Feeding a bioarena field (the scrimmage) uses a different, model-free
+counter that is fast enough for its AUTO-winner deadline: `run.py hubfeed`,
+walked through in [deploy/HUB_FEED.md](deploy/HUB_FEED.md).
+
 ## 6. Per-robot shots
 
 ```bash
