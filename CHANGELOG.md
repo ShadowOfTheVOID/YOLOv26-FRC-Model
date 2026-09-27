@@ -9,7 +9,21 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
-Nothing yet.
+### Experimental
+
+- `experiments/area_hub_count.py`: counts fuel into each hub from the yellow
+  area crossing a hand-drawn funnel outline, without the model or long
+  tracks, so a drum shooter's clump of balls counts as several. Tested on
+  one match only, 2026 Einstein Playoff Match 4, and its settings were chosen
+  on that same match. Against that match's scoreboard it counted blue 444
+  of 479 (93%) and red 769 of 807 at the buzzer (95%). On the same video
+  `run.py count` counted 0 and `run.py shots` 13/23 (cropped) and 44/123
+  (full frame). Hub totals only, not per robot. Blind-tested on Einstein
+  Match 5 with the same settings, it did not transfer: blue 713 against 594
+  (120%) and red 931 against 682 (137%). It still stayed flat whenever a hub
+  was inactive, but it counted too many balls per burst. Treat it as a
+  record of what was tried, not a scorer. The script's docstring has the
+  details.
 
 ## v0.3.0 — 2026-09-26
 
