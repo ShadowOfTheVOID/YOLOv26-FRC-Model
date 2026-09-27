@@ -45,9 +45,26 @@ What went wrong on the way, so nobody repeats it:
     area must be measured with the SAME gate (272 px loose vs 235 px strict),
     or the count inflates by the ratio (blue 532 with the mismatch).
 
+Blind test, and it failed. Einstein Playoff Match 5 (Hopper 594 - Archimedes
+682 at the buzzer), same code and settings, outlines moved by the hub shift
+template-matched from Einstein 4 (blue +9,+14 px, red +28,+2 px), not
+redrawn by eye:
+
+    alliance  scoreboard at buzzer   measured ball (300 px)   --ball-area 272
+    blue      594                    713   (120%)             813   (137%)
+    red       682                    931   (137%)             1018  (149%)
+
+Still flat in every inactive-hub window, so it sees WHEN a hub scores; it
+over-counts HOW MANY per burst, worst in auto (red +115 against +33 in
+0:10-0:15). The 93-95% on Einstein 4 was a fit to that match. Candidate
+causes, none checked: glare on the red hood, different robots' trajectories
+crossing the outline in front of the hub, the one-ball area (it moves the
+total ~5% per 3%). The final screen is cut from this video, so post-buzzer
+draining (35 balls for red in Einstein 4) is unknown and would narrow, not
+close, the gap.
+
 Not fixed, not known:
-  * The parameters were chosen on the same match they are scored on. Until a
-    second match with a known score agrees, 93%/95% is a fit, not a result.
+  * No setting has been shown to transfer between matches (see above).
   * Red takes two false drops (-20, -25) while its hub is inactive:
     something yellow leaving the outline. Not traced.
   * Hub totals only. Per-robot credit from a broadcast is not attempted.

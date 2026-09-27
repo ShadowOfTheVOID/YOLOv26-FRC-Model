@@ -18,9 +18,12 @@ the build rather than publishing an empty release.
   on that same match. Against that match's scoreboard it counted blue 444
   of 479 (93%) and red 769 of 807 at the buzzer (95%). On the same video
   `run.py count` counted 0 and `run.py shots` 13/23 (cropped) and 44/123
-  (full frame). Hub totals only, not per robot. It needs a second match
-  with a known score before it counts as a result. The script's docstring
-  has the details.
+  (full frame). Hub totals only, not per robot. Blind-tested on Einstein
+  Match 5 with the same settings, it did not transfer: blue 713 against 594
+  (120%) and red 931 against 682 (137%). It still stayed flat whenever a hub
+  was inactive, but it counted too many balls per burst. Treat it as a
+  record of what was tried, not a scorer. The script's docstring has the
+  details.
 
 ## v0.3.0 — 2026-09-26
 
