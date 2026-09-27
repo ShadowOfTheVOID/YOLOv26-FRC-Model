@@ -55,7 +55,9 @@ import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 Point = Tuple[float, float]
-Blob = Tuple[float, float, float]            # cx, cy, area (px)
+# cx, cy, area (px), then optionally the pixel covariance cxx, cyy, cxy --
+# the blob's spread, which the blur correction reads its length from.
+Blob = Tuple[float, ...]
 
 # autolabel_fuel.LOOSE_LO/HI. The strict gate lost balls seen through the
 # clear hood (blue 363 against 444 on Einstein 4). The one-ball area must be
@@ -118,12 +120,17 @@ class CrossingCounter:
     balls to report NOW -- the rise in the high-water mark, never negative.
     """
 
-    def __init__(self, poly: Sequence[Point], ball_area: float):
+    def __init__(self, poly: Sequence[Point], ball_area: float,
+                 blur: float = 0.0):
         if ball_area <= 0:
             raise ValueError("ball_area must be positive; measure it with "
                              "run.py hubfeed --measure")
+        if not 0.0 <= blur <= 1.0:
+            raise ValueError("blur is a fraction, 0 to 1")
         self.poly = list(poly)
         self.ball_area = float(ball_area)
+        self.blur = float(blur)
+        self.diameter = math.sqrt(4.0 * self.ball_area / math.pi)
         self.min_area = MIN_AREA_FRAC * self.ball_area
         self.min_reach = MIN_REACH_BALLS * math.sqrt(self.ball_area)
         self.prev: List[Dict] = []
@@ -137,12 +144,32 @@ class CrossingCounter:
         """Balls reported that have since come back out, not yet absorbed."""
         return self.reported - self.net
 
-    def balls_in(self, area: float) -> int:
-        """A clump of four drum-fed balls is one blob of four balls' area."""
-        return max(1, int(round(area / self.ball_area)))
+    def balls_in(self, area: float, cov=None, vel=(0.0, 0.0)) -> int:
+        """A clump of four drum-fed balls is one blob of four balls' area.
+
+        With `blur` > 0, one ball is taken to be smeared along its motion:
+        a ball of diameter d whose blob is L long along its velocity covers
+        A1 + d(L - d), and `blur` is the fraction of that smear credited.
+        blur = 1 halved every Einstein total (the long blobs are mostly real
+        trains of drum-fed balls); the right fraction differed per match
+        (Einstein 4 best at 0, 5 at 0.2-0.3, 1 at 0.5-0.7), and a value
+        picked on two matches did no better than 0 on the third. So it is a
+        per-camera calibration, set against a hand-counted recording from
+        that camera (`calibrate`), never a constant.
+        """
+        one = self.ball_area
+        speed = math.hypot(vel[0], vel[1])
+        if self.blur > 0 and cov is not None and speed > 0:
+            ux, uy = vel[0] / speed, vel[1] / speed
+            cxx, cyy, cxy = cov
+            var = cxx * ux * ux + cyy * uy * uy + 2 * cxy * ux * uy
+            length = 4.0 * math.sqrt(max(var, 0.0))
+            one += self.blur * self.diameter * max(0.0, length - self.diameter)
+        return max(1, int(round(area / one)))
 
     def update(self, blobs: Sequence[Blob]) -> int:
         cur = [{"c": (b[0], b[1]), "a": b[2], "v": (0.0, 0.0),
+                "cov": tuple(b[3:6]) if len(b) >= 6 else None,
                 "in": point_in_poly(self.poly, (b[0], b[1]))}
                for b in blobs if b[2] >= self.min_area]
         # Nearest pairs first, each blob used once, predicted by last motion.
@@ -165,7 +192,8 @@ class CrossingCounter:
             b, c = self.prev[i], cur[j]
             c["v"] = (c["c"][0] - b["c"][0], c["c"][1] - b["c"][1])
             if b["in"] != c["in"]:
-                n = self.balls_in(max(b["a"], c["a"]))
+                big = b if b["a"] >= c["a"] else c
+                n = self.balls_in(big["a"], big["cov"], c["v"])
                 if c["in"]:
                     self.net += n
                     self.entries += n
@@ -201,18 +229,77 @@ def frame_time(pos_msec: float, now: float) -> float:
     return now
 
 
-def yellow_blobs(frame, box, lo=LOOSE_LO, hi=LOOSE_HI) -> List[Blob]:
-    """Connected yellow components in `box`, in full-frame pixels."""
+def yellow_mask(frame, box, lo=LOOSE_LO, hi=LOOSE_HI):
     import cv2
     import numpy as np
 
     x0, y0, x1, y1 = box
     hsv = cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
     m = cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
-    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    n, _, st, cen = cv2.connectedComponentsWithStats(m)
-    return [(float(cen[i][0]) + x0, float(cen[i][1]) + y0, float(st[i, 4]))
-            for i in range(1, n)]
+    return cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+
+def blobs_of(mask, box) -> List[Blob]:
+    """Connected components of a mask, with centre, area and pixel
+    covariance, in full-frame pixels."""
+    import cv2
+    import numpy as np
+
+    x0, y0 = box[0], box[1]
+    n, lab, st, cen = cv2.connectedComponentsWithStats(mask)
+    if n <= 1:
+        return []
+    ys, xs = np.nonzero(lab)
+    L = lab[ys, xs]
+    xs = xs.astype(np.float64)
+    ys = ys.astype(np.float64)
+    cnt = np.maximum(np.bincount(L, minlength=n), 1)
+    mx = np.bincount(L, xs, n) / cnt
+    my = np.bincount(L, ys, n) / cnt
+    cxx = np.bincount(L, xs * xs, n) / cnt - mx * mx
+    cyy = np.bincount(L, ys * ys, n) / cnt - my * my
+    cxy = np.bincount(L, xs * ys, n) / cnt - mx * my
+    return [(float(cen[i][0]) + x0, float(cen[i][1]) + y0, float(st[i, 4]),
+             float(cxx[i]), float(cyy[i]), float(cxy[i])) for i in range(1, n)]
+
+
+def yellow_blobs(frame, box, lo=LOOSE_LO, hi=LOOSE_HI) -> List[Blob]:
+    """Connected yellow components in `box`, in full-frame pixels."""
+    return blobs_of(yellow_mask(frame, box, lo, hi), box)
+
+
+class ZoneEye:
+    """What one zone sees each frame: its search box, and -- with
+    `remove_static` -- a running map of pixels that have been yellow most of
+    the last ~3 s, removed before blobs are found.
+
+    Removing them was measured to move the Einstein totals only a few
+    percent (the crossings touching them were mostly balls passing in front
+    of balls resting on the hood, not shirts), so it is off unless a
+    camera's calibration says it helps.
+    """
+
+    STATIC_S = 3.0
+    STATIC_FRAC = 0.5
+
+    def __init__(self, box, remove_static: bool = False, fps: float = 30.0):
+        self.box = box
+        self.remove_static = remove_static
+        self.alpha = 1.0 / (self.STATIC_S * (fps or 30.0))
+        self.freq = None
+
+    def blobs(self, frame) -> List[Blob]:
+        m = yellow_mask(frame, self.box)
+        if self.remove_static:
+            y = (m > 0).astype("float32")
+            if self.freq is None:
+                self.freq = y
+            else:
+                self.freq *= (1.0 - self.alpha)
+                self.freq += self.alpha * y
+            m = m.copy()
+            m[self.freq > self.STATIC_FRAC] = 0
+        return blobs_of(m, self.box)
 
 
 def isolated_ball_areas(frame, box, lo=LOOSE_LO, hi=LOOSE_HI) -> List[float]:
@@ -366,21 +453,24 @@ class Zone:
     """One outline on one camera, counting into one hub."""
 
     def __init__(self, name: str, hub: str, outline: Sequence[Point],
-                 ball_area: float):
+                 ball_area: float, blur: float = 0.0):
         self.name = name
         self.hub = hub
-        self.counter = CrossingCounter(outline, ball_area)
+        self.counter = CrossingCounter(outline, ball_area, blur)
 
 
 class Camera:
     def __init__(self, name: str, source: str, ball_area: float,
-                 zones: List[Zone], fps: float = 0.0, size: str = ""):
+                 zones: List[Zone], fps: float = 0.0, size: str = "",
+                 blur: float = 0.0, remove_static: bool = False):
         self.name = name
         self.source = str(source)
         self.ball_area = float(ball_area)
         self.zones = zones
         self.fps = fps
         self.size = size
+        self.blur = float(blur)
+        self.remove_static = bool(remove_static)
 
 
 class Setup:
@@ -431,6 +521,9 @@ class Setup:
                                  f"measured (run.py hubfeed --measure)")
             if not c.zones:
                 raise ValueError(f"camera {c.name!r} has no zones")
+            if not 0.0 <= c.blur <= 1.0:
+                raise ValueError(f"camera {c.name!r}: blur is a fraction, "
+                                 f"0 to 1 (got {c.blur})")
             for z in c.zones:
                 if z.hub not in HUB_NAMES:
                     raise ValueError(f"zone {z.name!r}: hub must be red or "
@@ -471,18 +564,43 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
         if "source" not in c:
             raise ValueError(f"camera {name!r} has no source")
         area = float(c.get("ball_area") or 0)
+        blur = float(c.get("blur") or 0)
         zones = []
         for j, z in enumerate(c.get("zones") or []):
             zname = str(z.get("name") or f"{name}/{z.get('hub')}{j}")
             try:
                 zones.append(Zone(zname, str(z.get("hub")),
                                   _outline(z.get("outline") or []),
-                                  area if area > 0 else 1.0))
+                                  area if area > 0 else 1.0,
+                                  min(max(blur, 0.0), 1.0)))
             except ValueError as e:
                 raise ValueError(f"zone {zname!r}: {e}")
         cams.append(Camera(name, c["source"], area, zones,
-                           float(c.get("fps") or 0), str(c.get("size") or "")))
+                           float(c.get("fps") or 0), str(c.get("size") or ""),
+                           blur, bool(c.get("remove_static", False))))
     return Setup(cams, cfg.get("combine"), measuring)
+
+
+def setup_to_dict(setup: "Setup") -> Dict:
+    """The inverse of setup_from_dict, for saving what the GUI built."""
+    cams = []
+    for c in setup.cameras:
+        d = {"name": c.name, "source": c.source,
+             "ball_area": round(c.ball_area, 1),
+             "zones": [{"name": z.name, "hub": z.hub,
+                        "outline": [[round(x, 1), round(y, 1)]
+                                    for x, y in z.counter.poly]}
+                       for z in c.zones]}
+        if c.fps:
+            d["fps"] = c.fps
+        if c.size:
+            d["size"] = c.size
+        if c.blur:
+            d["blur"] = c.blur
+        if c.remove_static:
+            d["remove_static"] = True
+        cams.append(d)
+    return {"combine": dict(setup.combine), "cameras": cams}
 
 
 def load_setup(path: str, measuring: bool = False) -> Setup:
@@ -557,7 +675,9 @@ class HubTally:
 
 def run(sender, setup: Setup, realtime: bool = False,
         log_path: Optional[str] = None, out=print,
-        stop: Optional[threading.Event] = None) -> HubTally:
+        stop: Optional[threading.Event] = None,
+        on_frame: Optional[Callable] = None,
+        monitor: Optional[Dict] = None) -> HubTally:
     """Count from every camera into `sender` until stopped.
 
     One capture thread per camera; a camera with several zones decodes each
@@ -570,10 +690,17 @@ def run(sender, setup: Setup, realtime: bool = False,
     or quietly degraded counts behind an ONLINE badge would let a match
     start in Counted mode with a hub half-watched. Fail closed; restart
     without that camera if the match must go on.
+
+    `on_frame(camera_name, frame)` is called from each camera's thread with
+    every frame it counted, for a live preview; it must return at once.
+    `monitor`, if given, is filled with the live `health` and `tally` so a
+    display can read them.
     """
     stop = stop or threading.Event()
     tally = HubTally(setup)
     health = {c.name: Health() for c in setup.cameras}
+    if monitor is not None:
+        monitor.update(health=health, tally=tally, errors=[])
     log_lock = threading.Lock()
     log_file = open(log_path, "a", newline="") if log_path else None
     log = csv.writer(log_file) if log_file else None
@@ -592,7 +719,7 @@ def run(sender, setup: Setup, realtime: bool = False,
             stop.set()
             return
         file_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        boxes: Dict[str, Tuple[int, int, int, int]] = {}
+        eyes: Dict[str, ZoneEye] = {}
         started = time.monotonic()
         n = 0
         hl = health[cam.name]
@@ -613,13 +740,15 @@ def run(sender, setup: Setup, realtime: bool = False,
                     time.sleep(due - now)
                 captured = time.monotonic()
             n += 1
-            if not boxes:
+            if not eyes:
                 h, w = frame.shape[:2]
-                boxes = {z.name: region_of(z.counter.poly, cam.ball_area, w, h)
-                         for z in cam.zones}
+                eyes = {z.name: ZoneEye(region_of(z.counter.poly,
+                                                  cam.ball_area, w, h),
+                                        cam.remove_static, file_fps)
+                        for z in cam.zones}
             touched = []
             for z in cam.zones:
-                if z.counter.update(yellow_blobs(frame, boxes[z.name])):
+                if z.counter.update(eyes[z.name].blobs(frame)):
                     touched.append(z)
             for z in touched:
                 sent = tally.rise(z.hub)
@@ -634,6 +763,8 @@ def run(sender, setup: Setup, realtime: bool = False,
                             round((time.monotonic() - captured) * 1000)])
                         log_file.flush()
             hl.frame(captured, time.monotonic())
+            if on_frame:
+                on_frame(cam.name, frame)
         cap.release()
 
     threads = [threading.Thread(target=loop, args=(c,), daemon=True,
@@ -673,6 +804,8 @@ def run(sender, setup: Setup, realtime: bool = False,
             log_file.close()
     for e in errors:
         out(e)
+    if monitor is not None:
+        monitor["errors"] = list(errors)
     return tally
 
 
@@ -704,3 +837,98 @@ def status_line(sender, health: Dict[str, Health], tally: HubTally) -> str:
     errs = f"  send errors {sender.send_errors}: {sender.last_error}" \
         if sender.send_errors else ""
     return f"{'  '.join(parts)}  |  {info_line(health, tally)}  |  {link}{errs}"
+
+
+# -- calibration against a hand count --------------------------------------
+
+BLUR_STEPS = tuple(round(0.1 * i, 1) for i in range(11))
+
+
+def record_blobs(camera: Camera, video: str, remove_static: bool,
+                 start: float = 0.0, end: float = 0.0,
+                 progress: Optional[Callable[[float], None]] = None,
+                 stop: Optional[threading.Event] = None) -> List[Dict]:
+    """Every zone's blobs for every frame of a recording, decoded once, so
+    the blur settings can be replayed over it in seconds."""
+    import cv2
+
+    cap = cv2.VideoCapture(video)
+    if not cap.isOpened():
+        raise ValueError(f"could not open {video!r}")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    first = int(start * fps)
+    last = int(end * fps) if end else total
+    if first:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, first)
+    eyes = None
+    frames: List[Dict] = []
+    fi = first
+    while (not last or fi < last) and not (stop and stop.is_set()):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if eyes is None:
+            h, w = frame.shape[:2]
+            eyes = {z.name: ZoneEye(region_of(z.counter.poly,
+                                              camera.ball_area, w, h),
+                                    remove_static, fps)
+                    for z in camera.zones}
+        frames.append({name: eye.blobs(frame) for name, eye in eyes.items()})
+        fi += 1
+        if progress and fi % 60 == 0 and last > first:
+            progress((fi - first) / (last - first))
+    cap.release()
+    return frames
+
+
+def replay_counts(camera: Camera, frames: List[Dict], blur: float) -> Dict[str, int]:
+    """Each hub's count from recorded blobs at one blur setting."""
+    counters = {z.name: (z.hub, CrossingCounter(z.counter.poly,
+                                                 camera.ball_area, blur))
+                for z in camera.zones}
+    for rec in frames:
+        for name, (_, c) in counters.items():
+            c.update(rec.get(name, []))
+    out: Dict[str, int] = {}
+    for hub, c in counters.values():
+        out[hub] = out.get(hub, 0) + c.reported
+    return out
+
+
+def calibrate(camera: Camera, video: str, hand: Dict[str, int],
+              start: float = 0.0, end: float = 0.0, out=print,
+              progress=None, stop=None) -> Dict:
+    """Pick this camera's `blur` and `remove_static` from a recording whose
+    balls were counted by hand.
+
+    Replays every setting over the recording and keeps the one whose counts
+    are nearest the hand count (total absolute error over the hubs given;
+    ties go to less correction). This is fitting, so it is only as good as
+    the recording: use a few minutes of real shooting from the camera's
+    real position, and check the choice on a second recording.
+    """
+    results = []
+    for remove_static in (False, True):
+        out(f"decoding {video} ({'static removed' if remove_static else 'as is'})")
+        frames = record_blobs(camera, video, remove_static, start, end,
+                              progress, stop)
+        if stop and stop.is_set():
+            break
+        for blur in BLUR_STEPS:
+            got = replay_counts(camera, frames, blur)
+            err = sum(abs(got.get(h, 0) - n) for h, n in hand.items())
+            results.append({"blur": blur, "remove_static": remove_static,
+                            "counts": got, "error": err})
+    if not results:
+        return {}
+    for r in results:
+        out(f"  blur {r['blur']:.1f}  static {'on ' if r['remove_static'] else 'off'}"
+            f"  " + "  ".join(f"{h} {r['counts'].get(h, 0)}/{n}"
+                              for h, n in hand.items())
+            + f"  error {r['error']}")
+    best = min(results, key=lambda r: (r["error"], r["blur"], r["remove_static"]))
+    base = next(r for r in results if r["blur"] == 0 and not r["remove_static"])
+    out(f"best: blur {best['blur']}, remove_static {best['remove_static']} "
+        f"(error {best['error']}; uncorrected {base['error']})")
+    return {"best": best, "uncorrected": base, "all": results}

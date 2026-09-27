@@ -2545,6 +2545,90 @@ def test_hub_multi_camera_setup():
           sorted(c.source for c in split.cameras) == ["0", "1"])
 
 
+def test_hub_calibration_and_gui_helpers():
+    """Blur correction, the setup file round trip, and the window's helpers.
+
+    The blur fraction that best matched the scoreboard was different on
+    every Einstein match (0 on 4, 0.2-0.3 on 5, 0.5-0.7 on 1), so it is a
+    per-camera setting chosen against a hand count, not a constant.
+    """
+    import math
+    from tbavid import hubcount as HC
+    from tbavid import hubgui as G
+
+    sq = [(100.0, 100.0), (300.0, 100.0), (300.0, 300.0), (100.0, 300.0)]
+    A1 = 300.0
+    d = math.sqrt(4 * A1 / math.pi)
+    # One ball smeared 2 diameters along x: area A1 + d*2d, length 3d.
+    L = 3 * d
+    streak_area = A1 + d * (L - d)
+    cov = (L * L / 16.0, d * d / 16.0, 0.0)          # uniform ellipse spread
+
+    def cross(blur, area, cov_):
+        c = HC.CrossingCounter(sq, A1, blur)
+        c.update([(60.0, 200.0, area) + cov_])
+        c.update([(90.0, 200.0, area) + cov_])            # outside, moving +x
+        c.update([(120.0, 200.0, area) + cov_])           # crosses in
+        return c.reported
+
+    check("uncorrected, one smeared ball counts as its area in balls",
+          cross(0.0, streak_area, cov) == round(streak_area / A1))
+    check("fully corrected, the same streak is one ball",
+          cross(1.0, streak_area, cov) == 1)
+    check("a blob with no shape recorded is never corrected",
+          cross(1.0, streak_area, ()) == round(streak_area / A1))
+    try:
+        HC.CrossingCounter(sq, A1, 1.5)
+        check("a blur fraction over 1 is refused", False)
+    except ValueError:
+        check("a blur fraction over 1 is refused", True)
+
+    # A replay of recorded blobs gives each hub's count at a blur setting.
+    cam = HC.setup_from_dict({"cameras": [{
+        "name": "c", "source": "x.mp4", "ball_area": A1, "blur": 0.5,
+        "remove_static": True,
+        "zones": [{"hub": "red", "outline": [list(p) for p in sq]}]}]}).cameras[0]
+    frames = [{cam.zones[0].name: [(60.0 + 30 * i, 200.0, streak_area) + cov]}
+              for i in range(3)]
+    check("replay_counts: no correction", HC.replay_counts(cam, frames, 0.0)
+          == {"red": round(streak_area / A1)})
+    check("replay_counts: full correction", HC.replay_counts(cam, frames, 1.0)
+          == {"red": 1})
+
+    # What the window builds is what hubfeed --setup reads, and back again.
+    setup = HC.setup_from_dict({"combine": {"red": "max", "blue": "sum"},
+                                "cameras": [{"name": "c", "source": "0",
+                                             "ball_area": A1, "blur": 0.3,
+                                             "remove_static": True, "fps": 60,
+                                             "zones": [{"name": "z", "hub": "red",
+                                                        "outline": [list(p) for p in sq]}]}]})
+    again = HC.setup_from_dict(HC.setup_to_dict(setup))
+    c0, c1 = setup.cameras[0], again.cameras[0]
+    check("a setup survives saving and loading",
+          (c1.blur, c1.remove_static, c1.fps, c1.ball_area, again.combine["red"])
+          == (0.3, True, 60.0, A1, "max")
+          and c1.zones[0].counter.poly == c0.zones[0].counter.poly
+          and c1.zones[0].counter.blur == 0.3)
+
+    # The window's pure helpers.
+    check("a 1080p frame is shrunk to the canvas, a small one is not",
+          G.fit_scale(1920, 1080) == 0.5 and G.fit_scale(640, 480) == 1.0)
+    check("a click on the half-size preview is stored in frame pixels",
+          G.to_frame(100, 50, 0.5) == (200.0, 100.0))
+    check("and drawn back where it was clicked",
+          G.to_canvas([(200.0, 100.0)], 0.5) == [100.0, 50.0])
+    check("camera numbers are cameras, paths are recordings",
+          not G.is_file_source("0") and G.is_file_source("hub.mp4")
+          and not G.is_file_source("rtsp://cam/1"))
+    check("names are made unique", G.next_name(["cam0", "cam02"], "cam0") == "cam03"
+          and G.next_name([], "cam0") == "cam0")
+    check("an empty setup says to add a camera",
+          G.problems(G.new_setup()) == ["Add a camera (or a recording) first."])
+    todo = G.problems({"cameras": [{"name": "c", "source": "0", "zones": []}]})
+    check("a camera with no outline and no ball size says both",
+          len(todo) == 2 and "outline" in todo[0] and "ball" in todo[1])
+
+
 def test_hub_feed_needs_no_opencv_to_load():
     """The sender is stdlib only: it runs on whatever laptop is wired into the
     field switch, and CI has no cv2. hubcount keeps cv2 inside functions."""
@@ -2559,6 +2643,15 @@ def test_hub_feed_needs_no_opencv_to_load():
         elif isinstance(node, ast.ImportFrom) and node.module:
             found |= {node.module.split(".")[0]} & third
     check("hubfeed.py imports no third-party package", not found)
+    for rel in ("tbavid/hubcount.py", "tbavid/hubgui.py"):
+        top = ast.parse((root / rel).read_text()).body
+        check(f"{rel} imports cv2, numpy and tkinter only inside functions",
+              not any(isinstance(n, (ast.Import, ast.ImportFrom)) and
+                      ({a.name.split(".")[0] for a in n.names}
+                       & {"cv2", "numpy", "tkinter"}
+                       if isinstance(n, ast.Import) else
+                       (n.module or "").split(".")[0] in {"cv2", "numpy", "tkinter"})
+                      for n in top))
     top = ast.parse((root / "tbavid" / "hubcount.py").read_text()).body
     check("hubcount.py imports cv2 and numpy only inside functions",
           not any(isinstance(n, (ast.Import, ast.ImportFrom)) and
@@ -2584,7 +2677,8 @@ def main() -> int:
                test_robot_autolabel_rules,
                test_model_must_name_its_classes, test_hub_feed_protocol,
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
-               test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup):
+               test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
+               test_hub_calibration_and_gui_helpers):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

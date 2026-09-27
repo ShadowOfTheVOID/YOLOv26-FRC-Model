@@ -107,6 +107,62 @@ the balls on broadcast footage. The area counter needs no model and no GPU,
 counts on the frame a ball crosses the funnel-mouth outline, and spends a few
 ms per frame on a laptop CPU.
 
+## The easy way: the window
+
+```bash
+.venv/bin/python run.py hubgui --setup cams.json     # or double-click hubfeed.command on a Mac
+```
+
+One window does everything below. Work down the right-hand side:
+
+1. **Cameras.** *Find cameras* lists every camera that answers, with its
+   size; pick one. *Add recording…* adds a video file instead, to set up or
+   practise on (the picture is taken a third of the way in, past title cards,
+   or at the second you type). Camera numbers can change when cameras are
+   re-plugged, so always check the picture.
+2. **Hub outlines.** *Draw RED* / *Draw BLUE*, then click the corners of the
+   hub's opening on the picture; double-click, right-click or Enter to
+   finish, Esc to cancel. A camera can have several outlines; choose how each
+   hub combines them (sum / max / median, see below).
+3. **Measure ball** with a few balls sitting apart near the hub (5 s).
+4. **Calibrate (optional)**: pick a recording from this camera, type how
+   many balls you counted going into each hub, and it tries every blur
+   correction with and without ignoring still yellow, and offers the setting
+   nearest your count.
+5. **START.** The picture turns live, with each outline's count on it; the
+   big boxes are what bioarena is being sent; the line beside them says
+   whether bioarena is answering and each camera's frame rate, and turns red
+   with *NO PICTURE* if a camera stops. Tick *Practice: send to a test
+   receiver here* to try it all without bioarena.
+
+*Save* writes the same `cams.json` that `run.py hubfeed --setup` reads, so a
+setup made in the window also runs without it. Needs tkinter: included with
+the python.org installer; with Homebrew, `brew install python-tk`.
+
+## Blur correction and still-yellow removal (per camera)
+
+Two settings per camera, both off by default:
+
+- `"blur"` (0-1): how much of a fast ball's smear to discount. Tested on
+  three Einstein matches, the best value was different on each (0 on
+  Einstein 4, 0.2-0.3 on 5, 0.5-0.7 on 1), and a value chosen on two matches
+  did no better than 0 on the third. So it is not a fix, it is a
+  calibration: set it from a hand-counted recording made by that camera in
+  its real position, and check it on a second recording.
+- `"remove_static"`: ignore pixels that have been yellow for most of the
+  last ~3 s (resting balls, shirts). It moved the Einstein totals a few
+  percent.
+
+Calibrate in the window, or:
+
+```bash
+run.py hubfeed --setup cams.json --calibrate practice.mp4 --camera red-exit --count red=23
+```
+
+Neither setting can fix what the Einstein tests found the real error to be:
+from in front, a ball that clips the rim and drops behind the hub looks like
+one that went in. That needs the camera somewhere it can see the difference.
+
 ## What you need
 
 - A laptop wired into the field switch on the management VLAN, static

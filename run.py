@@ -757,6 +757,26 @@ def cmd_hubfeed(args, cfg):
         except ValueError as e:
             raise SystemExit(str(e))
 
+    if args.calibrate:
+        cams = [c for c in setup.cameras
+                if not args.camera or c.name == args.camera]
+        if len(cams) != 1:
+            raise SystemExit("--calibrate needs one camera: name it with "
+                             f"--camera ({', '.join(c.name for c in setup.cameras)})")
+        try:
+            hand = {k: int(v) for k, v in (kv.split("=") for kv in
+                                           args.count.split(","))}
+        except (ValueError, AttributeError):
+            raise SystemExit("--count wants the hand count per hub, e.g. "
+                             "--count red=23,blue=0")
+        r = hubcount.calibrate(cams[0], args.calibrate, hand)
+        if r:
+            b = r["best"]
+            print(f'set in {args.setup or "the setup file"}, camera '
+                  f'"{cams[0].name}": "blur": {b["blur"]}, "remove_static": '
+                  f'{str(b["remove_static"]).lower()}')
+        return 0
+
     if args.measure:
         # Every camera measured on its own: they sit at different distances,
         # so one ball is a different number of pixels on each.
@@ -792,6 +812,13 @@ def cmd_hubfeed(args, cfg):
     print(f"stopped: red {sender.counts['red']}, blue {sender.counts['blue']} "
           f"in session {sender.session}")
     return 0
+
+
+def cmd_hubgui(args, cfg):
+    """The hub counter in a window: cameras, outlines, calibration, the feed."""
+    from tbavid import hubgui
+
+    return hubgui.main(args.setup)
 
 
 def cmd_hubfeed_listen(args, cfg):
@@ -1179,8 +1206,21 @@ def main(argv=None):
                    help="several cameras: each with its own source, ball "
                         "area and outlines, and how each hub combines them "
                         "(sum / max / median). See deploy/HUB_FEED.md.")
+    p.add_argument("--calibrate", metavar="VIDEO",
+                   help="pick a camera's blur / remove_static from a recording "
+                        "counted by hand (with --setup, --camera, --count)")
+    p.add_argument("--camera", help="which camera --calibrate is for")
+    p.add_argument("--count", help="the hand count for --calibrate, e.g. "
+                                   "red=23,blue=0")
     p.add_argument("--log", help="append every count to this CSV")
     p.set_defaults(func=cmd_hubfeed)
+
+    p = sub.add_parser("hubgui",
+                       help="the hub counter in a window: pick cameras, click "
+                            "hub outlines, measure, calibrate, start the feed")
+    p.add_argument("--setup", metavar="CAMS.JSON",
+                   help="open this setup file (created on first save)")
+    p.set_defaults(func=cmd_hubgui)
 
     p = sub.add_parser("hubfeed-listen",
                        help="stand in for bioarena: receive the hub counter "

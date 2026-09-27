@@ -57,6 +57,25 @@ the build rather than publishing an empty release.
   cameras close to each hub. Checked end to end with two recordings as two
   cameras on one hub under `max`; not yet run on real multi-camera hardware.
 
+- **`run.py hubgui` — the hub counter in a window** (`tbavid/hubgui.py`;
+  `hubfeed.command` opens it from Finder). Find cameras or add a recording,
+  click each hub's outline on the picture, measure the ball, calibrate, and
+  start the feed; the live picture shows each outline's count, the score
+  sent to bioarena, the bioarena link and every camera's frame rate, and
+  says *NO PICTURE* when a camera stops. A practice switch runs a test
+  receiver inside the window. It edits the same `cams.json` that `hubfeed
+  --setup` runs headless. Tk only, frames shown as PNG, no Pillow. Driven
+  end to end on a virtual display with Einstein 4 as the camera; not yet
+  opened on a Mac.
+- **Per-camera `blur` and `remove_static`, and calibration** (`run.py
+  hubfeed --calibrate VIDEO --camera NAME --count red=N,blue=M`, or the
+  window). Both off by default. The best blur fraction was 0 / 0.2-0.3 /
+  0.5-0.7 on Einstein 4 / 5 / 1, and one picked on two matches did no better
+  than none on the third, so it is set per camera from a hand-counted
+  recording, not fixed. The live code reproduces the offline experiment on
+  Einstein 1: red identical at all 22 settings, blue within 2 (the offline
+  cache stored positions as float32).
+
 ### Fixed
 
 - **QUICKSTART's "see what the model sees" was killed part-way through a
