@@ -280,7 +280,9 @@ def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
         colours = {"red": (0, 0, 255), "blue": (255, 0, 0)}
         for hub, poly in polys.items():
             pts = np.array(poly, np.int32).reshape(-1, 1, 2)
-            cv2.polylines(still, [pts], True, colours.get(hub, (0, 255, 0)), 2)
+            colour = next((c for k, c in colours.items() if k in hub),
+                          (0, 255, 0))
+            cv2.polylines(still, [pts], True, colour, 2)
         cv2.imwrite(still_path, still)
         out(f"wrote {still_path}: draw each hub's funnel-mouth outline on it "
             f"(x,y pairs, bottom edge on the solid front rim)")
@@ -345,54 +347,261 @@ class Health:
 STALE_S = 0.5    # a camera silent this long is blind; stop the heartbeat
 
 
-def run(sender, hubs: Dict[str, Tuple[str, List[Point]]], ball_area: float,
-        fps: float = 0.0, size: str = "", realtime: bool = False,
+# -- the camera setup -----------------------------------------------------
+#
+# One camera watching both hubs from the side of the field is what the Einstein
+# broadcasts tested, and from in front a ball that clips the rim and drops
+# behind the hub looks exactly like one that goes in (net entries over the red
+# hood: 819 on Einstein 4, 832 on Einstein 1, against real totals of 804 and
+# 415). The fix is more cameras, closer, each seeing part of a hub well --
+# so a hub may be counted from any number of outlines on any number of
+# cameras, each camera with its own ball size, since a camera a metre from a
+# chute and one across the field see very different balls.
+
+COMBINE = ("sum", "max", "median")
+HUB_NAMES = ("red", "blue")
+
+
+class Zone:
+    """One outline on one camera, counting into one hub."""
+
+    def __init__(self, name: str, hub: str, outline: Sequence[Point],
+                 ball_area: float):
+        self.name = name
+        self.hub = hub
+        self.counter = CrossingCounter(outline, ball_area)
+
+
+class Camera:
+    def __init__(self, name: str, source: str, ball_area: float,
+                 zones: List[Zone], fps: float = 0.0, size: str = ""):
+        self.name = name
+        self.source = str(source)
+        self.ball_area = float(ball_area)
+        self.zones = zones
+        self.fps = fps
+        self.size = size
+
+
+class Setup:
+    """Every camera, and how each hub combines the zones that count it.
+
+    `sum`: the zones see different balls (one camera per exit chute, or per
+    side of a hub), so the hub's count is their total. `max`: they see the
+    same balls from different angles and the one that missed fewest is
+    taken. `median`: three or more see the same balls and the odd one out is
+    outvoted. Each zone's own count never goes down, and a sum, a max and an
+    order statistic of non-decreasing counts never go down either, so the
+    combined count keeps the feed's rule. An even number of zones under
+    `median` takes the lower middle one.
+    """
+
+    def __init__(self, cameras: List[Camera],
+                 combine: Optional[Dict[str, str]] = None,
+                 measuring: bool = False):
+        self.cameras = cameras
+        self.combine = {h: "sum" for h in HUB_NAMES}
+        self.combine.update(combine or {})
+        self.validate(measuring)
+
+    def zones(self, hub: str) -> List[Zone]:
+        return [z for c in self.cameras for z in c.zones if z.hub == hub]
+
+    def hubs(self) -> List[str]:
+        return [h for h in HUB_NAMES if self.zones(h)]
+
+    def validate(self, measuring: bool = False) -> None:
+        """`measuring`: the setup is being commissioned with --measure, which
+        is how a camera's ball area is found, so it may not have one yet."""
+        if not self.cameras:
+            raise ValueError("no cameras")
+        names, sources, zone_names = set(), set(), set()
+        for c in self.cameras:
+            if c.name in names:
+                raise ValueError(f"two cameras are named {c.name!r}")
+            names.add(c.name)
+            if c.source in sources:
+                # One device opened twice fails on most drivers, and when it
+                # does not, both loops count the same balls.
+                raise ValueError(f"source {c.source!r} is used by two cameras; "
+                                 f"give that camera several zones instead")
+            sources.add(c.source)
+            if c.ball_area <= 0 and not measuring:
+                raise ValueError(f"camera {c.name!r}: ball_area must be "
+                                 f"measured (run.py hubfeed --measure)")
+            if not c.zones:
+                raise ValueError(f"camera {c.name!r} has no zones")
+            for z in c.zones:
+                if z.hub not in HUB_NAMES:
+                    raise ValueError(f"zone {z.name!r}: hub must be red or "
+                                     f"blue, not {z.hub!r}")
+                if z.name in zone_names:
+                    raise ValueError(f"two zones are named {z.name!r}")
+                zone_names.add(z.name)
+        for hub, how in self.combine.items():
+            if hub not in HUB_NAMES or how not in COMBINE:
+                raise ValueError(f"combine: {hub!r}: {how!r} is not one of "
+                                 f"{', '.join(COMBINE)}")
+        if not self.hubs():
+            raise ValueError("no zone counts into either hub")
+
+
+def _outline(raw) -> List[Point]:
+    if isinstance(raw, str):
+        return parse_poly(raw)
+    pts = [(float(p[0]), float(p[1])) for p in raw]
+    if len(pts) < 3:
+        raise ValueError("an outline needs at least three points")
+    return pts
+
+
+def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
+    """The JSON setup file, parsed. Outlines are [[x, y], ...] or "x,y,...".
+
+        {"combine": {"red": "sum", "blue": "max"},
+         "cameras": [
+           {"name": "red-exit", "source": "0", "ball_area": 1800, "fps": 60,
+            "zones": [{"hub": "red", "outline": [[100,80],[520,80],[520,300]]}]},
+           {"name": "blue-high", "source": "1", "ball_area": 950,
+            "zones": [{"hub": "blue", "outline": "40,60,600,60,600,200"}]}]}
+    """
+    cams = []
+    for i, c in enumerate(cfg.get("cameras") or []):
+        name = str(c.get("name") or f"cam{i}")
+        if "source" not in c:
+            raise ValueError(f"camera {name!r} has no source")
+        area = float(c.get("ball_area") or 0)
+        zones = []
+        for j, z in enumerate(c.get("zones") or []):
+            zname = str(z.get("name") or f"{name}/{z.get('hub')}{j}")
+            try:
+                zones.append(Zone(zname, str(z.get("hub")),
+                                  _outline(z.get("outline") or []),
+                                  area if area > 0 else 1.0))
+            except ValueError as e:
+                raise ValueError(f"zone {zname!r}: {e}")
+        cams.append(Camera(name, c["source"], area, zones,
+                           float(c.get("fps") or 0), str(c.get("size") or "")))
+    return Setup(cams, cfg.get("combine"), measuring)
+
+
+def load_setup(path: str, measuring: bool = False) -> Setup:
+    """A setup file. A recording named by a relative path is found next to
+    the file, so a setup and its test videos can be moved together."""
+    import json
+    import os
+    with open(path) as fh:
+        cfg = json.load(fh)
+    base = os.path.dirname(os.path.abspath(path))
+    for c in cfg.get("cameras") or []:
+        src = str(c.get("source", ""))
+        if (src and not src.isdigit() and "://" not in src
+                and not os.path.isabs(src)
+                and os.path.exists(os.path.join(base, src))):
+            c["source"] = os.path.join(base, src)
+    return setup_from_dict(cfg, measuring)
+
+
+def setup_from_flags(source: str, outlines: Dict[str, Sequence[Point]],
+                     sources: Dict[str, Optional[str]], ball_area: float,
+                     fps: float = 0.0, size: str = "") -> Setup:
+    """The single-camera flags (--source --red --blue --red-source ...) as a
+    Setup: hubs sharing a source become one camera with two zones."""
+    by_source: Dict[str, List[Tuple[str, Sequence[Point]]]] = {}
+    for hub, poly in outlines.items():
+        by_source.setdefault(str(sources.get(hub) or source), []).append(
+            (hub, poly))
+    cams = []
+    for src, hubs in by_source.items():
+        name = "cam" if len(by_source) == 1 else f"cam-{'-'.join(h for h, _ in hubs)}"
+        cams.append(Camera(name, src, ball_area,
+                           [Zone(hub if len(by_source) == 1 else f"{name}/{hub}",
+                                 hub, poly, ball_area if ball_area > 0 else 1.0)
+                            for hub, poly in hubs], fps, size))
+    return Setup(cams)
+
+
+class HubTally:
+    """Each hub's combined count, and how much of it bioarena has not heard.
+
+    Camera threads call `rise` after updating their zones; it is locked so two
+    cameras on one hub cannot both report the same increase.
+    """
+
+    def __init__(self, setup: Setup):
+        self.setup = setup
+        self.zones = {h: setup.zones(h) for h in HUB_NAMES}
+        self.sent = {h: 0 for h in HUB_NAMES}
+        self._lock = threading.Lock()
+
+    def value(self, hub: str) -> int:
+        counts = sorted(z.counter.reported for z in self.zones[hub])
+        if not counts:
+            return 0
+        how = self.setup.combine[hub]
+        if how == "max":
+            return counts[-1]
+        if how == "median":
+            return counts[(len(counts) - 1) // 2]
+        return sum(counts)
+
+    def rise(self, hub: str) -> int:
+        with self._lock:
+            v = self.value(hub)
+            r = v - self.sent[hub]
+            if r > 0:
+                self.sent[hub] = v
+                return r
+            return 0
+
+
+def run(sender, setup: Setup, realtime: bool = False,
         log_path: Optional[str] = None, out=print,
-        stop: Optional[threading.Event] = None) -> Dict[str, CrossingCounter]:
-    """Count from the camera(s) into `sender` until stopped.
+        stop: Optional[threading.Event] = None) -> HubTally:
+    """Count from every camera into `sender` until stopped.
 
-    `hubs` maps 'red'/'blue' to (source, outline). Two hubs on one source are
-    one capture loop and one decode per frame; a hub with its own camera gets
-    its own loop. A hub not given is never counted and reads 0, which is
-    what the spec asks of a half field.
+    One capture thread per camera; a camera with several zones decodes each
+    frame once. A hub no zone counts reads 0, which is what the spec asks of
+    a half field.
 
-    The heartbeat runs on its own thread and only while every camera is
-    delivering frames. A counter whose camera has died must not tell bioarena
-    it is alive: frozen counts behind an ONLINE badge would let a match start
-    in Counted mode with nobody watching the hubs.
+    The heartbeat runs on its own thread and only while EVERY camera is
+    delivering frames -- including a redundant one under `max` or `median`.
+    A counter with a dead camera must not tell bioarena it is alive: frozen
+    or quietly degraded counts behind an ONLINE badge would let a match
+    start in Counted mode with a hub half-watched. Fail closed; restart
+    without that camera if the match must go on.
     """
     stop = stop or threading.Event()
-    counters = {h: CrossingCounter(p, ball_area) for h, (_, p) in hubs.items()}
-    by_source: Dict[str, List[str]] = {}
-    for hub, (src, _) in hubs.items():
-        by_source.setdefault(src, []).append(hub)
-    health = {src: Health() for src in by_source}
+    tally = HubTally(setup)
+    health = {c.name: Health() for c in setup.cameras}
     log_lock = threading.Lock()
     log_file = open(log_path, "a", newline="") if log_path else None
     log = csv.writer(log_file) if log_file else None
     if log and log_file.tell() == 0:
-        log.writerow(["wall", "session", "hub", "reported", "net", "balls",
+        log.writerow(["wall", "session", "camera", "zone", "hub",
+                      "zone_reported", "zone_net", "hub_count", "balls_sent",
                       "capture_lag_ms"])
     errors: List[str] = []
 
-    def loop(src: str, names: List[str]) -> None:
+    def loop(cam: Camera) -> None:
         import cv2
         try:
-            cap = open_source(src, fps, size)
+            cap = open_source(cam.source, cam.fps, cam.size)
         except SystemExit as e:
-            errors.append(str(e))
+            errors.append(f"{cam.name}: {e}")
             stop.set()
             return
         file_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         boxes: Dict[str, Tuple[int, int, int, int]] = {}
         started = time.monotonic()
         n = 0
-        hl = health[src]
+        hl = health[cam.name]
         while not stop.is_set():
             ok, frame = cap.read()
             now = time.monotonic()
             if not ok:
-                errors.append(f"{src}: the source stopped giving frames")
+                errors.append(f"{cam.name} ({cam.source}): the source "
+                              f"stopped giving frames")
                 stop.set()
                 break
             captured = frame_time(cap.get(cv2.CAP_PROP_POS_MSEC), now)
@@ -406,26 +615,29 @@ def run(sender, hubs: Dict[str, Tuple[str, List[Point]]], ball_area: float,
             n += 1
             if not boxes:
                 h, w = frame.shape[:2]
-                boxes = {hub: region_of(counters[hub].poly, ball_area, w, h)
-                         for hub in names}
-            for hub in names:
-                rise = counters[hub].update(yellow_blobs(frame, boxes[hub]))
-                if rise:
-                    sender.score(hub, rise, captured)
-                    if log:
-                        with log_lock:
-                            log.writerow([
-                                time.strftime("%Y-%m-%dT%H:%M:%S"),
-                                sender.session, hub, counters[hub].reported,
-                                counters[hub].net, rise,
-                                round((time.monotonic() - captured) * 1000)])
-                            log_file.flush()
+                boxes = {z.name: region_of(z.counter.poly, cam.ball_area, w, h)
+                         for z in cam.zones}
+            touched = []
+            for z in cam.zones:
+                if z.counter.update(yellow_blobs(frame, boxes[z.name])):
+                    touched.append(z)
+            for z in touched:
+                sent = tally.rise(z.hub)
+                if sent:
+                    sender.score(z.hub, sent, captured)
+                if log:
+                    with log_lock:
+                        log.writerow([
+                            time.strftime("%Y-%m-%dT%H:%M:%S"), sender.session,
+                            cam.name, z.name, z.hub, z.counter.reported,
+                            z.counter.net, tally.value(z.hub), sent,
+                            round((time.monotonic() - captured) * 1000)])
+                        log_file.flush()
             hl.frame(captured, time.monotonic())
         cap.release()
 
-    threads = [threading.Thread(target=loop, args=(src, names), daemon=True,
-                                name=f"cam {src}")
-               for src, names in by_source.items()]
+    threads = [threading.Thread(target=loop, args=(c,), daemon=True,
+                                name=f"cam {c.name}") for c in setup.cameras]
     for t in threads:
         t.start()
 
@@ -436,7 +648,7 @@ def run(sender, hubs: Dict[str, Tuple[str, List[Point]]], ball_area: float,
             now = time.monotonic()
             stale = [s for s, hl in health.items()
                      if now - hl.last_frame > STALE_S]
-            sender.info = info_line(health, counters)
+            sender.info = info_line(health, tally)
             if stale:
                 # A camera takes a second or two to open; only say so after.
                 if not blind_said and now - began > 3.0:
@@ -449,7 +661,7 @@ def run(sender, hubs: Dict[str, Tuple[str, List[Point]]], ball_area: float,
             sender.poll_replies()
             if now - last_status >= 5.0:
                 last_status = now
-                out(status_line(sender, health, counters))
+                out(status_line(sender, health, tally))
             time.sleep(0.01)
     except KeyboardInterrupt:
         pass
@@ -461,27 +673,34 @@ def run(sender, hubs: Dict[str, Tuple[str, List[Point]]], ball_area: float,
             log_file.close()
     for e in errors:
         out(e)
-    return counters
+    return tally
 
 
-def info_line(health: Dict[str, Health],
-              counters: Dict[str, CrossingCounter]) -> str:
-    """<= 64 chars for bioarena's tooltip (spec 4.2)."""
-    cams = " ".join(f"{hl.fps():.0f}fps/{hl.lag_ms():.0f}ms"
-                    for hl in health.values())
-    owed = sum(c.owed for c in counters.values())
-    return f"cam {cams} owed {owed}"[:64]
+def info_line(health: Dict[str, Health], tally: HubTally) -> str:
+    """<= 64 chars for bioarena's tooltip (spec 4.2): the slowest camera and
+    the worst lag, since with several cameras the weakest one is the news."""
+    fps = [hl.fps() for hl in health.values()]
+    lag = [hl.lag_ms() for hl in health.values()]
+    owed = sum(z.counter.owed for zs in tally.zones.values() for z in zs)
+    cams = f"{len(fps)} cams min " if len(fps) > 1 else "cam "
+    return (f"{cams}{min(fps):.0f}fps lag {max(lag):.0f}ms "
+            f"owed {owed}")[:64]
 
 
-def status_line(sender, health: Dict[str, Health],
-                counters: Dict[str, CrossingCounter]) -> str:
+def status_line(sender, health: Dict[str, Health], tally: HubTally) -> str:
     link = "no reply from bioarena"
     if sender.linked():
         r = sender.last_reply or {}
         link = (f"bioarena {r.get('match_state', '?')} {r.get('shift', '')} "
                 f"rtt {sender.rtt_ms} ms")
-    hubs = "  ".join(f"{h} {c.reported} (in {c.entries} out {c.exits})"
-                     for h, c in sorted(counters.items()))
+    parts = []
+    for hub in HUB_NAMES:
+        zs = tally.zones[hub]
+        if not zs:
+            continue
+        detail = ", ".join(f"{z.name} {z.counter.reported}" for z in zs)
+        how = f" {tally.setup.combine[hub]}" if len(zs) > 1 else ""
+        parts.append(f"{hub} {tally.value(hub)}{how} [{detail}]")
     errs = f"  send errors {sender.send_errors}: {sender.last_error}" \
         if sender.send_errors else ""
-    return f"{hubs}  |  {info_line(health, counters)}  |  {link}{errs}"
+    return f"{'  '.join(parts)}  |  {info_line(health, tally)}  |  {link}{errs}"

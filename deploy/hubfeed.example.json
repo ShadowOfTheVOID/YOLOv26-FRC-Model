@@ -1,0 +1,19 @@
+{
+  "combine": {"red": "sum", "blue": "median"},
+  "cameras": [
+    {"name": "red-exit-left", "source": "0", "fps": 60, "size": "1280x720",
+     "ball_area": 1800,
+     "zones": [{"hub": "red", "name": "red-left",
+                "outline": [[210, 140], [640, 140], [660, 420], [190, 420]]}]},
+    {"name": "red-exit-right", "source": "1", "fps": 60, "size": "1280x720",
+     "ball_area": 1750,
+     "zones": [{"hub": "red", "name": "red-right",
+                "outline": [[600, 150], [1050, 150], [1080, 430], [580, 430]]}]},
+    {"name": "blue-a", "source": "2", "ball_area": 900,
+     "zones": [{"hub": "blue", "outline": "300,120,700,120,720,360,280,360"}]},
+    {"name": "blue-b", "source": "3", "ball_area": 850,
+     "zones": [{"hub": "blue", "outline": "320,140,690,140,700,370,300,370"}]},
+    {"name": "blue-c", "source": "4", "ball_area": 1100,
+     "zones": [{"hub": "blue", "outline": "280,100,740,100,760,380,260,380"}]}
+  ]
+}

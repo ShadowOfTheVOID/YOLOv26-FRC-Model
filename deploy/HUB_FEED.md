@@ -181,6 +181,55 @@ bioarena keeps the match's score and loses only the balls scored while it was
 down. If the camera stops delivering frames it stops the heartbeat, so
 bioarena shows OFFLINE instead of frozen counts behind an ONLINE badge.
 
+## Several cameras (`--setup`)
+
+The Einstein tests say one camera in front of a hub cannot tell a ball that
+clips the rim and drops behind it from one that goes in. More cameras,
+closer, is the way to accuracy, so `--setup cams.json` takes any number of
+cameras, each with its own source, frame rate, size and **ball area** (a
+camera a metre from a chute and one across the field see very different
+balls), and each with one or more outlines ("zones") counting into a hub.
+`deploy/hubfeed.example.json` is a complete example; a relative video path
+is found next to the setup file.
+
+How a hub combines its zones is chosen per hub under `"combine"`:
+
+| rule | when | example |
+| --- | --- | --- |
+| `sum` (default) | zones see **different** balls | one camera per exit chute, or per side of the hub |
+| `max` | zones see the **same** balls; the one that missed fewest wins | two angles on one mouth |
+| `median` | three or more see the same balls; the odd one out is outvoted | three angles, one of which glare fools |
+
+`max` assumes cameras miss balls rather than invent them; if one over-counts
+(the Einstein failure), `max` follows it and `median` does not. Every rule
+keeps the count from ever going down, which the feed requires.
+
+Commissioning is per camera:
+
+```bash
+run.py hubfeed --setup cams.json --measure 5 --still still.png
+```
+
+writes `still_<camera>.png` for each camera and prints each camera's
+`"ball_area"` to paste into the file. Then run it with `--setup cams.json`
+and the usual `--target` / `--log`. The status line shows each hub's
+combined count and every zone's own count; the CSV log has one row per zone
+change with the camera, zone, zone count and hub count, which is what to
+read when two cameras disagree.
+
+If **any** camera stops delivering frames the heartbeat stops and bioarena
+shows OFFLINE, even under `max`/`median` where the others could carry on: a
+half-watched hub must not look fully watched. Remove that camera from the
+file and restart if the match has to go on. Each camera is its own thread
+decoding its own frames, so check the frame rate in the status line with
+every camera running -- a laptop that keeps up with one 60 fps camera may
+not keep up with four. USB cameras on one hub or port can also run out of
+bandwidth; lower `size` or `fps` if a camera's rate drops.
+
+The single-camera flags (`--source --red --blue --red-source
+--blue-source`) still work and are the same as a setup file with one or two
+cameras.
+
 ## 5. Validate before trusting it
 
 In this order, and write the numbers down:

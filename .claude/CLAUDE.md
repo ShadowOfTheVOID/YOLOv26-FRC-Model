@@ -183,7 +183,9 @@ decided at T+23.000 s so camera-to-count must stay under ~200 ms p99.
 `run.py hubfeed` (`tbavid/hubfeed.py` stdlib sender + `Receiver` stand-in,
 `tbavid/hubcount.py` the area-crossing counter from
 `experiments/area_hub_count.py`) implements it; `deploy/HUB_FEED.md` is the
-runbook. Plumbing is tested; counting is unvalidated on a practice-field
+runbook. Several cameras: `--setup cams.json`
+(`Setup`/`HubTally` in hubcount.py; zones per hub combined by sum/max/median,
+any camera stale holds the heartbeat). Plumbing is tested; counting is unvalidated on a practice-field
 camera -- the spec's 20-ball acceptance test comes before bioarena's
 `counted` mode. Do not swap in `BallCounter`: its 400 ms hold breaks the
 budget.

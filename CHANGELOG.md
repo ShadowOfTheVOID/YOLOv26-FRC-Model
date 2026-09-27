@@ -44,6 +44,19 @@ the build rather than publishing an empty release.
   behind the hub, which look like scores from in front -- a camera-angle
   limit (`deploy/HUB_FEED.md`).
 
+- **`run.py hubfeed --setup cams.json` — several cameras.** Any number of
+  cameras, each with its own source, frame rate, size and one-ball area, each
+  with outlines counting into a hub; per hub the zones are combined by `sum`
+  (different balls, e.g. one camera per exit chute), `max` (same balls, take
+  the one that missed fewest) or `median` (three or more, outvote the odd
+  one). All three keep the feed's never-decreasing rule. Any camera going
+  quiet stops the heartbeat. `--measure` works per camera and prints each
+  camera's ball area for the file; `deploy/hubfeed.example.json` is a
+  template. Motivated by the Einstein tests: from in front, a ball that clips
+  the rim and drops behind the hub looks like a score, so accuracy needs
+  cameras close to each hub. Checked end to end with two recordings as two
+  cameras on one hub under `max`; not yet run on real multi-camera hardware.
+
 ### Experimental
 
 - `experiments/area_hub_count.py`: counts fuel into each hub from the yellow

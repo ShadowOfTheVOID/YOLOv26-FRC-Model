@@ -2432,9 +2432,117 @@ def test_hub_crossing_counter():
         h.frame(10.0 + i / 30.0, 10.0 + i / 30.0 + 0.012)
     check("health measures the camera's rate and the lag",
           round(h.fps()) == 30 and round(h.lag_ms()) == 12)
+    tally = HC.HubTally(HC.setup_from_flags(
+        "0", {"red": square, "blue": square}, {}, 280.0))
     check("the info line fits bioarena's 64 characters",
-          len(HC.info_line({"0": h, "1": h, "2": h},
-                           {"red": c, "blue": c})) <= 64)
+          len(HC.info_line({str(i): h for i, _ in enumerate(range(9))},
+                           tally)) <= 64)
+
+
+def test_hub_multi_camera_setup():
+    """Several cameras, several outlines per hub, combined into one count.
+
+    From in front a ball that clips the rim and drops behind the hub looks
+    like a score (Einstein 1: 832 net entries over the red hood, 415 real),
+    so the way to accuracy is cameras close to each hub -- more than one per
+    hub, at different distances. The feed still carries one number per hub
+    that must never go down.
+    """
+    from tbavid import hubcount as HC
+
+    sq = [[100, 100], [200, 100], [200, 200], [100, 200]]
+    cfg = {"combine": {"red": "sum", "blue": "median"},
+           "cameras": [
+               {"name": "red-left", "source": "0", "ball_area": 1800,
+                "zones": [{"hub": "red", "outline": sq}]},
+               {"name": "red-right", "source": "1", "ball_area": 900,
+                "zones": [{"hub": "red", "outline": "100,100,200,100,200,200"}]},
+               {"name": "blue-a", "source": "2", "ball_area": 300,
+                "zones": [{"hub": "blue", "outline": sq, "name": "ba"}]},
+               {"name": "blue-b", "source": "3", "ball_area": 300,
+                "zones": [{"hub": "blue", "outline": sq, "name": "bb"}]},
+               {"name": "blue-c", "source": "4", "ball_area": 300,
+                "zones": [{"hub": "blue", "outline": sq, "name": "bc"}]}]}
+    setup = HC.setup_from_dict(cfg)
+    check("a setup file parses: five cameras, both hubs",
+          len(setup.cameras) == 5 and setup.hubs() == ["red", "blue"])
+    check("each camera keeps its own ball size",
+          [z.counter.ball_area for z in setup.zones("red")] == [1800.0, 900.0])
+
+    t = HC.HubTally(setup)
+    zr = setup.zones("red")
+    zb = {z.name: z for z in setup.zones("blue")}
+    zr[0].counter.reported, zr[1].counter.reported = 3, 2
+    check("sum: two cameras on different chutes add up", t.value("red") == 5)
+    check("and the whole rise is reported once", t.rise("red") == 5
+          and t.rise("red") == 0)
+    zr[1].counter.reported = 4
+    check("a later rise on one camera reports only the new balls",
+          t.rise("red") == 2 and t.sent["red"] == 7)
+
+    # Three cameras on the same balls: one misses, one double-counts.
+    zb["ba"].counter.reported, zb["bb"].counter.reported = 10, 12
+    zb["bc"].counter.reported = 30
+    check("median: the odd camera out is outvoted", t.value("blue") == 12)
+    t.rise("blue")
+    zb["bc"].counter.reported = 60
+    check("and its runaway count does not move the hub", t.rise("blue") == 0)
+    setup.combine["blue"] = "max"
+    check("max takes the camera that missed fewest", t.value("blue") == 60)
+    setup.combine["blue"] = "median"
+
+    # Never-decreasing in, never-decreasing out, under every rule.
+    import random as _r
+    rng = _r.Random(7)
+    ok = True
+    for how in HC.COMBINE:
+        setup.combine["blue"] = how
+        for z in zb.values():
+            z.counter.reported = 0
+        tt = HC.HubTally(setup)
+        last = 0
+        for _ in range(300):
+            rng.choice(list(zb.values())).counter.reported += rng.randint(0, 3)
+            v = tt.value("blue")
+            ok &= v >= last
+            last = v
+    check("sum, max and median of rising counts never fall", ok)
+
+    def refused(c, why):
+        try:
+            HC.setup_from_dict(c)
+            check(why, False)
+        except ValueError:
+            check(why, True)
+
+    one = lambda **kw: {"cameras": [dict({"name": "a", "source": "0",
+                                          "ball_area": 300, "zones": [
+                                              {"hub": "red", "outline": sq}]},
+                                         **kw)]}
+    refused({"cameras": []}, "a setup with no cameras is refused")
+    refused(one(ball_area=0), "a camera without a measured ball is refused")
+    check("but accepted while measuring it, which is how it gets one",
+          HC.setup_from_dict(one(ball_area=0), measuring=True).cameras[0]
+          .ball_area == 0)
+    refused(one(zones=[{"hub": "green", "outline": sq}]),
+            "a zone for a hub that is not red or blue is refused")
+    refused(one(zones=[{"hub": "red", "outline": [[1, 2], [3, 4]]}]),
+            "an outline of two points is refused")
+    refused(one(zones=[]), "a camera with no zones is refused")
+    two = one()
+    two["cameras"].append(dict(two["cameras"][0], name="b"))
+    refused(two, "one device used by two cameras is refused")
+    refused(dict(one(), combine={"red": "average"}),
+            "an unknown combine rule is refused")
+
+    # The single-camera flags still mean what they did.
+    flags = HC.setup_from_flags("0", {"red": sq, "blue": sq}, {}, 280.0)
+    check("--red/--blue on one --source are one camera, two zones",
+          len(flags.cameras) == 1 and len(flags.cameras[0].zones) == 2)
+    split = HC.setup_from_flags("0", {"red": sq, "blue": sq},
+                                {"blue": "1"}, 280.0)
+    check("--blue-source gives blue its own camera",
+          sorted(c.source for c in split.cameras) == ["0", "1"])
 
 
 def test_hub_feed_needs_no_opencv_to_load():
@@ -2476,7 +2584,7 @@ def main() -> int:
                test_robot_autolabel_rules,
                test_model_must_name_its_classes, test_hub_feed_protocol,
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
-               test_hub_feed_needs_no_opencv_to_load):
+               test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

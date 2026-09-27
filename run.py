@@ -716,40 +716,79 @@ def cmd_live(args, cfg):
 
 
 def cmd_hubfeed(args, cfg):
-    """Count fuel into each hub from a camera and feed bioarena over UDP."""
+    """Count fuel into each hub from one or more cameras; feed bioarena over UDP."""
     from tbavid import hubcount, hubfeed
 
-    polys, hubs = {}, {}
-    for hub in ("red", "blue"):
-        text = getattr(args, hub)
-        if not text:
-            continue
+    if args.setup:
+        if args.red or args.blue:
+            raise SystemExit("--setup describes every camera and outline; drop "
+                             "--red/--blue, or drop --setup")
         try:
-            polys[hub] = hubcount.parse_poly(text)
+            setup = hubcount.load_setup(args.setup, measuring=bool(args.measure))
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"--setup {args.setup}: {e}")
+    else:
+        polys = {}
+        for hub in ("red", "blue"):
+            text = getattr(args, hub)
+            if not text:
+                continue
+            try:
+                polys[hub] = hubcount.parse_poly(text)
+            except ValueError as e:
+                raise SystemExit(f"--{hub}: {e}")
+        if args.measure:
+            hubcount.measure(args.source, polys, args.measure, args.still,
+                             args.cam_fps, args.cam_size)
+            return 0
+        if not polys:
+            raise SystemExit("give at least one hub outline: --red X,Y,... and/or "
+                             "--blue X,Y,... (a half field has one hub), or "
+                             "--setup cams.json for several cameras. Find "
+                             "outlines with --measure 5 --still still.png")
+        if args.ball_area <= 0:
+            raise SystemExit("--ball-area is required: every crossing is divided "
+                             "by it. Measure it on this camera with --measure 5.")
+        try:
+            setup = hubcount.setup_from_flags(
+                args.source, polys,
+                {"red": args.red_source, "blue": args.blue_source},
+                args.ball_area, args.cam_fps, args.cam_size)
         except ValueError as e:
-            raise SystemExit(f"--{hub}: {e}")
-        hubs[hub] = (getattr(args, f"{hub}_source") or args.source, polys[hub])
+            raise SystemExit(str(e))
+
     if args.measure:
-        hubcount.measure(args.source, polys, args.measure, args.still,
-                         args.cam_fps, args.cam_size)
+        # Every camera measured on its own: they sit at different distances,
+        # so one ball is a different number of pixels on each.
+        for cam in setup.cameras:
+            print(f"\n== {cam.name} ({cam.source})")
+            still = ""
+            if args.still:
+                stem, dot, ext = args.still.rpartition(".")
+                still = f"{stem}_{cam.name}.{ext}" if dot else f"{args.still}_{cam.name}"
+            area = hubcount.measure(cam.source,
+                                    {z.name: z.counter.poly for z in cam.zones},
+                                    args.measure, still, cam.fps, cam.size)
+            if area:
+                print(f'   -> in {args.setup}, camera "{cam.name}": '
+                      f'"ball_area": {area:.0f}')
         return 0
-    if not hubs:
-        raise SystemExit("give at least one hub outline: --red X,Y,... and/or "
-                         "--blue X,Y,... (a half field has one hub). Find them "
-                         "with --measure 5 --still still.png")
-    if args.ball_area <= 0:
-        raise SystemExit("--ball-area is required: every crossing is divided "
-                         "by it. Measure it on this camera with --measure 5.")
+
     try:
         target = hubfeed.parse_target(args.target)
     except ValueError:
         raise SystemExit(f"--target wants HOST or HOST:PORT (got {args.target!r})")
     sender = hubfeed.FeedSender(target)
-    print(f"session {sender.session}: sending to udp {target[0]}:{target[1]}, "
-          f"counting {', '.join(f'{h} from {s}' for h, (s, _) in hubs.items())}"
-          f"; ball = {args.ball_area:.0f} px. Ctrl-C to stop.")
-    hubcount.run(sender, hubs, args.ball_area, fps=args.cam_fps,
-                 size=args.cam_size, realtime=args.realtime, log_path=args.log)
+    print(f"session {sender.session}: sending to udp {target[0]}:{target[1]}. "
+          f"Ctrl-C to stop.")
+    for cam in setup.cameras:
+        print(f"  {cam.name}: {cam.source}, ball {cam.ball_area:.0f} px, "
+              f"zones {', '.join(f'{z.name}->{z.hub}' for z in cam.zones)}")
+    for hub in setup.hubs():
+        n = len(setup.zones(hub))
+        if n > 1:
+            print(f"  {hub}: {n} zones combined by {setup.combine[hub]}")
+    hubcount.run(sender, setup, realtime=args.realtime, log_path=args.log)
     print(f"stopped: red {sender.counts['red']}, blue {sender.counts['blue']} "
           f"in session {sender.session}")
     return 0
@@ -1136,6 +1175,10 @@ def main(argv=None):
     p.add_argument("--realtime", action="store_true",
                    help="play a video file at its own frame rate, as a "
                         "camera would deliver it")
+    p.add_argument("--setup", metavar="CAMS.JSON",
+                   help="several cameras: each with its own source, ball "
+                        "area and outlines, and how each hub combines them "
+                        "(sum / max / median). See deploy/HUB_FEED.md.")
     p.add_argument("--log", help="append every count to this CSV")
     p.set_defaults(func=cmd_hubfeed)
 
