@@ -41,8 +41,15 @@ M=models/fuel_withBotbest.pt
 ## 3. See what the model sees
 
 ```bash
-$PY -c "from ultralytics import YOLO; YOLO('$M').predict('match.mp4', imgsz=960, conf=0.25, save=True)"
+$PY -c "import collections; from ultralytics import YOLO; collections.deque(YOLO('$M').predict('match.mp4', imgsz=960, conf=0.25, save=True, stream=True, max_det=1000, verbose=False), maxlen=0)"
 ```
+
+`stream=True` is not optional on a video. Without it Ultralytics keeps every
+frame's result -- the decoded frame included, ~6 MB at 1080p -- until the
+video ends: a 3.5-minute match at 60 fps is ~12,900 frames, ~75 GB, and macOS
+kills Python part-way (`zsh: killed`, at frame ~8,000 and ~10,000 on a 36 GB
+M4 Max). `max_det=1000` because the default caps every frame at 300 boxes,
+which a field with its central pile of fuel reaches on every frame.
 
 The annotated copy lands under `runs/detect/` (the path is printed). Swap
 `match.mp4` for a folder of `.jpg` frames or a single image.

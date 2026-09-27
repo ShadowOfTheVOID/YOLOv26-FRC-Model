@@ -57,6 +57,16 @@ the build rather than publishing an empty release.
   cameras close to each hub. Checked end to end with two recordings as two
   cameras on one hub under `max`; not yet run on real multi-camera hardware.
 
+### Fixed
+
+- **QUICKSTART's "see what the model sees" was killed part-way through a
+  match video.** It called `predict(..., save=True)` without `stream=True`,
+  so Ultralytics held every frame's result, decoded image included, until
+  the end: ~6 MB a frame at 1080p against ~12,900 frames. On a 36 GB M4 Max
+  macOS killed it at frame ~8,000 on one run and 10,008 on another. It now
+  streams, and passes `max_det=1000`, since the default 300-box cap was
+  reached on every frame of an Einstein video.
+
 ### Experimental
 
 - `experiments/area_hub_count.py`: counts fuel into each hub from the yellow
