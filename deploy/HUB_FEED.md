@@ -64,6 +64,39 @@ was changed. What that points at for the scrimmage is camera placement: an
 outline whose search region sees no crowd, no yellow shirts, and no bumper.
 Processing cost was 2.2 ms per 1080p frame on this VM's CPU.
 
+### Two fixes tried on all three, and why neither helped (2026-09-27)
+
+Both were chosen from a diagnosis before looking at the scores, with their
+settings fixed in advance, and replayed over cached blobs from all three
+matches (the replay reproduces the counts above exactly).
+
+| variant | Einstein 4 buzzer | Einstein 5 | Einstein 1 | E1 decision (real 95 - 96) |
+| --- | --- | --- | --- | --- |
+| as shipped | 93% / 93% | 123% / 137% | 121% / 185% | 155 - 179 |
+| blur-aware ball count | 56% / 47% | 62% / 55% | 39% / 65% | 69 - 79 |
+| static yellow removed | 94% / 94% | 129% / 140% | 110% / 188% | 155 - 178 |
+| both | 58% / 47% | 68% / 57% | 38% / 65% | 69 - 79 |
+
+- **Blur.** A crossing blob's area grows with its speed (1.2x a resting ball
+  when slow, 2x at 1.5 ball-widths per frame) while its width barely does,
+  which looked like one ball smeared into a streak and counted as two.
+  Dividing each blob by the area one ball smears to at its measured length
+  along the motion halved every count, the well-counted Einstein 4
+  included: the long blobs are mostly real trains of balls from drum
+  shooters, not smears.
+- **Static yellow** (pixels yellow more than half of a ~3 s average,
+  removed before finding blobs). Crossings touching such pixels were 1% on
+  Einstein 4 and 11-12% on 5 and 1, netting +224 and +467 -- but removing
+  those pixels changed the totals by a few percent. They are mostly balls
+  passing in front of balls resting on the hood, not shirts.
+- **What the error actually is.** Net entries through the top of the red
+  outline were 819 on Einstein 4 and 832 on Einstein 1, whose real red
+  totals were 804 and 415. The same flow of balls down over the hood
+  scored twice as often in one match as the other: from in front, a ball
+  that clips the rim and drops behind the hub is indistinguishable from
+  one that goes in. That is a camera-angle limit, and no change to the
+  blob logic reaches it. The counter was left as shipped.
+
 ## Why this counter and not `run.py count`
 
 The spec's budget is camera-to-count <= 80 ms typical, 200 ms p99, because

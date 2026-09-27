@@ -38,6 +38,11 @@ the build rather than publishing an empty release.
   On Einstein 1, a one-ball AUTO (95 - 96 at the decision), it counted
   155 - 179: the right winner by coincidence, red ahead while blue led at
   AUTO's end, and red ahead at the buzzer of a match blue won 621 - 415.
+  Two fixes were tried on all three and not kept: a blur-aware ball count
+  (halved every total, Einstein 4 to 47-58%) and removing static yellow
+  (a few percent either way). The error is balls that clip the rim and drop
+  behind the hub, which look like scores from in front -- a camera-angle
+  limit (`deploy/HUB_FEED.md`).
 
 ### Experimental
 
