@@ -31,7 +31,10 @@ the build rather than publishing an empty release.
   93-95% on the match it was fitted to and 120-137% blind. Only a synthetic
   video has been run end to end. The spec's 20-ball field acceptance test is
   the first real measurement; leave bioarena's AUTO winner off `counted`
-  until it passes.
+  until it passes. Checked against the Einstein 4 and 5 broadcasts: the
+  port's counts equal the experiment's on Einstein 4 and are within 1% on
+  Einstein 5, both AUTO winners come out right, and the totals are 93% / 93%
+  and 123% / 137% of the broadcast fuel counters (`deploy/HUB_FEED.md`).
 
 ### Experimental
 

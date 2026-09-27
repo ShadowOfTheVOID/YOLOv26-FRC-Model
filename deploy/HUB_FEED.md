@@ -15,6 +15,37 @@ a synthetic video has been run end to end over loopback. The counting method
 Until the 20-ball acceptance test below passes, leave bioarena's AUTO winner
 mode on `random`/`red`/`blue`, not `counted`, and keep a human scorekeeper.
 
+## Measured on the Einstein broadcasts (2026-09-27)
+
+`tbavid/hubcount.py` was run over the same Einstein 4 and 5 broadcasts as the
+experiment (6-182 s, the experiment's outlines, one-ball area 272 / 300 px)
+and compared against the broadcast's fuel counters in the corner boxes.
+Those are fuel; the centre numbers are points and differ on Einstein 5.
+
+The port is the experiment: on Einstein 4 its signed totals are identical
+(blue 444, red 769). On Einstein 5 they are 721 / 937 against 712 / 932,
+because the size floor, search margin and match reach scale with the 300 px
+ball instead of staying at the 272 px values. The high-water mark the feed
+reports was never more than 25 above the signed count.
+
+| | AUTO decision (t=29): truth | counted | buzzer (t=172): truth | counted |
+| --- | --- | --- | --- | --- |
+| Einstein 4 blue | 91 | 81 | 479 | 445 (93%) |
+| Einstein 4 red | 193 | 135 | 804 | 750 (93%) |
+| Einstein 5 blue | 90 | 94 | 585 | 717 (123%) |
+| Einstein 5 red | 161 | 228 | 669 | 918 (137%) |
+
+Both AUTO winners came out right, by margins far wider than the error; a
+close AUTO would not. The Einstein 5 excess is mostly in crossings of four or
+more ball-areas, which net +402 red and +254 blue there against +114 and +54
+on Einstein 4, and include single blobs of 20-28 balls; the crowd behind
+Einstein 5's hoods has yellow and khaki shirts that Einstein 4's does not.
+Capping the balls per crossing was tried and does not fix it: a cap of 3
+brings Einstein 5 to 102% / 109% and drops Einstein 4 to 88% / 88%. Nothing
+was changed. What that points at for the scrimmage is camera placement: an
+outline whose search region sees no crowd, no yellow shirts, and no bumper.
+Processing cost was 2.2 ms per 1080p frame on this VM's CPU.
+
 ## Why this counter and not `run.py count`
 
 The spec's budget is camera-to-count <= 80 ms typical, 200 ms p99, because
