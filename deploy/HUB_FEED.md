@@ -35,8 +35,26 @@ reports was never more than 25 above the signed count.
 | Einstein 5 blue | 90 | 94 | 585 | 717 (123%) |
 | Einstein 5 red | 161 | 228 | 669 | 918 (137%) |
 
-Both AUTO winners came out right, by margins far wider than the error; a
-close AUTO would not. The Einstein 5 excess is mostly in crossings of four or
+Both AUTO winners came out right, by margins far wider than the error.
+
+**A close AUTO: Einstein 1** (Newton vs Archimedes, from the same Drive
+folder). Outlines moved by the hub shift template-matched from Einstein 4 on
+a mid-match median (blue +16,+13, red +28,+5; the same method gives
+Einstein 5's recorded blue shift exactly). One ball measured 229 px.
+
+| t (s) | fuel counters: blue - red | counted: blue - red |
+| --- | --- | --- |
+| 26 (AUTO ends) | 85 - 80 | 155 - 177 |
+| 29-30 (decision) | 95 - 96, red by 1 | 155 - 179, red by 24 |
+| 172 (buzzer) | 621 - 415 | 754 - 766 |
+
+The winner came out right by coincidence: it counted red ahead all through
+AUTO while blue led at its end, and was 63% / 86% over at the decision. At
+272 px (Einstein 4's ball) the decision reads 128 - 149, still red. After
+AUTO it had red ahead from t=100 to the buzzer, when blue scored half again
+as much. It still stayed flat through blue's inactive shift (t=60-95). **On
+a close AUTO this counter's call is noise**, so a broadcast-angle camera
+cannot be used for `counted` mode. The Einstein 5 excess is mostly in crossings of four or
 more ball-areas, which net +402 red and +254 blue there against +114 and +54
 on Einstein 4, and include single blobs of 20-28 balls; the crowd behind
 Einstein 5's hoods has yellow and khaki shirts that Einstein 4's does not.

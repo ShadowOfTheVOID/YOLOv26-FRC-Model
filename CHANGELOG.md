@@ -35,6 +35,9 @@ the build rather than publishing an empty release.
   port's counts equal the experiment's on Einstein 4 and are within 1% on
   Einstein 5, both AUTO winners come out right, and the totals are 93% / 93%
   and 123% / 137% of the broadcast fuel counters (`deploy/HUB_FEED.md`).
+  On Einstein 1, a one-ball AUTO (95 - 96 at the decision), it counted
+  155 - 179: the right winner by coincidence, red ahead while blue led at
+  AUTO's end, and red ahead at the buzzer of a match blue won 621 - 415.
 
 ### Experimental
 
