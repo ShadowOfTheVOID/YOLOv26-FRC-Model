@@ -547,6 +547,9 @@ def cmd_shots(args, cfg):
                 str(args.annotate), cv2.VideoWriter_fourcc(*"mp4v"),
                 fps or 30.0, (w, h))
         out = img.copy()
+        # Small, anti-aliased text scaled from a 1080p baseline: 0.6/0.8-size
+        # bold labels covered the balls they were naming.
+        scale = out.shape[0] / 1080.0
         colour = {"blue": (255, 120, 0), "red": (0, 0, 255)}
         for alliance, (x, y, w, h) in ((counter.hubs if counter else hubs) or {}).items():
             cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)),
@@ -557,19 +560,23 @@ def cmd_shots(args, cfg):
             # The id is what --teams needs. Watching this video once, with the
             # match roster to hand, is how track ids become team numbers.
             cv2.putText(out, f"#{tid}" + (f" = {teams[tid]}" if tid in teams else ""),
-                        (int(x), max(int(y) - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, colour.get(alliance, (255, 255, 255)), 2)
+                        (int(x), max(int(y) - 4, 10)), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.45 * scale, colour.get(alliance, (255, 255, 255)), 1,
+                        cv2.LINE_AA)
         for (x, y, w, h) in balls.values():
             cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)),
                           (0, 220, 255), 1)
         if counter is not None:
             for row, (tid, st) in enumerate(sorted(counter.per_robot.items())):
                 cv2.putText(out, f"#{tid}: {st['made']}/{st['shots']} made",
-                            (10, 24 + 22 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                            colour.get(st["alliance"], (255, 255, 255)), 2)
+                            (10, int((18 + 16 * row) * scale)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45 * scale,
+                            colour.get(st["alliance"], (255, 255, 255)), 1,
+                            cv2.LINE_AA)
         if state["flash"] and t - state["flash"][0] < 1.5:
-            cv2.putText(out, state["flash"][1], (10, out.shape[0] - 16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            cv2.putText(out, state["flash"][1], (10, out.shape[0] - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55 * scale, (255, 255, 255), 1,
+                        cv2.LINE_AA)
         state["writer"].write(out)
 
     result = shooting.run_shots(model, source, hubs=hubs or None,
@@ -811,6 +818,20 @@ def cmd_hubfeed(args, cfg):
     hubcount.run(sender, setup, realtime=args.realtime, log_path=args.log)
     print(f"stopped: red {sender.counts['red']}, blue {sender.counts['blue']} "
           f"in session {sender.session}")
+    return 0
+
+
+def cmd_track(args, cfg):
+    """Draw the model's tracks on a video: small labels, trails, gaps bridged."""
+    from tbavid import trackvis
+
+    out = args.out or str(Path(args.source).with_suffix("")) + "_tracked.mp4"
+    r = trackvis.render(str(args.weights), args.source, out, imgsz=args.imgsz,
+                        conf=args.conf, labels=args.labels,
+                        trails=not args.no_trails, coast=args.coast,
+                        device=args.device, max_frames=args.frames,
+                        tracker=args.tracker)
+    print(f"{r['frames']} frames -> {r['out']}")
     return 0
 
 
@@ -1214,6 +1235,30 @@ def main(argv=None):
                                    "red=23,blue=0")
     p.add_argument("--log", help="append every count to this CSV")
     p.set_defaults(func=cmd_hubfeed)
+
+    p = sub.add_parser("track",
+                       help="draw a model's tracks on a video: small labels, "
+                            "trails, balls followed through brief misses")
+    p.add_argument("--weights", type=Path, required=True, help="the .pt")
+    p.add_argument("--source", required=True, help="a video file")
+    p.add_argument("--out", help="output video (default <source>_tracked.mp4)")
+    p.add_argument("--imgsz", type=int, default=960,
+                   help="inference size; 1280 finds more small balls, slower")
+    p.add_argument("--conf", type=float, default=0.1,
+                   help="0.1 so weak detections can continue a track "
+                        "(fuel_track.yaml decides which may start one)")
+    p.add_argument("--labels", choices=("none", "id", "full"), default="id",
+                   help="label per box: nothing, the track id, or class + id")
+    p.add_argument("--no-trails", dest="no_trails", action="store_true")
+    p.add_argument("--coast", type=int, default=8,
+                   help="frames a lost ball is still drawn where it should be")
+    p.add_argument("--device", help="mps on a Mac, 0 for a GPU, cpu")
+    p.add_argument("--frames", type=int, default=0, help="stop after N frames")
+    p.add_argument("--tracker", choices=("distance", "bytetrack"),
+                   default="distance",
+                   help="distance: follows balls through the top of their arc "
+                        "(default). bytetrack: Ultralytics' tracker, tuned.")
+    p.set_defaults(func=cmd_track)
 
     p = sub.add_parser("hubgui",
                        help="the hub counter with a user interface: pick "

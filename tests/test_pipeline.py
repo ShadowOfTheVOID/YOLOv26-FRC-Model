@@ -2862,6 +2862,81 @@ def test_hub_exit_line_counter():
           HC.setup_from_dict(ctl.cfg).cameras[0].zones[0].kind == "exit")
 
 
+def test_ball_tracker_follows_through_the_apex():
+    """The renderer's tracker links balls by distance, not box overlap.
+
+    ByteTrack lost flying balls at the top of their arc: a 12-20 px ball
+    turning over stops overlapping a straight-line prediction. On 4 s of
+    Einstein 4, 19 of 20 flights lost there still had a 0.1-0.8 detection
+    where the ball was; ByteTrack took 1 of 25 flights through the apex, this
+    took 106. These fix the rules on synthetic arcs.
+    """
+    from tbavid.trackvis import BallTracker, Coaster
+
+    def box(x, y, w=16):
+        return (x - w / 2, y - w / 2, x + w / 2, y + w / 2)
+
+    # A ball thrown up and over: 12 px/frame sideways, rising, turning over at
+    # the top, falling -- the case that broke.
+    arc = [(100 + 12 * i, 400 - (30 * i - 1.5 * i * i)) for i in range(21)]
+    t = BallTracker()
+    ids = set()
+    for i, (x, y) in enumerate(arc):
+        conf = 0.15 if 8 <= i <= 12 else 0.6          # weak at the top
+        got = t.update([(box(x, y), conf)])
+        ids |= set(got)
+    check("one ball over its apex keeps one id", len(ids) == 1)
+
+    # Missed for three frames at the top, found again further along.
+    t = BallTracker()
+    ids = set()
+    for i, (x, y) in enumerate(arc):
+        if 9 <= i <= 11:
+            t.update([])
+            continue
+        ids |= set(t.update([(box(x, y), 0.6)]))
+    check("and through a three-frame gap", len(ids) == 1)
+
+    # A weak detection alone cannot start a track.
+    t = BallTracker()
+    check("a weak detection does not start a track",
+          t.update([(box(50, 50), 0.12)]) == {})
+
+    # Two balls crossing paths keep their own ids (nearest match first).
+    t = BallTracker()
+    a_ids, b_ids = set(), set()
+    for i in range(10):
+        got = t.update([(box(100 + 10 * i, 200), 0.6), (box(100 + 10 * i, 260), 0.6)])
+        for tid, bx in got.items():
+            (a_ids if bx[1] < 230 else b_ids).add(tid)
+    check("two balls side by side stay two tracks",
+          len(a_ids) == 1 and len(b_ids) == 1 and a_ids != b_ids)
+    # A far bigger object nearby is not taken for the ball.
+    t = BallTracker()
+    t.update([(box(100, 100), 0.6)])
+    got = t.update([(box(104, 100, w=80), 0.9)])
+    check("a robot-sized box is not linked to a ball's track",
+          1 not in got)
+
+    c = Coaster(coast=4)
+    c.update(0, {7: box(100, 100)})
+    c.update(1, {7: box(110, 100)})
+    _, coasting = c.update(2, {})
+    check("a lost moving ball is drawn where it should be",
+          7 in coasting and abs((coasting[7][0] + coasting[7][2]) / 2 - 120) < 1e-6)
+    for f in range(3, 7):
+        _, coasting = c.update(f, {})
+    check("but only for a few frames", 7 not in coasting)
+    c = Coaster()
+    for f in range(6):
+        c.update(f, {1: box(100 + (f % 2) * 3, 100)})       # jitter in a pile
+    check("a ball jittering in a pile draws no trail", c.moving_trail(1) == [])
+    c = Coaster()
+    for f in range(6):
+        c.update(f, {1: box(100 + 10 * f, 100)})
+    check("a ball travelling draws one", len(c.moving_trail(1)) == 6)
+
+
 def test_hub_feed_needs_no_opencv_to_load():
     """The sender is stdlib only: it runs on whatever laptop is wired into the
     field switch, and CI has no cv2. hubcount keeps cv2 inside functions."""
@@ -2912,7 +2987,7 @@ def main() -> int:
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
                test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
-               test_hub_exit_line_counter):
+               test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

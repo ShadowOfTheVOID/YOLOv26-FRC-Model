@@ -76,6 +76,39 @@ the build rather than publishing an empty release.
   laid out, so no outline could be drawn; it is now sized on the picture's
   load. Neither has been opened on a Mac yet. (A Tk window came first and
   was replaced: Homebrew's Python needs `brew install python-tk` for it.)
+- **`run.py track` — a readable tracked video, and balls followed through
+  the top of their arc** (`tbavid/trackvis.py`, `tbavid/fuel_track.yaml`).
+  Asked for: smaller labels, better following, and no losing the ball when
+  it "plateaus". Measured on 4 s of Einstein 4 shooting (239 frames,
+  `fuel_best.pt`, imgsz 960):
+  - Labels: `predict(save=True)` put "fuel 0.85" on ~300 balls a frame and
+    buried the picture; this draws thin boxes and a small id, scaled to the
+    frame, and trails only for balls really travelling (piles and hoppers
+    jitter in place and drew zigzags).
+  - Following: ByteTrack at its defaults with conf 0.25 split the balls into
+    2357 tracks, median 5 frames. conf 0.25 threw away the weak detections
+    before ByteTrack's low-score association saw them, and the default
+    match threshold needs 20% box overlap, which a 15-20 px ball moving its
+    own width a frame barely has. `fuel_track.yaml` (conf 0.1, weak
+    detections may only continue a track, match 0.95, 60-frame memory):
+    1145 tracks, median 25 frames, short (<5 f) 1178 -> 167.
+  - The top of the arc: still only 1 of 25 flights survived its apex. In 19
+    of 20 flights lost while rising or at the top, the detector still had
+    the ball at confidence 0.1-0.8 in the next frames -- the linking, not the
+    detection, dropped it: a ball turning over stops overlapping a
+    straight-line prediction. `BallTracker` links by distance to the
+    predicted position, in a gate scaled by size, speed and time missing,
+    and rejects a size far off (a robot). Result: 818 tracks, median 172
+    frames, 762 lasting 30+ frames, 11 under 5, and 106 flights followed
+    through their apex (ByteTrack: 1). Jumps over 2.5 ball widths in a
+    frame: 35 of 129,884 links (0.03%), some real fast balls. It is the
+    default; `--tracker bytetrack` keeps the tuned ByteTrack.
+  - A ball the detector misses for a few frames is drawn where it should
+    be, as a hollow circle, for up to `--coast` frames (display only).
+  - `run.py shots --annotate` labels are smaller too.
+  Not done: `run.py shots` and `run.py count` still track with ByteTrack;
+  moving them to `BallTracker` needs its own measurement against a
+  scoreboard.
 - **Wireless cameras** (*Wireless camera* in the website; an `rtsp://` or
   `http://` `"source"` in `cams.json`): Wi-Fi IP cameras and phone
   IP-camera apps. Opened through FFmpeg over TCP with input buffering off

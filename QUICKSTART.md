@@ -41,18 +41,20 @@ M=models/fuel_withBotbest.pt
 ## 3. See what the model sees
 
 ```bash
-$PY -c "import collections; from ultralytics import YOLO; collections.deque(YOLO('$M').predict('match.mp4', imgsz=960, conf=0.25, save=True, stream=True, max_det=1000, verbose=False), maxlen=0)"
+$PY run.py track --weights $M --source match.mp4          # add --device mps on a Mac
 ```
 
-`stream=True` is not optional on a video. Without it Ultralytics keeps every
-frame's result -- the decoded frame included, ~6 MB at 1080p -- until the
-video ends: a 3.5-minute match at 60 fps is ~12,900 frames, ~75 GB, and macOS
-kills Python part-way (`zsh: killed`, at frame ~8,000 and ~10,000 on a 36 GB
-M4 Max). `max_det=1000` because the default caps every frame at 300 boxes,
-which a field with its central pile of fuel reaches on every frame.
+It writes `match_tracked.mp4`: a thin box and a small track number on every
+ball and robot, a short trail behind each ball that is really moving, and a
+hollow circle where a ball briefly lost by the detector should be. `--labels
+none` drops the numbers, `--labels full` adds the class, `--imgsz 1280`
+finds more small balls (slower).
 
-The annotated copy lands under `runs/detect/` (the path is printed). Swap
-`match.mp4` for a folder of `.jpg` frames or a single image.
+Why not `YOLO(...).predict(save=True)`: it labels every one of ~300 balls
+"fuel 0.85", which buries the picture; it does not track; and without
+`stream=True` it keeps every frame in memory until macOS kills it. `run.py
+track` streams, and follows balls by distance rather than box overlap, which
+is what keeps a ball through the top of its arc (see CHANGELOG).
 
 ## 4. Hub boxes (once per camera position)
 

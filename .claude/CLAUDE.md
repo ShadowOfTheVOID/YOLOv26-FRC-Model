@@ -191,6 +191,10 @@ any camera stale holds the heartbeat). `run.py hubgui` edits the same cams.json:
 the website; the Qt window was removed. It also takes a Twitch/YouTube
 stream as a source (`hubcount.is_stream_page`, yt-dlp), which the user
 wants kept; streams are seconds late, so never for the AUTO call.
+`run.py track` (`trackvis.py`): renderer with `BallTracker`, distance-based
+linking -- ByteTrack loses balls at the apex because a turning 15 px ball
+stops overlapping its prediction (1 of 25 flights vs 106 with BallTracker on
+Einstein 4). shots/count still use ByteTrack; switching them is untested.
 Wireless cameras: `hubcount.is_network_camera` (rtsp/http, not a stream
 page), FFmpeg over TCP unbuffered, reconnect forever, pre-drop blobs cleared.
 Zones are an outline (funnel mouth) or an exit line (`ExitLineCounter`,
