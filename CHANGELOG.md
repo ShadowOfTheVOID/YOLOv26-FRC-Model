@@ -76,6 +76,18 @@ the build rather than publishing an empty release.
   laid out, so no outline could be drawn; it is now sized on the picture's
   load. Neither has been opened on a Mac yet. (A Tk window came first and
   was replaced: Homebrew's Python needs `brew install python-tk` for it.)
+- **Wireless cameras** (*Wireless camera* in the website; an `rtsp://` or
+  `http://` `"source"` in `cams.json`): Wi-Fi IP cameras and phone
+  IP-camera apps. Opened through FFmpeg over TCP with input buffering off
+  (UDP smears the picture over Wi-Fi; buffered frames are latency). A drop
+  holds the heartbeat and reconnects for as long as the counter runs, and
+  forgets the pre-drop blobs, since matching a ball from before the gap to
+  one after it would invent a crossing. Camera passwords are kept out of
+  the log. An iPhone on a Mac needs none of this: Continuity Camera lists
+  it under *Find cameras*. Tested against a stand-in MJPEG phone camera:
+  picture in 1.3-1.8 s, 30 fps, and a 4 s drop showed NO PICTURE, held the
+  heartbeat and resumed at 30 fps. Not tried with a real phone, an IP
+  camera, or RTSP.
 - **Exit-line counting** (`hubcount.ExitLineCounter`; *Red exit* / *Blue
   exit* in the website; `"line"` + `"out"` zones in `cams.json`). Every
   scored ball comes back out of the hub, so balls crossing a line across an

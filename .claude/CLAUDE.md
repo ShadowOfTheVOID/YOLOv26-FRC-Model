@@ -191,6 +191,8 @@ any camera stale holds the heartbeat). `run.py hubgui` edits the same cams.json:
 the website; the Qt window was removed. It also takes a Twitch/YouTube
 stream as a source (`hubcount.is_stream_page`, yt-dlp), which the user
 wants kept; streams are seconds late, so never for the AUTO call.
+Wireless cameras: `hubcount.is_network_camera` (rtsp/http, not a stream
+page), FFmpeg over TCP unbuffered, reconnect forever, pre-drop blobs cleared.
 Zones are an outline (funnel mouth) or an exit line (`ExitLineCounter`,
 `"line"`+`"out"`); the user wants exits counted -- exits equal entries and
 rim bounces never reach an exit. Exits are not visible enough on broadcasts

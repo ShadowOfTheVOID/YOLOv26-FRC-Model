@@ -194,6 +194,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.5"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/></symbol>
   <symbol id="i-live" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5"/><path d="M16.2 7.8a6 6 0 010 8.4M7.8 16.2a6 6 0 010-8.4M19.1 4.9a10 10 0 010 14.2M4.9 19.1a10 10 0 010-14.2"/></symbol>
   <symbol id="i-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16"/><path d="M9 12h11M16 8l4 4-4 4"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 8.8a15 15 0 0120 0M5 12.6a10 10 0 0114 0M8.5 16.4a5 5 0 017 0"/><circle cx="12" cy="20" r="1"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
   <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
@@ -246,6 +247,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <div class="row">
         <button class="btn" onclick="findCams()"><svg><use href="#i-search"/></svg>Find cameras</button>
         <button class="btn" onclick="pickFile('add')"><svg><use href="#i-film"/></svg>Add recording</button>
+        <button class="btn" onclick="addWireless()"><svg><use href="#i-wifi"/></svg>Wireless camera</button>
         <button class="btn" onclick="addStream()"><svg><use href="#i-live"/></svg>Add stream</button>
       </div>
       <div id="camform" style="display:none">
@@ -363,8 +365,9 @@ async function refresh(){
 function renderCams(){const L=$("cams");L.innerHTML="";
   for(const c of S.cfg.cameras){const kind=S.kinds[c.name]||"camera";
     const d=document.createElement("div");d.className="item"+(c.name===cur?" sel":"");
-    d.innerHTML=`<span class="icon"><svg><use href="#i-${{file:'film',stream:'live',camera:'cam'}[kind]}"/></svg></span><span class="t">${esc(c.name)}</span>`+
+    d.innerHTML=`<span class="icon"><svg><use href="#i-${{file:'film',stream:'live',camera:'cam',wireless:'wifi'}[kind]}"/></svg></span><span class="t">${esc(c.name)}</span>`+
       (kind==="stream"?`<span class="tag warn" title="${esc(S.stream_warning)}">delayed</span>`:"")+
+      (kind==="wireless"?`<span class="tag blue" title="${esc(S.wireless_warning)}">Wi-Fi</span>`:"")+
       (c.ball_area?`<span class="tag ok">${Math.round(c.ball_area)} px</span>`:`<span class="tag warn">measure</span>`)+`<button class="x" title="Remove">✕</button>`;
     d.onclick=e=>{if(e.target.classList.contains("x")){removeCam(c.name);return;}cur=c.name;lastPic="";fillForm();refresh();if(!S.pictures[c.name])grab();};
     L.appendChild(d);}
@@ -389,6 +392,7 @@ function renderLive(){const v=S.live;
   if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:"Ready. Press Start to send counts to bioarena.");
   else if(v.stale.length)setStatus("bad","No picture",`${v.stale.join(", ")} stopped sending frames — bioarena shows OFFLINE.`);
   else if(v.linked){const r=v.reply||{};const delayed=Object.values(S.kinds).includes("stream");
+    // a Wi-Fi camera is not flagged here: its delay is small and shown as fps
     setStatus(delayed?"warn":"ok","Connected to bioarena",`${(r.match_state||"").replace(/_/g," ").toLowerCase()} · ${r.shift||""} · ${v.rtt_ms} ms`+(delayed?" · counting from a delayed stream":""));}
   else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
   $("schips").innerHTML=Object.entries(v.cameras).map(([n,c])=>`<span class="chip">${esc(n)} <b class="tnum">${Math.round(c.fps)}</b> fps</span>`).join("");}
@@ -476,6 +480,19 @@ document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEac
 function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
 function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
 function findCams(){api("find_cameras");}
+async function addWireless(){
+  const url=await modal("Add a wireless camera",`<label class="field"><span>Camera address</span>
+    <input class="input" id="mIn" placeholder="rtsp://192.168.1.50:554/stream1"></label>
+    <div class="pick" style="margin-top:12px">
+      <div class="item"><span class="icon"><svg><use href="#i-cam"/></svg></span><span class="t" style="white-space:normal;font-weight:500"><b>iPhone + Mac:</b> no address needed — the iPhone appears under <b>Find cameras</b> (Continuity Camera).</span></div>
+      <div class="item"><span class="icon"><svg><use href="#i-wifi"/></svg></span><span class="t" style="white-space:normal;font-weight:500"><b>Android phone:</b> the IP Webcam app shows an address like <code>http://192.168.1.60:8080/video</code>.</span></div>
+      <div class="item"><span class="icon"><svg><use href="#i-wifi"/></svg></span><span class="t" style="white-space:normal;font-weight:500"><b>Wi-Fi IP camera:</b> its RTSP address, e.g. <code>rtsp://user:pass@192.168.1.50:554/stream1</code>.</span></div>
+    </div>
+    <p class="muted" style="margin-top:12px">${esc(S.wireless_warning)} If the connection drops, the counter reconnects by itself.</p>`,
+    [{label:"Cancel",value:null},{label:"Add camera",cls:"primary",value:()=>$("mIn").value.trim()}]);
+  if(!url)return;
+  if(!/^(rtsps?|rtmp|https?|udp|tcp|srt):\/\//i.test(url)){toast("That doesn't look like a camera address (it should start with rtsp:// or http://)","warn");return;}
+  try{const c=await api("add_camera",{source:url});cur=c.name;lastPic="";hint("Connecting to the camera…");grab();}catch(e){}}
 async function addStream(){
   const url=await modal("Add a live stream",`<label class="field"><span>Twitch or YouTube live address</span>
     <input class="input" id="mIn" placeholder="https://www.twitch.tv/firstinspires"></label>

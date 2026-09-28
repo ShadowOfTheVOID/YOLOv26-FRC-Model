@@ -2712,6 +2712,18 @@ def test_hub_ui_controller_and_web():
         check("source kinds", (A.source_kind("0"), A.source_kind(video),
                                A.source_kind("twitch.tv/frc"))
               == ("camera", "file", "stream"))
+        check("network cameras are wireless, streams are not",
+              A.source_kind("rtsp://192.168.1.50:554/stream1") == "wireless"
+              and A.source_kind("http://192.168.1.60:8080/video") == "wireless"
+              and A.source_kind("https://www.twitch.tv/frc") == "stream"
+              and not HC.is_network_camera("https://youtu.be/x"))
+        wc = ctl.add_camera("rtsp://admin:hunter2@192.168.1.50:554/stream1")
+        check("a Wi-Fi camera is named after its address",
+              wc["name"] == "wifi-50" and ctl.state()["kinds"]["wifi-50"] == "wireless")
+        check("and its password never reaches the on-screen log",
+              not any("hunter2" in m[2] for m in ctl.messages_since(0))
+              and A.redact("rtsp://admin:hunter2@h:554/s") == "rtsp://***@h:554/s")
+        ctl.remove_camera("wifi-50")
         sc = ctl.add_camera("https://www.twitch.tv/firstinspires")
         check("a stream is added without looking it up (it may be offline)",
               sc["name"] == "firstinspires"

@@ -138,6 +138,33 @@ right-hand side:
    with *NO PICTURE* if a camera stops. Tick *Practice: send to a test
    receiver here* to try it all without bioarena.
 
+**Wireless cameras.** Three ways:
+
+- *iPhone + Mac*: Continuity Camera makes the iPhone a camera with no cable;
+  it shows up under *Find cameras* like a USB one. Nothing else to set up.
+- *Android phone*: an IP-camera app (e.g. IP Webcam) shows an address like
+  `http://192.168.1.60:8080/video`.
+- *Wi-Fi IP camera*: its RTSP address, e.g.
+  `rtsp://user:pass@192.168.1.50:554/stream1`.
+
+*Wireless camera* in the website takes the address (in `cams.json` it is
+just the `"source"`). It is opened over TCP with FFmpeg's input buffering
+off, so frames are not queued. If the Wi-Fi drops, the heartbeat stops
+(bioarena shows OFFLINE) and the counter keeps reconnecting until the camera
+is back, then forgets where the balls were before the gap so it cannot
+invent a crossing. Passwords in an address are kept out of the log.
+
+Wi-Fi costs delay and can drop out: check the frame rate in the status card
+holds before trusting it for AUTO, and prefer a cable when you can. Use your
+own router, never the field's Wi-Fi, and check the event's rules first:
+FRC events prohibit teams running their own Wi-Fi networks.
+
+Tested with a stand-in phone camera (MJPEG over HTTP, 30 fps): picture in
+1.3-1.8 s, counting at 30 fps, and a simulated drop -- the camera killed for
+4 s -- showed NO PICTURE, held the heartbeat, reconnected and resumed at
+30 fps without stopping the session. Not yet tried with a real phone or IP
+camera, or an RTSP one.
+
 **Twitch / YouTube streams.** *Add stream* takes a live address
 (`https://www.twitch.tv/<channel>`, a YouTube live URL, or a Twitch past
 broadcast `https://www.twitch.tv/videos/<id>`), looks up the video behind it

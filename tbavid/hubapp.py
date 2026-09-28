@@ -51,14 +51,34 @@ def is_file_source(source: str) -> bool:
 
 
 def source_kind(source: str) -> str:
-    """'camera', 'stream' (Twitch / YouTube page) or 'file'."""
-    from .hubcount import is_stream_page
+    """'camera' (USB / built-in, or an iPhone over Continuity Camera),
+    'wireless' (rtsp:// or http:// camera), 'stream' (Twitch / YouTube page)
+    or 'file'."""
+    from .hubcount import is_network_camera, is_stream_page
     s = str(source)
     if s.isdigit():
         return "camera"
     if is_stream_page(s):
         return "stream"
+    if is_network_camera(s):
+        return "wireless"
     return "file" if is_file_source(s) else "camera"
+
+
+def redact(source: str) -> str:
+    """rtsp://user:pass@host/... -> rtsp://***@host/... for logs: camera
+    passwords sit in the address and the activity log is on screen."""
+    s = str(source)
+    if "://" in s and "@" in s.split("://", 1)[1].split("/", 1)[0]:
+        scheme, rest = s.split("://", 1)
+        return f"{scheme}://***@{rest.split('@', 1)[1]}"
+    return s
+
+
+WIRELESS_WARNING = ("Wi-Fi adds delay and drops out, so check the picture "
+                    "keeps up before trusting it. Use your own router, not the "
+                    "field's Wi-Fi, and check the event allows it: official "
+                    "FRC events ban personal Wi-Fi networks.")
 
 
 STREAM_WARNING = ("A stream runs several seconds behind the field (Twitch's "
@@ -293,7 +313,11 @@ class HubController:
                 raise ValueError(f"{source} is already added")
             if not name:
                 kind = source_kind(source)
-                if kind == "stream":
+                if kind == "wireless":
+                    host = source.split("://", 1)[1].split("/", 1)[0]
+                    host = host.rsplit("@", 1)[-1].split(":", 1)[0]
+                    name = f"wifi-{host.split('.')[-1] if host.replace('.', '').isdigit() else host}"[:20]
+                elif kind == "stream":
                     from .hubcount import stream_name
                     name = stream_name(source)
                 elif source.isdigit():
@@ -304,9 +328,11 @@ class HubController:
                                      name),
                    "source": source, "ball_area": 0, "zones": []}
             self.cfg["cameras"].append(cam)
-        self.say(f"added {cam['name']} ({source})")
+        self.say(f"added {cam['name']} ({redact(source)})")
         if source_kind(source) == "stream":
             self.say(STREAM_WARNING)
+        elif source_kind(source) == "wireless":
+            self.say(WIRELESS_WARNING)
         return cam
 
     def remove_camera(self, name: str) -> None:
@@ -513,6 +539,7 @@ class HubController:
         kinds = {c["name"]: source_kind(c["source"]) for c in cfg["cameras"]}
         out = {"cfg": cfg, "path": self.path, "running": running, "job": job,
                "kinds": kinds, "stream_warning": STREAM_WARNING,
+               "wireless_warning": WIRELESS_WARNING,
                "problems": problems(cfg), "pictures": pictures,
                "log": self.messages_since(last_log)}
         s = self.sender

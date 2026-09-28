@@ -450,6 +450,29 @@ def resolve_stream(page: str, timeout: float = 45.0) -> str:
     return lines[0]
 
 
+NETWORK_SCHEMES = ("rtsp://", "rtsps://", "rtmp://", "http://", "https://",
+                   "udp://", "tcp://", "srt://")
+
+
+def is_network_camera(source: str) -> bool:
+    """A camera reached over the network -- a Wi-Fi IP camera, or a phone
+    running an IP-camera app -- by its rtsp:// or http:// address. A
+    Twitch / YouTube page is a stream, not a camera, and is looked up first.
+    """
+    s = str(source).strip().lower()
+    return s.startswith(NETWORK_SCHEMES) and not is_stream_page(s)
+
+
+# FFmpeg options for a network camera, set before it is opened. TCP rather
+# than RTSP's default UDP: over Wi-Fi, UDP loses packets and the picture
+# smears, which is worse for counting than a few ms. No input buffering and
+# low-delay decoding, because every buffered frame is latency (spec 5.2), and
+# a 5 s socket timeout so a camera that drops off Wi-Fi is noticed and
+# reconnected rather than waited on.
+NETWORK_OPTIONS = ("rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|"
+                   "max_delay;0|stimeout;5000000|timeout;5000000")
+
+
 def open_source(source: str, fps: float = 0.0, size: str = ""):
     """A cv2.VideoCapture with the driver's queue cut to one frame.
 
@@ -466,6 +489,16 @@ def open_source(source: str, fps: float = 0.0, size: str = ""):
         cap = cv2.VideoCapture(resolve_stream(str(source)), cv2.CAP_FFMPEG)
         if not cap.isOpened():
             raise SystemExit(f"could not open the stream behind {source!r}")
+        return cap
+    if is_network_camera(source):
+        import os
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", NETWORK_OPTIONS)
+        cap = cv2.VideoCapture(str(source).strip(), cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            raise SystemExit(f"could not reach the network camera at "
+                             f"{source!r} -- same Wi-Fi? address and port "
+                             f"right? (open it in a browser or VLC to check)")
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         return cap
     src = int(source) if str(source).isdigit() else source
     cap = cv2.VideoCapture(src)
@@ -897,26 +930,36 @@ def run(sender, setup: Setup, realtime: bool = False,
         n = 0
         hl = health[cam.name]
         stream = is_stream_page(cam.source)
+        wireless = is_network_camera(cam.source)
         src = str(cam.source)
         pace = realtime and (stream or (not src.isdigit() and "://" not in src))
         drops = 0
         while not stop.is_set():
             ok, frame = cap.read()
             now = time.monotonic()
-            if not ok and stream and drops < STREAM_RETRIES:
-                # An HLS stream hiccups (a slow segment, a CDN switch) where a
-                # camera does not. Reconnect rather than end the session; the
-                # heartbeat is held meanwhile, so bioarena sees OFFLINE and
-                # nothing pretends to be watching.
+            if not ok and (wireless or (stream and drops < STREAM_RETRIES)):
+                # An HLS stream hiccups (a slow segment, a CDN switch) and a
+                # Wi-Fi camera drops out, where a USB camera does not.
+                # Reconnect rather than end the session; the heartbeat is
+                # held meanwhile, so bioarena sees OFFLINE and nothing
+                # pretends to be watching. A Wi-Fi camera is retried for as
+                # long as the counter runs -- it is coming back when the
+                # signal does -- a Twitch stream five times.
                 drops += 1
-                out(f"{cam.name}: stream dropped, reconnecting "
-                    f"({drops}/{STREAM_RETRIES})")
+                out(f"{cam.name}: {'connection' if wireless else 'stream'} "
+                    f"dropped, reconnecting (try {drops}"
+                    f"{'' if wireless else f'/{STREAM_RETRIES}'})")
                 cap.release()
-                stop.wait(2.0 * drops)
+                stop.wait(min(2.0 * drops, 5.0))
                 try:
                     cap = open_source(cam.source)
                 except SystemExit as e:
                     out(f"{cam.name}: {e}")
+                # The picture after a gap is not the one before it: a ball
+                # remembered from before the drop, matched to a different one
+                # after, would be a crossing that never happened.
+                for z in cam.zones:
+                    z.counter.prev = []
                 continue
             if not ok:
                 errors.append(f"{cam.name} ({cam.source}): the source "
