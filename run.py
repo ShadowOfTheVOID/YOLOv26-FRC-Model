@@ -815,15 +815,7 @@ def cmd_hubfeed(args, cfg):
 
 
 def cmd_hubgui(args, cfg):
-    """The hub counter with a user interface: a web page, or a Qt window."""
-    if args.ui == "qt":
-        try:
-            from tbavid import hubqt
-        except ImportError:
-            raise SystemExit("the Qt window needs PySide6: .venv/bin/pip "
-                             "install PySide6 -- or use --ui web, which needs "
-                             "nothing")
-        return hubqt.main(args.setup)
+    """The hub counter as a web page: cameras, outlines, calibration, the feed."""
     from tbavid import hubweb
 
     return hubweb.main(args.setup, args.port, args.bind, not args.no_browser)
@@ -1229,9 +1221,6 @@ def main(argv=None):
                             "start the feed")
     p.add_argument("--setup", metavar="CAMS.JSON",
                    help="open this setup file (created on first save)")
-    p.add_argument("--ui", choices=("web", "qt"), default="web",
-                   help="web: a page in your browser, nothing to install "
-                        "(default). qt: a desktop window, needs PySide6.")
     p.add_argument("--port", type=int, default=8790, help="web page port")
     p.add_argument("--bind", default="127.0.0.1",
                    help="web page interface; anything but 127.0.0.1 lets "

@@ -76,6 +76,9 @@ the build rather than publishing an empty release.
   laid out, so no outline could be drawn; it is now sized on the picture's
   load. Neither has been opened on a Mac yet. (A Tk window came first and
   was replaced: Homebrew's Python needs `brew install python-tk` for it.)
+- **The hub counter's interface is the web page.** The Qt window
+  (`tbavid/hubqt.py`, `run.py hubgui --ui qt`) was removed once the website
+  was chosen; `run.py hubgui` opens the page and no longer takes `--ui`.
 - **Twitch and YouTube streams as a counter source** (`hubcount.open_source`,
   and *Add stream* in both front ends). A page address is looked up to its
   HLS stream with yt-dlp -- run from the app's own environment, since a

@@ -5,8 +5,6 @@
 #
 #  First run only: makes .venv and installs numpy + OpenCV into it. The setup
 #  you save is cams.json in this folder, and it is opened again next time.
-#  For the desktop window instead: .venv/bin/pip install PySide6, then
-#  change "--ui web" below to "--ui qt".
 #
 cd "$(dirname "$0")" || exit 1
 
@@ -18,4 +16,4 @@ if ! .venv/bin/python -c "import cv2, numpy, yt_dlp" 2>/dev/null; then
     # yt-dlp finds the video behind a Twitch / YouTube stream address
     .venv/bin/pip install -q -r requirements.txt opencv-python-headless yt-dlp || { read -r; exit 1; }
 fi
-exec .venv/bin/python run.py hubgui --ui web --setup cams.json
+exec .venv/bin/python run.py hubgui --setup cams.json

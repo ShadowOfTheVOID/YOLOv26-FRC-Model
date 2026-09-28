@@ -1,6 +1,6 @@
 """The hub counter as a web page: standard library only, any browser.
 
-    python3 run.py hubgui --ui web          # opens http://127.0.0.1:8790
+    python3 run.py hubgui                   # opens http://127.0.0.1:8790
 
 No toolkit to install -- the Tk window needed `brew install python-tk` on a
 Homebrew Mac -- and it looks the same on every machine. All the logic is in

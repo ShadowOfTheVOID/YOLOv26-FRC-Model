@@ -186,9 +186,11 @@ decided at T+23.000 s so camera-to-count must stay under ~200 ms p99.
 runbook. Several cameras: `--setup cams.json`
 (`Setup`/`HubTally` in hubcount.py; zones per hub combined by sum/max/median,
 any camera stale holds the heartbeat). `run.py hubgui` edits the same cams.json: a web page
-(`hubweb.py`, stdlib, default) or a Qt window (`hubqt.py`, `--ui qt`,
-PySide6), both thin views over `hubapp.HubController` -- put logic there, not
-in either view. The user has not yet chosen between them. Per-camera `blur`/`remove_static` exist only as calibration
+(`hubweb.py` + `hubweb.html`, stdlib), a thin view over
+`hubapp.HubController` -- put logic there, not in the page. The user chose
+the website; the Qt window was removed. It also takes a Twitch/YouTube
+stream as a source (`hubcount.is_stream_page`, yt-dlp), which the user
+wants kept; streams are seconds late, so never for the AUTO call. Per-camera `blur`/`remove_static` exist only as calibration
 against a hand-counted recording -- the best value differed on every Einstein
 match. Plumbing is tested; counting is unvalidated on a practice-field
 camera -- the spec's 20-ball acceptance test comes before bioarena's

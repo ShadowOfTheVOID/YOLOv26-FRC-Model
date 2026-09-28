@@ -107,18 +107,16 @@ the balls on broadcast footage. The area counter needs no model and no GPU,
 counts on the frame a ball crosses the funnel-mouth outline, and spends a few
 ms per frame on a laptop CPU.
 
-## The easy way: the web page (or the Qt window)
+## The easy way: the web page
 
 ```bash
 .venv/bin/python run.py hubgui --setup cams.json            # opens in your browser
-.venv/bin/python run.py hubgui --setup cams.json --ui qt    # desktop window (pip install PySide6)
 ```
 
-On a Mac, double-clicking `hubfeed.command` does the first line, installing
-what it needs the first time. The web page needs nothing but Python and
-OpenCV; the Qt window is the same controls in a native window and needs
-PySide6 (~200 MB). Both are views over one controller (`tbavid/hubapp.py`),
-so they behave identically. Work down the right-hand side:
+On a Mac, double-clicking `hubfeed.command` does the same, installing what
+it needs the first time. The page needs nothing but Python, OpenCV and (for
+streams) yt-dlp; its logic lives in `tbavid/hubapp.py`. Work down the
+right-hand side:
 
 1. **Cameras.** *Find cameras* lists every camera that answers, with its
    size; pick one. *Add recording…* adds a video file instead, to set up or

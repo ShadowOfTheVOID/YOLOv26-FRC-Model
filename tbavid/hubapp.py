@@ -1,13 +1,13 @@
 """Everything the hub counter's user interfaces do, with no user interface.
 
-Two front ends sit on this -- a web page (`hubweb.py`, standard library
-only, opened in any browser) and a Qt window (`hubqt.py`, PySide6) -- and
-neither holds any logic of its own: adding cameras, drawing outlines,
+The web page (`hubweb.py`, standard library only, opened in any browser)
+holds no logic of its own: adding cameras and streams, drawing outlines,
 measuring, calibrating, starting the feed and reading its live state all
-happen here, so the two cannot disagree about what a button does.
+happen here, where they are tested without a browser. (A Qt window sat on
+this too until the user chose the website.)
 
 It edits the same setup dictionary `run.py hubfeed --setup cams.json` runs,
-so a setup made in either front end also runs headless. OpenCV is imported
+so a setup made in the page also runs headless. OpenCV is imported
 only inside functions: the helpers are tested in CI without it.
 """
 from __future__ import annotations

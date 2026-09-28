@@ -2632,8 +2632,8 @@ def test_hub_calibration_and_gui_helpers():
 def test_hub_ui_controller_and_web():
     """The logic both front ends share, and the web page's HTTP surface.
 
-    The web page and the Qt window are views over one HubController, so
-    what a button does is tested here once. The web server controls cameras
+    The web page is a view over HubController, so what a button does is
+    tested here, without a browser. The web server controls cameras
     and lists the disk, so it must refuse other hosts and non-JSON posts.
     """
     import json
