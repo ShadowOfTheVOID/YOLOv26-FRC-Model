@@ -76,6 +76,19 @@ the build rather than publishing an empty release.
   laid out, so no outline could be drawn; it is now sized on the picture's
   load. Neither has been opened on a Mac yet. (A Tk window came first and
   was replaced: Homebrew's Python needs `brew install python-tk` for it.)
+- **The counter's interfaces were redesigned** after the first version was
+  called "a 1980 application": a dark control-room theme shared by the web
+  page and the Qt window, score tiles that pulse on a new ball, a status
+  card (connected / sending with no reply / no picture) with each camera's
+  frame rate, a LIVE badge and per-hub count labels on the picture, and
+  numbered steps that turn into check marks as the setup completes. The web
+  page replaced every browser alert, confirm and prompt with its own dialogs
+  and toasts, closes an outline by clicking its first corner, undoes a
+  corner with Backspace, and keeps the scoreboard and picture on screen
+  while the steps scroll. It moved into `tbavid/hubweb.html`; no web fonts
+  or CDNs, since a field often has no internet. Driven again in Chromium
+  (1440x900) and on Qt's offscreen platform, into the test receiver, with
+  no page errors.
 - **Per-camera `blur` and `remove_static`, and calibration** (`run.py
   hubfeed --calibrate VIDEO --camera NAME --count red=N,blue=M`, or the
   window). Both off by default. The best blur fraction was 0 / 0.2-0.3 /

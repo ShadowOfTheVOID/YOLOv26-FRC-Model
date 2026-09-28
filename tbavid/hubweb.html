@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hub Counter</title>
+<style>
+/* No web fonts or CDNs: this runs on a laptop at a field with no internet.
+   The system stack is SF Pro on a Mac, Segoe on Windows. */
+:root{
+  --bg:#0b0e14; --bg2:#0f131b; --panel:#141923; --panel2:#1a2030; --line:#252c3b;
+  --ink:#e7ebf3; --ink2:#a9b2c3; --muted:#6f7a8f;
+  --red:#ff4d4f; --red-deep:#c9302c; --blue:#3b8cff; --blue-deep:#1f5fd1;
+  --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --accent:#5b7cfa;
+  --radius:14px; --shadow:0 10px 30px rgba(0,0,0,.35);
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3f5f9; --bg2:#eef1f6; --panel:#ffffff; --panel2:#f6f8fb; --line:#e3e7ef;
+    --ink:#131722; --ink2:#434b5c; --muted:#7a8497; --shadow:0 8px 24px rgba(20,30,60,.08);
+  }
+}
+*{box-sizing:border-box}
+html{min-height:100%;background:var(--bg)}
+body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 20% -10%,color-mix(in srgb,var(--accent) 12%,transparent),transparent) fixed,var(--bg);
+  color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- top bar ---------- */
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;padding:12px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:.01em}
+.logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;
+  background:linear-gradient(135deg,#6d8bff,#3b5bdb);box-shadow:0 4px 14px rgba(91,124,250,.45)}
+.logo svg{width:20px;height:20px}
+.file{display:flex;align-items:center;gap:8px;min-width:0;flex:1;color:var(--ink2);font-size:13px}
+.file .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46vw}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;
+  background:var(--panel2);border:1px solid var(--line);color:var(--ink2);white-space:nowrap}
+.pill.saved{color:var(--ok)} .pill.dirty{color:var(--warn)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;
+  border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-weight:600;font-size:13px;transition:.15s;white-space:nowrap}
+.btn:hover{border-color:color-mix(in srgb,var(--accent) 60%,var(--line));background:color-mix(in srgb,var(--accent) 8%,var(--panel2))}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn svg{width:15px;height:15px}
+.btn.ghost{background:transparent}
+.btn.red{color:var(--red);border-color:color-mix(in srgb,var(--red) 40%,var(--line))}
+.btn.red:hover{background:color-mix(in srgb,var(--red) 12%,transparent)}
+.btn.blue{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 40%,var(--line))}
+.btn.blue:hover{background:color-mix(in srgb,var(--blue) 12%,transparent)}
+.btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+.btn.danger{color:var(--bad)}
+.btn.sm{height:28px;padding:0 10px;font-size:12px;border-radius:8px}
+.go{width:100%;height:54px;border-radius:12px;border:0;cursor:pointer;font-size:17px;font-weight:800;letter-spacing:.06em;color:#fff;
+  background:linear-gradient(180deg,#2fd06a,#16a34a);box-shadow:0 6px 18px rgba(34,197,94,.35);transition:.15s}
+.go:hover{filter:brightness(1.06)} .go:disabled{filter:grayscale(.6);opacity:.45;box-shadow:none;cursor:not-allowed}
+.go.stop{background:linear-gradient(180deg,#ff5a5a,#dc2626);box-shadow:0 6px 18px rgba(239,68,68,.35)}
+
+/* ---------- layout ---------- */
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:18px;padding:18px 20px 28px;max-width:1700px;margin:0 auto}
+.main{position:sticky;top:72px;align-self:start}
+@media (max-width:1100px){.wrap{grid-template-columns:1fr}.main{position:static}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+
+/* ---------- scoreboard ---------- */
+.board{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:12px;margin-bottom:14px}
+@media (max-width:760px){.board{grid-template-columns:1fr 1fr}.status{grid-column:1/-1}}
+.score{position:relative;overflow:hidden;border-radius:var(--radius);padding:14px 18px 12px;color:#fff;min-height:108px}
+.score.red{background:linear-gradient(135deg,var(--red),var(--red-deep))}
+.score.blue{background:linear-gradient(135deg,var(--blue),var(--blue-deep))}
+.score::after{content:"";position:absolute;right:-30px;top:-30px;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,.08)}
+.score .lbl{font-size:12px;font-weight:700;letter-spacing:.14em;opacity:.85}
+.score .num{font-size:56px;font-weight:800;line-height:1.05;letter-spacing:-.02em}
+.score .num.bump{animation:bump .35s ease}
+@keyframes bump{0%{transform:scale(1)}40%{transform:scale(1.08)}100%{transform:scale(1)}}
+.status{padding:14px 16px;display:flex;flex-direction:column;gap:8px;justify-content:center}
+.state{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 22%,transparent);animation:pulse 1.8s infinite}
+.dot.bad{background:var(--bad);box-shadow:0 0 0 4px color-mix(in srgb,var(--bad) 22%,transparent)}
+.dot.warn{background:var(--warn)}
+@keyframes pulse{50%{box-shadow:0 0 0 7px color-mix(in srgb,var(--ok) 0%,transparent)}}
+.sub{color:var(--ink2);font-size:12.5px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--ink2)}
+.chip b{color:var(--ink)}
+
+/* ---------- stage ---------- */
+.stage{position:relative;border-radius:var(--radius);overflow:hidden;background:#05070b;border:1px solid var(--line);
+  min-height:320px;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center}
+.pic{position:relative;line-height:0}
+.pic img{display:block;max-width:100%;max-height:calc(100vh - 330px)}
+.pic canvas{position:absolute;inset:0;cursor:crosshair}
+.badges{position:absolute;left:12px;top:12px;display:flex;gap:8px;z-index:2}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;
+  background:rgba(8,10,16,.72);color:#fff;backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.08)}
+.badge.live .dot{background:#ff3b3b;box-shadow:0 0 0 3px rgba(255,59,59,.3);animation:none}
+.banner{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:3;padding:9px 14px;border-radius:10px;
+  background:rgba(8,10,16,.82);color:#fff;font-size:13px;font-weight:600;backdrop-filter:blur(8px);display:none;
+  border:1px solid rgba(255,255,255,.1);white-space:nowrap}
+.banner kbd{font:600 11px var(--mono);padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.14);margin:0 2px}
+.empty{color:#8a93a6;text-align:center;padding:60px 20px}
+.empty svg{width:56px;height:56px;opacity:.5;margin-bottom:10px}
+.empty h3{margin:0 0 4px;color:#c9d1e0;font-size:16px}
+
+.hint{display:flex;align-items:center;gap:10px;margin:12px 2px 0;color:var(--ink2);min-height:22px}
+.hint b{color:var(--ink)}
+.progress{height:4px;border-radius:4px;background:var(--line);overflow:hidden;flex:1;max-width:220px;display:none}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+details.log{margin-top:12px}
+details.log summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;list-style:none;display:inline-flex;align-items:center;gap:6px}
+details.log summary::before{content:"";width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:.15s}
+details.log[open] summary::before{transform:rotate(45deg)}
+details.log summary:hover{color:var(--ink2)}
+details.log summary::-webkit-details-marker{display:none}
+#log{margin-top:8px;height:170px;overflow:auto;padding:10px 12px;border-radius:10px;background:var(--bg2);border:1px solid var(--line);
+  font:12px/1.55 var(--mono);color:var(--ink2);white-space:pre-wrap}
+
+/* ---------- steps ---------- */
+.steps{display:flex;flex-direction:column;gap:12px}
+.step{padding:14px 16px}
+.step h2{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:14px;font-weight:700}
+.step h2 .n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;
+  background:var(--panel2);border:1px solid var(--line);color:var(--ink2);flex:none}
+.step.done h2 .n{background:var(--ok);border-color:transparent;color:#fff}
+.step h2 .opt{margin-left:auto;font-weight:600;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.muted{color:var(--muted);font-size:12.5px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.item{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;transition:.12s}
+.item:hover{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
+.item.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel2))}
+.item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.item .s{font-size:11.5px;color:var(--muted)}
+.item .x{opacity:0;border:0;background:none;color:var(--muted);cursor:pointer;padding:2px 4px;border-radius:6px}
+.item:hover .x{opacity:1} .item .x:hover{color:var(--bad)}
+.tag{font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px}
+.tag.red{background:color-mix(in srgb,var(--red) 18%,transparent);color:var(--red)}
+.tag.blue{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--blue)}
+.tag.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.tag.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.icon{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--bg2);flex:none}
+.icon svg{width:15px;height:15px;color:var(--ink2)}
+
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 6px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field.full{grid-column:1/-1}
+.field span{font-size:11.5px;font-weight:600;color:var(--muted)}
+.input{height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:var(--bg2);outline:none;transition:.12s;width:100%}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.input.big{font-weight:700}
+.adv{margin-top:6px}
+.adv summary{cursor:pointer;color:var(--ink2);font-size:12.5px;font-weight:600}
+.slider{display:flex;align-items:center;gap:10px}
+input[type=range]{flex:1;accent-color:var(--accent)}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;cursor:pointer;user-select:none}
+.switch input{display:none}
+.switch i{width:38px;height:22px;border-radius:999px;background:var(--line);position:relative;transition:.15s;flex:none}
+.switch i::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.switch input:checked+i{background:var(--accent)} .switch input:checked+i::after{left:19px}
+.seg{display:inline-flex;padding:3px;border-radius:10px;background:var(--bg2);border:1px solid var(--line)}
+.seg button{border:0;background:none;padding:5px 12px;border-radius:7px;font-size:12px;font-weight:600;color:var(--ink2);cursor:pointer}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.comb{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+.divider{height:1px;background:var(--line);margin:12px 0}
+
+/* ---------- modal & toasts ---------- */
+.scrim{position:fixed;inset:0;background:rgba(3,5,10,.55);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:20}
+.scrim.open{display:flex;animation:fade .15s ease}
+@keyframes fade{from{opacity:0}}
+.modal{width:min(520px,92vw);max-height:84vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.5);animation:rise .18s ease}
+@keyframes rise{from{transform:translateY(8px);opacity:.6}}
+.modal header{padding:18px 20px 6px;font-size:16px;font-weight:700}
+.modal .body{padding:6px 20px 12px;overflow:auto;color:var(--ink2)}
+.modal .body p{margin:6px 0}
+.modal footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 18px}
+.pick{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.crumbs{font:12px var(--mono);color:var(--muted);word-break:break-all;margin-bottom:6px}
+.toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:30}
+.toast{min-width:260px;max-width:420px;padding:11px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line);
+  box-shadow:var(--shadow);font-size:13px;display:flex;gap:10px;align-items:flex-start;animation:rise .2s ease}
+.toast .dot{margin-top:5px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.5"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v1H3V7z"/><path d="M3 10h18l-2 9H5z"/></symbol>
+  <symbol id="i-tune" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-hub" viewBox="0 0 24 24"><path d="M5 20l2.6-9h8.8L19 20z" fill="rgba(255,255,255,.18)" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M7.6 11h8.8" stroke="#fff" stroke-width="1.8"/><circle cx="12" cy="6" r="3.2" fill="#facc15"/></symbol>
+</svg>
+
+<div class="top">
+  <div class="brand"><span class="logo"><svg><use href="#i-hub"/></svg></span>Hub Counter</div>
+  <div class="file"><span class="name" id="path">New setup</span><span class="pill dirty" id="savestate">Not saved</span></div>
+  <button class="btn ghost" onclick="openSetup()"><svg><use href="#i-open"/></svg>Open</button>
+  <button class="btn" onclick="save()"><svg><use href="#i-save"/></svg>Save</button>
+</div>
+
+<div class="wrap">
+  <div class="main">
+    <div class="board">
+      <div class="score red"><div class="lbl">RED HUB</div><div class="num tnum" id="red">0</div></div>
+      <div class="score blue"><div class="lbl">BLUE HUB</div><div class="num tnum" id="blue">0</div></div>
+      <div class="card status">
+        <div class="state"><span class="dot" id="sdot"></span><span id="stext">Stopped</span></div>
+        <div class="sub" id="ssub">Counts are sent to bioarena once you press Start.</div>
+        <div class="chips" id="schips"></div>
+      </div>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="badges" id="badges"></div>
+      <div class="banner" id="banner"></div>
+      <div class="empty" id="empty">
+        <svg><use href="#i-cam"/></svg>
+        <h3>No picture yet</h3>
+        <div>Add a camera or a recording in step 1.</div>
+      </div>
+      <div class="pic" id="pic" style="display:none"><img id="img" alt=""><canvas id="cv"></canvas></div>
+    </div>
+    <div class="hint"><span id="hint"></span><div class="progress" id="prog"><i></i></div></div>
+    <details class="log"><summary>Activity</summary><div id="log"></div></details>
+  </div>
+
+  <div class="steps">
+    <section class="card step" id="st1">
+      <h2><span class="n">1</span>Cameras</h2>
+      <div class="list" id="cams"></div>
+      <div class="row">
+        <button class="btn" onclick="findCams()"><svg><use href="#i-search"/></svg>Find cameras</button>
+        <button class="btn" onclick="pickFile('add')"><svg><use href="#i-film"/></svg>Add recording</button>
+      </div>
+      <div id="camform" style="display:none">
+        <div class="divider"></div>
+        <div class="fields" id="form">
+          <label class="field full"><span>Name</span><input class="input" id="f_name"></label>
+          <label class="field full"><span>Source</span><input class="input" id="f_source"></label>
+          <label class="field"><span>Frame rate</span><input class="input" id="f_fps" type="number" min="0" placeholder="camera default"></label>
+          <label class="field"><span>Size</span><input class="input" id="f_size" placeholder="1280x720"></label>
+        </div>
+        <div class="row">
+          <button class="btn sm" onclick="grab()"><svg><use href="#i-image"/></svg>Refresh picture</button>
+          <span class="muted" id="seekwrap">at <input class="input" id="seek" type="number" min="0" style="width:64px;height:28px;display:inline-block"> s</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card step" id="st2">
+      <h2><span class="n">2</span>Hub outlines</h2>
+      <div class="list" id="zones"></div>
+      <div class="row">
+        <button class="btn red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Draw red</button>
+        <button class="btn blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Draw blue</button>
+      </div>
+      <div class="comb"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
+      <div class="comb"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
+      <p class="muted" style="margin:8px 0 0">Sum when cameras see different balls; max or median when several watch the same ones.</p>
+    </section>
+
+    <section class="card step" id="st3">
+      <h2><span class="n">3</span>Ball size</h2>
+      <div class="row" style="align-items:flex-end">
+        <label class="field" style="flex:1"><span>One ball, in pixels</span><input class="input big tnum" id="f_ball_area" type="number" min="0" placeholder="not measured"></label>
+        <button class="btn primary" onclick="measure()"><svg><use href="#i-ruler"/></svg>Measure</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Put a few balls near the hub, apart from each other, then measure (5 s).</p>
+      <details class="adv"><summary>Calibration <span class="muted">(optional)</span></summary>
+        <div class="slider" style="margin-top:10px"><span class="muted" style="width:92px">Blur correction</span><input type="range" id="f_blur" min="0" max="1" step="0.1"><b class="tnum" id="blurv">0</b></div>
+        <label class="switch"><span>Ignore yellow that stays still</span><input type="checkbox" id="f_remove_static"><i></i></label>
+        <button class="btn sm" onclick="pickFile('calibrate')"><svg><use href="#i-tune"/></svg>Calibrate from a hand-counted recording</button>
+      </details>
+    </section>
+
+    <section class="card step" id="st4">
+      <h2><span class="n">4</span>Run</h2>
+      <label class="field"><span>bioarena address</span><input class="input tnum" id="target" value="10.0.100.5:8411"></label>
+      <label class="switch"><span>Practice with a test receiver</span><input type="checkbox" id="practice"><i></i></label>
+      <label class="switch"><span>Play recordings at real speed</span><input type="checkbox" id="realtime" checked><i></i></label>
+      <label class="switch"><span>Save a CSV log of every count</span><input type="checkbox" id="csv" checked><i></i></label>
+      <div style="margin-top:10px">
+        <button class="go" id="start" onclick="start()">START</button>
+        <button class="go stop" id="stop" onclick="stop()" style="display:none">STOP</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"><div class="modal"><header id="mTitle"></header><div class="body" id="mBody"></div><footer id="mFoot"></footer></div></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const COL={red:"#ff4d4f",blue:"#3b8cff"};
+let S=null,cur=null,drawing=null,logId=0,lastPic="",jobSeen=0,pickMode=null,lastCounts={red:0,blue:0},savedCfg=null;
+
+/* ---------- plumbing ---------- */
+async function api(action,body={}){
+  const r=await fetch("/api/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json(); if(!r.ok||j.error){toast(j.error||"Something went wrong","bad");throw j;} return j.result;}
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function cam(){return S&&S.cfg.cameras.find(c=>c.name===cur);}
+function toast(msg,kind="ok",ms=4200){const t=document.createElement("div");t.className="toast";
+  t.innerHTML=`<span class="dot ${kind}"></span><div>${esc(msg)}</div>`;$("toasts").appendChild(t);setTimeout(()=>t.remove(),ms);}
+function hint(html){$("hint").innerHTML=html||"";}
+
+/* ---------- modal (replaces alert / confirm / prompt) ---------- */
+let closeModal=()=>{};
+function modal(title,bodyHTML,buttons){closeModal(null);return new Promise(res=>{
+  $("mTitle").textContent=title;$("mBody").innerHTML=bodyHTML;const F=$("mFoot");F.innerHTML="";
+  const close=v=>{$("scrim").classList.remove("open");document.removeEventListener("keydown",key);closeModal=()=>{};res(v);};
+  closeModal=close;
+  for(const b of buttons){const e=document.createElement("button");e.className="btn "+(b.cls||"");e.textContent=b.label;
+    e.onclick=()=>close(b.value===undefined?true:(typeof b.value==="function"?b.value():b.value));F.appendChild(e);}
+  const key=e=>{if(e.key==="Escape")close(null);if(e.key==="Enter"&&buttons.length){const last=buttons[buttons.length-1];close(typeof last.value==="function"?last.value():(last.value??true));}};
+  document.addEventListener("keydown",key);$("scrim").classList.add("open");
+  $("scrim").onclick=e=>{if(e.target.id==="scrim")close(null);};
+  const inp=$("mBody").querySelector("input");if(inp)setTimeout(()=>inp.focus(),30);});}
+const confirmBox=(t,m,ok="OK")=>modal(t,`<p>${m}</p>`,[{label:"Cancel",value:false},{label:ok,cls:"primary",value:true}]);
+function ask(t,label,val="",type="text"){return modal(t,`<label class="field"><span>${esc(label)}</span><input class="input" id="mIn" type="${type}" value="${esc(val)}"></label>`,
+  [{label:"Cancel",value:null},{label:"OK",cls:"primary",value:()=>$("mIn").value}]);}
+
+/* ---------- refresh ---------- */
+async function refresh(){
+  let r;try{r=await fetch("/api/state?log="+logId);}catch(e){setStatus("bad","Lost the counter","Is run.py still running?");return;}
+  S=await r.json();
+  for(const [id,t,m] of S.log){logId=id;const d=$("log");d.textContent+=t+"  "+m+"\n";d.scrollTop=d.scrollHeight;}
+  if(savedCfg===null)savedCfg=JSON.stringify(S.cfg);
+  $("path").textContent=S.path?S.path.split("/").pop():"New setup";$("path").title=S.path||"";
+  const dirty=JSON.stringify(S.cfg)!==savedCfg||!S.path;
+  $("savestate").className="pill "+(dirty?"dirty":"saved");$("savestate").textContent=dirty?"Not saved":"Saved";
+  if(!cam()&&S.cfg.cameras.length)cur=S.cfg.cameras[0].name;
+  renderCams();renderZones();renderSteps();renderLive();handleJob();
+  const pic=cur&&S.pictures[cur];
+  if(pic){const key=cur+":"+pic+":"+(S.running?Date.now():S.job.id);if(S.running||key!==lastPic){lastPic=key;loadImg();}}
+  else{$("pic").style.display="none";$("empty").style.display="";}
+  $("badges").innerHTML=cur?`<span class="badge">${S.running?'':'<svg width="13" height="13"><use href="#i-cam"/></svg>'}${esc(cur)}</span>`+(S.running?`<span class="badge live"><span class="dot"></span>LIVE</span>`:""):"";
+  if($("pic").style.display!=="none")overlay();
+}
+function renderCams(){const L=$("cams");L.innerHTML="";
+  for(const c of S.cfg.cameras){const file=!/^\d+$/.test(c.source)&&!c.source.includes("://");
+    const d=document.createElement("div");d.className="item"+(c.name===cur?" sel":"");
+    d.innerHTML=`<span class="icon"><svg><use href="#i-${file?'film':'cam'}"/></svg></span><span class="t">${esc(c.name)}</span>`+
+      (c.ball_area?`<span class="tag ok">${Math.round(c.ball_area)} px</span>`:`<span class="tag warn">measure</span>`)+`<button class="x" title="Remove">✕</button>`;
+    d.onclick=e=>{if(e.target.classList.contains("x")){removeCam(c.name);return;}cur=c.name;lastPic="";fillForm();refresh();if(!S.pictures[c.name])grab();};
+    L.appendChild(d);}
+  $("camform").style.display=cam()?"":"none";
+  const c=cam();$("seekwrap").style.display=c&&!/^\d+$/.test(c.source)?"":"none";
+  if(!document.activeElement||!document.activeElement.closest(".step"))fillForm();
+  document.querySelectorAll(".seg").forEach(g=>{const v=S.cfg.combine[g.dataset.hub]||"sum";g.querySelectorAll("button").forEach(b=>b.className=b.textContent===v?"on":"");});
+  $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";}
+function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
+  $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;}
+function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
+  if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">No outlines yet. Draw one around each hub's opening.</div>`;return;}
+  for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";
+    d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+" in":z.outline.length+" corners"}</span><button class="x" title="Delete">✕</button>`;
+    d.querySelector(".x").onclick=()=>api("delete_zone",{camera:cur,zone:z.name}).then(refresh);L.appendChild(d);}}
+function renderSteps(){const cams=S.cfg.cameras;
+  const done=[cams.length>0,cams.length>0&&cams.every(c=>c.zones.length),cams.length>0&&cams.every(c=>c.ball_area>0),S.running];
+  done.forEach((d,i)=>{const s=$("st"+(i+1));s.classList.toggle("done",d);s.querySelector(".n").textContent=d?"✓":i+1;});}
+function setStatus(kind,text,sub){$("sdot").className="dot "+kind;$("stext").textContent=text;$("ssub").textContent=sub||"";}
+function renderLive(){const v=S.live;
+  for(const h of["red","blue"]){const e=$(h);if(v.counts[h]!==lastCounts[h]){e.textContent=v.counts[h];e.classList.remove("bump");void e.offsetWidth;if(v.counts[h]>lastCounts[h])e.classList.add("bump");lastCounts[h]=v.counts[h];}}
+  if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:"Ready. Press Start to send counts to bioarena.");
+  else if(v.stale.length)setStatus("bad","No picture",`${v.stale.join(", ")} stopped sending frames — bioarena shows OFFLINE.`);
+  else if(v.linked){const r=v.reply||{};setStatus("ok","Connected to bioarena",`${(r.match_state||"").replace(/_/g," ").toLowerCase()} · ${r.shift||""} · ${v.rtt_ms} ms`);}
+  else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
+  $("schips").innerHTML=Object.entries(v.cameras).map(([n,c])=>`<span class="chip">${esc(n)} <b class="tnum">${Math.round(c.fps)}</b> fps</span>`).join("");}
+function handleJob(){const j=S.job;
+  if(j.running){$("prog").style.display=j.progress!=null?"block":"none";$("prog").firstChild.style.width=((j.progress||0)*100)+"%";
+    hint(`<b>${esc(j.name[0].toUpperCase()+j.name.slice(1))}…</b>`);return;}
+  $("prog").style.display="none";if(j.id===jobSeen)return;jobSeen=j.id;
+  if(j.error){hint("");return;}
+  if(j.name==="find cameras")chooseCamera(j.result||[]);
+  else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
+    else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
+  else if(j.name==="calibrate"&&j.result)showCalibration(j.result);
+  else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Draw red</b> or <b>Draw blue</b> and click the corners of the hub's opening.":"");}}
+async function chooseCamera(found){if(!found.length){modal("No camera found","<p>Check the camera is plugged in. On a Mac, the terminal needs permission: <b>System Settings → Privacy &amp; Security → Camera</b>.</p>",[{label:"OK",cls:"primary"}]);return;}
+  const body=`<p>Numbers can change when cameras are re-plugged — check the picture after adding.</p><div class="pick">`+
+    found.map(c=>`<div class="item" data-i="${c.index}"><span class="icon"><svg><use href="#i-cam"/></svg></span><span class="t">Camera ${c.index}</span><span class="s">${esc(c.size)}</span></div>`).join("")+"</div>";
+  const p=modal("Add a camera",body,[{label:"Cancel",value:null}]);
+  document.querySelectorAll("#mBody .item").forEach(e=>e.onclick=()=>{closeModal(null);api("add_camera",{source:e.dataset.i}).then(c=>{cur=c.name;lastPic="";grab();});});
+  await p;}
+async function showCalibration(r){const rows=Object.entries(r.hand).map(([h,n])=>`<div class="item"><span class="tag ${h}">${h.toUpperCase()}</span><span class="t">${r.counts[h]||0} counted</span><span class="s">${n} by hand · ${r.uncorrected[h]||0} without</span></div>`).join("");
+  const ok=await modal("Calibration result",`<p>Best setting: blur <b>${r.blur}</b>, ignore still yellow <b>${r.remove_static?"on":"off"}</b>.</p><div class="pick">${rows}</div><p class="muted">Fitted to one recording. Check it on a second one before trusting it.</p>`,
+    [{label:"Keep current",value:false},{label:"Use these settings",cls:"primary",value:true}]);
+  if(ok){await api("apply_calibration",{camera:r.camera,blur:r.blur,remove_static:r.remove_static});toast("Calibration applied");refresh();}}
+
+/* ---------- picture & drawing ---------- */
+$("img").addEventListener("load",sizeCanvas);
+function loadImg(){const n=new Image();n.onload=()=>{$("empty").style.display="none";$("pic").style.display="";$("img").src=n.src;};
+  n.src="/frame.jpg?cam="+encodeURIComponent(cur)+"&w=1600&t="+Date.now();}
+function sizeCanvas(){const img=$("img"),cv=$("cv");if(!img.clientWidth)return;
+  if(cv.width!==img.clientWidth||cv.height!==img.clientHeight){cv.width=img.clientWidth;cv.height=img.clientHeight;}overlay();}
+function scale(){const p=S&&S.pictures[cur];return p?$("img").clientWidth/p[0]:1;}
+function overlay(){const cv=$("cv"),g=cv.getContext("2d");g.clearRect(0,0,cv.width,cv.height);const c=cam();if(!c)return;const k=scale();
+  for(const z of c.zones){const col=COL[z.hub];g.beginPath();z.outline.forEach(([x,y],i)=>i?g.lineTo(x*k,y*k):g.moveTo(x*k,y*k));g.closePath();
+    g.fillStyle=col+"22";g.fill();g.lineWidth=2.5;g.strokeStyle=col;g.stroke();
+    const n=S.live.zones[z.name];const label=(n!==undefined?n+"  ":"")+z.hub.toUpperCase();
+    const x=Math.min(...z.outline.map(p=>p[0]))*k,y=Math.min(...z.outline.map(p=>p[1]))*k-10;
+    g.font="700 13px -apple-system,Segoe UI,sans-serif";const w=g.measureText(label).width+14;
+    g.fillStyle=col;roundRect(g,x,y-16,w,22,6);g.fill();g.fillStyle="#fff";g.fillText(label,x+7,y);}
+  if(drawing){const col=COL[drawing.hub];g.setLineDash([6,4]);g.lineWidth=2;g.strokeStyle=col;g.beginPath();
+    drawing.pts.forEach(([x,y],i)=>i?g.lineTo(x*k,y*k):g.moveTo(x*k,y*k));if(drawing.hover&&drawing.pts.length)g.lineTo(drawing.hover[0],drawing.hover[1]);g.stroke();g.setLineDash([]);
+    drawing.pts.forEach(([x,y],i)=>{g.beginPath();g.arc(x*k,y*k,i===0?7:5,0,7);g.fillStyle=i===0?"#fff":col;g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke();});}}
+function roundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
+$("cv").addEventListener("click",e=>{if(!drawing)return;const r=e.target.getBoundingClientRect(),k=scale();
+  const p=[(e.clientX-r.left)/k,(e.clientY-r.top)/k];
+  // clicking the first corner again closes the outline
+  if(drawing.pts.length>=3){const f=drawing.pts[0];if(Math.hypot((f[0]-p[0])*k,(f[1]-p[1])*k)<10){finish();return;}}
+  drawing.pts.push(p);overlay();});
+$("cv").addEventListener("mousemove",e=>{if(!drawing)return;const r=e.target.getBoundingClientRect();drawing.hover=[e.clientX-r.left,e.clientY-r.top];overlay();});
+$("cv").addEventListener("dblclick",()=>finish());
+$("cv").addEventListener("contextmenu",e=>{e.preventDefault();finish();});
+document.addEventListener("keydown",e=>{if(!drawing)return;if(e.key==="Enter")finish();if(e.key==="Escape")cancelDraw();if(e.key==="Backspace"){drawing.pts.pop();overlay();}});
+window.addEventListener("resize",sizeCanvas);
+function draw(hub){if(!cam()||!S.pictures[cur]){toast("Add a camera and show its picture first","warn");return;}
+  drawing={hub,pts:[]};const b=$("banner");b.style.display="block";
+  b.innerHTML=`Click the corners of the <span style="color:${COL[hub]}">${hub.toUpperCase()}</span> hub's opening · close it on the first corner or <kbd>Enter</kbd> · <kbd>⌫</kbd> undo · <kbd>Esc</kbd> cancel`;overlay();}
+function cancelDraw(){drawing=null;$("banner").style.display="none";overlay();}
+async function finish(){if(!drawing)return;const d=drawing;
+  try{await api("add_zone",{camera:cur,hub:d.hub,points:d.pts});cancelDraw();toast(d.hub.toUpperCase()+" outline saved");
+    const c=cam();hint(c&&!c.ball_area?"Next: put a few balls near the hub and press <b>Measure</b>.":"");}catch(e){}refresh();}
+
+/* ---------- actions ---------- */
+async function storeForm(){const c=cam();if(!c)return;const f={};for(const k of["name","source","fps","size","ball_area"])f[k]=$("f_"+k).value;
+  f.blur=$("f_blur").value;f.remove_static=$("f_remove_static").checked;try{const r=await api("update_camera",{name:cur,fields:f});cur=r.name;}catch(e){}refresh();}
+for(const k of["name","source","fps","size","ball_area"])$("f_"+k).addEventListener("change",storeForm);
+$("f_blur").addEventListener("input",()=>$("blurv").textContent=(+$("f_blur").value).toFixed(1));
+$("f_blur").addEventListener("change",storeForm);$("f_remove_static").addEventListener("change",storeForm);
+document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>api("combine",{hub:g.dataset.hub,how:b.textContent}).then(refresh)));
+function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
+function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
+function findCams(){api("find_cameras");}
+async function removeCam(name){if(await confirmBox("Remove camera",`Remove <b>${esc(name)}</b> and its outlines?`,"Remove")){await api("remove_camera",{name});if(cur===name)cur=null;lastPic="";refresh();}}
+async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked});
+  hint("Running. Leave it on across matches — bioarena marks each match's start itself.");}catch(e){}}
+function stop(){api("stop");hint("");}
+async function save(){let p=null;if(!S.path){p=await ask("Save setup","File name","cams.json");if(p===null)return;}
+  await api("save",{path:p});savedCfg=JSON.stringify(S.cfg);toast("Setup saved");refresh();}
+async function openSetup(){const p=await ask("Open setup","Setup file",S&&S.path||"cams.json");if(p){await api("load",{path:p});cur=null;lastPic="";savedCfg=null;refresh();}}
+async function pickFile(mode,path=""){pickMode=mode;const L=await(await fetch("/api/ls?path="+encodeURIComponent(path))).json();
+  const title=mode==="add"?"Add a recording":"Pick the hand-counted recording";
+  let body=`<div class="crumbs">${esc(L.path)}${L.error?" — "+esc(L.error):""}</div><div class="pick">`+
+    `<div class="item" data-d="${esc(L.parent)}"><span class="icon"><svg><use href="#i-up"/></svg></span><span class="t">Up one folder</span></div>`+
+    L.dirs.map(d=>`<div class="item" data-d="${esc(L.path+"/"+d)}"><span class="icon"><svg><use href="#i-folder"/></svg></span><span class="t">${esc(d)}</span></div>`).join("")+
+    L.videos.map(v=>`<div class="item" data-v="${esc(L.path+"/"+v)}"><span class="icon"><svg><use href="#i-film"/></svg></span><span class="t">${esc(v)}</span></div>`).join("")+
+    (L.videos.length||L.dirs.length?"":`<div class="muted">No videos here.</div>`)+"</div>";
+  const p=modal(title,body,[{label:"Cancel",value:null}]);
+  document.querySelectorAll("#mBody .item").forEach(e=>e.onclick=()=>{closeModal(null);if(e.dataset.d!==undefined)pickFile(mode,e.dataset.d);else chose(e.dataset.v);});
+  await p;}
+async function chose(p){if(pickMode==="add"){try{const c=await api("add_camera",{source:p});cur=c.name;lastPic="";grab();}catch(e){}return;}
+  const c=cam();if(!c)return;const hubs=[...new Set(c.zones.map(z=>z.hub))];
+  const body=`<p>How many balls went into each hub in this recording, counted by hand?</p>`+hubs.map(h=>`<label class="field" style="margin-top:8px"><span>${h.toUpperCase()} hub</span><input class="input" type="number" min="0" id="hand_${h}"></label>`).join("");
+  const ok=await modal("Hand count",body,[{label:"Cancel",value:false},{label:"Calibrate",cls:"primary",value:true}]);if(!ok)return;
+  const hand={};for(const h of hubs)hand[h]=parseInt($("hand_"+h).value,10)||0;api("calibrate",{camera:cur,video:p,hand});}
+(function loop(){refresh().finally(()=>setTimeout(loop,S&&S.running?250:700));})();
+</script>
+</body>
+</html>

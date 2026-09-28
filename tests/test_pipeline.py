@@ -2709,7 +2709,7 @@ def test_hub_ui_controller_and_web():
                 return e.code, e.read()
 
         code, page = call("/")
-        check("the page is served", code == 200 and b"Hub FUEL counter" in page)
+        check("the page is served", code == 200 and b"<title>Hub Counter</title>" in page)
         code, body = call("/api/state")
         check("the state is served as JSON",
               code == 200 and json.loads(body)["cfg"]["cameras"][0]["name"]

@@ -19,15 +19,73 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog,
-                               QFormLayout, QGroupBox, QHBoxLayout, QInputDialog,
-                               QLabel, QLineEdit, QListWidget, QMainWindow,
-                               QMessageBox, QPlainTextEdit, QPushButton, QSlider,
+                               QFormLayout, QFrame, QGroupBox, QHBoxLayout,
+                               QInputDialog, QLabel, QLineEdit, QListWidget,
+                               QMainWindow, QMessageBox, QPlainTextEdit,
+                               QPushButton, QScrollArea, QSizePolicy, QSlider,
                                QVBoxLayout, QWidget)
 
 from .hubapp import (DEFAULT_TARGET, HubController, encode, fit_scale,
                      probe_cameras)
 
-COL = {"red": QColor("#e53935"), "blue": QColor("#1e88e5")}
+COL = {"red": QColor("#ff4d4f"), "blue": QColor("#3b8cff")}
+
+# One dark theme, the same palette as the web page, so the two front ends look
+# like one product. Qt draws its own widgets from this; no platform theme.
+QSS = """
+* { font-family: -apple-system, "SF Pro Text", "Segoe UI", "Helvetica Neue", Arial; font-size: 13px; }
+QMainWindow, QWidget#root { background: #0b0e14; color: #e7ebf3; }
+QWidget { color: #e7ebf3; }
+QLabel#muted { color: #6f7a8f; font-size: 12px; }
+QLabel#hint { color: #a9b2c3; font-size: 14px; }
+QLabel#file { color: #a9b2c3; }
+QLabel#brand { font-size: 15px; font-weight: 700; }
+QFrame#topbar { background: #0f131b; border-bottom: 1px solid #252c3b; }
+QFrame#card, QGroupBox { background: #141923; border: 1px solid #252c3b; border-radius: 14px; }
+QGroupBox { margin-top: 14px; padding: 30px 12px 12px 12px; font-weight: 700; font-size: 14px; }
+QGroupBox::title { subcontrol-origin: padding; subcontrol-position: top left; left: 14px; top: 10px; color: #e7ebf3; }
+QGroupBox[done="true"]::title { color: #22c55e; }
+QFrame#red { border-radius: 14px; background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #ff4d4f, stop:1 #c9302c); }
+QFrame#blue { border-radius: 14px; background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #3b8cff, stop:1 #1f5fd1); }
+QLabel#tileLbl { color: rgba(255,255,255,.85); font-size: 11px; font-weight: 800; letter-spacing: 2px; background: transparent; }
+QLabel#tileNum { color: white; font-size: 52px; font-weight: 800; background: transparent; }
+QLabel#state { font-size: 15px; font-weight: 700; background: transparent; }
+QLabel#sub { color: #a9b2c3; font-size: 12px; background: transparent; }
+QPushButton { background: #1a2030; border: 1px solid #252c3b; border-radius: 9px; padding: 7px 13px; font-weight: 600; }
+QPushButton:hover { border-color: #5b7cfa; background: #1d2540; }
+QPushButton:pressed { background: #16203a; }
+QPushButton:disabled { color: #4a5263; border-color: #1f2533; }
+QPushButton#primary { background: #5b7cfa; border: none; color: white; }
+QPushButton#primary:hover { background: #6d8bff; }
+QPushButton#red { color: #ff4d4f; border-color: #5a2a33; }
+QPushButton#red:hover { background: #2a1519; }
+QPushButton#blue { color: #3b8cff; border-color: #22385e; }
+QPushButton#blue:hover { background: #121f36; }
+QPushButton#start { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #2fd06a, stop:1 #16a34a); border: none; color: white; font-size: 17px; font-weight: 800; padding: 14px; border-radius: 12px; letter-spacing: 2px; }
+QPushButton#start:disabled { background: #1d3326; color: #4d7a5d; }
+QPushButton#stop { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ff5a5a, stop:1 #dc2626); border: none; color: white; font-size: 17px; font-weight: 800; padding: 14px; border-radius: 12px; letter-spacing: 2px; }
+QPushButton#stop:disabled { background: #3a1c1f; color: #7a4a4d; }
+QLineEdit, QComboBox { background: #0f131b; border: 1px solid #252c3b; border-radius: 8px; padding: 6px 9px; selection-background-color: #5b7cfa; }
+QLineEdit:focus, QComboBox:focus { border-color: #5b7cfa; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView { background: #141923; border: 1px solid #252c3b; selection-background-color: #5b7cfa; }
+QListWidget { background: #0f131b; border: 1px solid #252c3b; border-radius: 10px; padding: 4px; outline: none; }
+QListWidget::item { padding: 7px 8px; border-radius: 7px; }
+QListWidget::item:selected { background: #22305a; color: white; }
+QListWidget::item:hover { background: #1a2238; }
+QPlainTextEdit { background: #0f131b; border: 1px solid #252c3b; border-radius: 10px; padding: 6px; color: #a9b2c3; font-family: Menlo, Consolas, monospace; font-size: 11px; }
+QCheckBox { spacing: 9px; padding: 3px 0; }
+QCheckBox::indicator { width: 34px; height: 18px; border-radius: 9px; background: #252c3b; }
+QCheckBox::indicator:checked { background: #5b7cfa; }
+QSlider::groove:horizontal { height: 4px; background: #252c3b; border-radius: 2px; }
+QSlider::sub-page:horizontal { background: #5b7cfa; border-radius: 2px; }
+QSlider::handle:horizontal { background: white; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }
+QScrollArea, QScrollArea > QWidget > QWidget, QWidget#side { border: none; background: #0b0e14; }
+QScrollBar:vertical { background: transparent; width: 10px; }
+QScrollBar::handle:vertical { background: #252c3b; border-radius: 5px; min-height: 30px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+QMessageBox, QInputDialog, QFileDialog { background: #141923; }
+"""
 VIDEO_FILTER = "Video (*.mp4 *.mov *.mkv *.avi *.m4v);;All files (*)"
 
 
@@ -59,24 +117,58 @@ class PictureView(QWidget):
 
     def paintEvent(self, _):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#111"))
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(QPen(QColor("#252c3b"), 1))
+        p.setBrush(QColor("#05070b"))
+        p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 14, 14)
         if self.pix is None:
-            p.setPen(QColor("#aaa"))
-            p.drawText(self.rect(), Qt.AlignCenter,
-                       "Add a camera or a recording to begin.")
+            p.setPen(QColor("#8a93a6"))
+            f = QFont()
+            f.setPointSize(14)
+            f.setBold(True)
+            p.setFont(f)
+            p.drawText(self.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter,
+                       "No picture yet")
+            f.setPointSize(11)
+            f.setBold(False)
+            p.setFont(f)
+            p.drawText(self.rect().adjusted(0, 20, 0, 20), Qt.AlignCenter,
+                       "Add a camera or a recording in step 1.")
             return
         p.drawPixmap(0, 0, self.pix)
+        if self.win.last_state.get("running"):
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(8, 10, 16, 190))
+            p.drawRoundedRect(12, 12, 70, 26, 8, 8)
+            p.setBrush(QColor("#ff3b3b"))
+            p.drawEllipse(QPointF(26, 25), 5, 5)
+            p.setPen(QColor("white"))
+            p.setFont(QFont("Helvetica", 11, QFont.Bold))
+            p.drawText(QPointF(37, 30), "LIVE")
         cam = self.win.cam()
         k = self.scale
         live = self.win.last_state.get("live", {}).get("zones", {}) \
             if self.win.last_state else {}
-        p.setFont(QFont("Helvetica", 12, QFont.Bold))
+        f = QFont("Helvetica", 11, QFont.Bold)
+        p.setFont(f)
         for z in (cam or {}).get("zones", []):
+            col = COL[z["hub"]]
             poly = QPolygonF([QPointF(x * k, y * k) for x, y in z["outline"]])
-            p.setPen(QPen(COL[z["hub"]], 3))
+            fill = QColor(col)
+            fill.setAlpha(40)
+            p.setBrush(fill)
+            p.setPen(QPen(col, 2.5))
             p.drawPolygon(poly)
-            label = z["name"] + (f": {live[z['name']]}" if z["name"] in live else "")
-            p.drawText(QPointF(z["outline"][0][0] * k, z["outline"][0][1] * k - 6), label)
+            label = (f"{live[z['name']]}  " if z["name"] in live else "") + z["hub"].upper()
+            x = min(q[0] for q in z["outline"]) * k
+            y = min(q[1] for q in z["outline"]) * k - 28
+            w = p.fontMetrics().horizontalAdvance(label) + 14
+            p.setPen(Qt.NoPen)
+            p.setBrush(col)
+            p.drawRoundedRect(int(x), int(y), w, 22, 6, 6)
+            p.setPen(QColor("white"))
+            p.drawText(QPointF(x + 7, y + 16), label)
+        p.setBrush(Qt.NoBrush)
         if self.drawing:
             pen = QPen(COL[self.drawing["hub"]], 2, Qt.DashLine)
             p.setPen(pen)
@@ -132,50 +224,92 @@ class HubWindow(QMainWindow):
     # -- layout -------------------------------------------------------------
     def _build(self) -> None:
         root = QWidget()
+        root.setObjectName("root")
         self.setCentralWidget(root)
-        outer = QHBoxLayout(root)
-        left = QVBoxLayout()
-        outer.addLayout(left, 1)
-        right = QVBoxLayout()
-        outer.addLayout(right)
+        page = QVBoxLayout(root)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.setSpacing(0)
 
-        bar = QHBoxLayout()
-        for text, fn in (("Open setup…", self.open_setup), ("Save", self.save),
+        top = QFrame()
+        top.setObjectName("topbar")
+        bar = QHBoxLayout(top)
+        bar.setContentsMargins(18, 10, 18, 10)
+        brand = QLabel("▲  Hub Counter")
+        brand.setObjectName("brand")
+        bar.addWidget(brand)
+        bar.addSpacing(14)
+        self.path_lbl = QLabel("New setup")
+        self.path_lbl.setObjectName("file")
+        bar.addWidget(self.path_lbl, 1)
+        for text, fn in (("Open…", self.open_setup), ("Save", self.save),
                          ("Save as…", self.save_as)):
             b = QPushButton(text)
             b.clicked.connect(fn)
             bar.addWidget(b)
-        self.path_lbl = QLabel("(unsaved setup)")
-        bar.addWidget(self.path_lbl, 1)
-        left.addLayout(bar)
+        page.addWidget(top)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(18, 16, 18, 18)
+        body.setSpacing(16)
+        page.addLayout(body, 1)
+        left = QVBoxLayout()
+        left.setSpacing(12)
+        body.addLayout(left, 1)
+        side = QWidget()
+        side.setObjectName("side")
+        right = QVBoxLayout(side)
+        right.setContentsMargins(0, 0, 6, 0)
+        right.setSpacing(12)
+        scroll = QScrollArea()
+        scroll.setWidget(side)
+        scroll.setWidgetResizable(True)
+        scroll.setFixedWidth(410)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body.addWidget(scroll)
 
         score = QHBoxLayout()
-        self.red = QLabel("RED 0")
-        self.blue = QLabel("BLUE 0")
-        for lbl, col in ((self.red, "#e53935"), (self.blue, "#1e88e5")):
-            lbl.setStyleSheet(f"background:{col};color:white;font:bold 30px;"
-                              f"padding:4px 16px;border-radius:8px")
-            lbl.setMinimumWidth(170)
-            lbl.setAlignment(Qt.AlignCenter)
-            score.addWidget(lbl)
-        self.link = QLabel("stopped")
+        score.setSpacing(12)
+        self.red, self.blue = QLabel("0"), QLabel("0")
+        for num, key, title in ((self.red, "red", "RED HUB"),
+                                (self.blue, "blue", "BLUE HUB")):
+            tile = QFrame()
+            tile.setObjectName(key)
+            tile.setMinimumSize(200, 104)
+            v = QVBoxLayout(tile)
+            v.setContentsMargins(18, 12, 18, 8)
+            lbl = QLabel(title)
+            lbl.setObjectName("tileLbl")
+            num.setObjectName("tileNum")
+            v.addWidget(lbl)
+            v.addWidget(num)
+            score.addWidget(tile, 1)
+        card = QFrame()
+        card.setObjectName("card")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(16, 12, 16, 12)
+        self.state_lbl = QLabel("●  Stopped")
+        self.state_lbl.setObjectName("state")
+        self.link = QLabel("Counts are sent to bioarena once you press Start.")
+        self.link.setObjectName("sub")
         self.link.setWordWrap(True)
-        score.addWidget(self.link, 1)
+        v.addWidget(self.state_lbl)
+        v.addWidget(self.link)
+        score.addWidget(card, 1)
         left.addLayout(score)
 
         self.view = PictureView(self)
         left.addWidget(self.view, 1)
         self.hint = QLabel("")
-        self.hint.setStyleSheet("font-size:15px")
+        self.hint.setObjectName("hint")
         left.addWidget(self.hint)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMaximumHeight(150)
-        self.log.setStyleSheet("font-family:Menlo,monospace;font-size:11px")
+        self.log.setMaximumHeight(120)
         left.addWidget(self.log)
 
         # 1. cameras
-        g = QGroupBox("1. Cameras")
+        g = QGroupBox("1   Cameras")
+        self.steps = [g]
         v = QVBoxLayout(g)
         self.cams = QListWidget()
         self.cams.setMaximumHeight(90)
@@ -183,7 +317,7 @@ class HubWindow(QMainWindow):
         v.addWidget(self.cams)
         row = QHBoxLayout()
         for text, fn in (("Find cameras", self.find_cameras),
-                         ("Add recording…", self.add_recording),
+                         ("Add video…", self.add_recording),
                          ("Remove", self.remove_camera)):
             b = QPushButton(text)
             b.clicked.connect(fn)
@@ -216,17 +350,25 @@ class HubWindow(QMainWindow):
         b.clicked.connect(self.grab)
         row.addWidget(b)
         b = QPushButton("Measure ball")
+        b.setObjectName("primary")
         b.clicked.connect(self.measure)
         row.addWidget(b)
+        v.addLayout(row)
+        row = QHBoxLayout()
+        seek_lbl = QLabel("Recording: picture at second")
+        seek_lbl.setObjectName("muted")
+        row.addWidget(seek_lbl)
         self.seek = QLineEdit()
-        self.seek.setPlaceholderText("at s")
-        self.seek.setMaximumWidth(60)
+        self.seek.setPlaceholderText("1/3 in")
+        self.seek.setMaximumWidth(70)
         row.addWidget(self.seek)
+        row.addStretch(1)
         v.addLayout(row)
         right.addWidget(g)
 
         # 2. outlines
-        g = QGroupBox("2. Hub outlines")
+        g = QGroupBox("2   Hub outlines")
+        self.steps.append(g)
         v = QVBoxLayout(g)
         self.zones = QListWidget()
         self.zones.setMaximumHeight(80)
@@ -234,7 +376,7 @@ class HubWindow(QMainWindow):
         row = QHBoxLayout()
         for hub in ("red", "blue"):
             b = QPushButton(f"Draw {hub.upper()}")
-            b.setStyleSheet(f"color:{COL[hub].name()};font-weight:bold")
+            b.setObjectName(hub)
             b.clicked.connect(lambda _=False, h=hub: self.start_outline(h))
             row.addWidget(b)
         b = QPushButton("Delete")
@@ -255,17 +397,17 @@ class HubWindow(QMainWindow):
         note = QLabel("sum: cameras see different balls.  max / median: "
                       "several cameras watch the same balls.")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#667085;font-size:11px")
+        note.setObjectName("muted")
         v.addWidget(note)
         right.addWidget(g)
 
         # 3. calibrate
-        g = QGroupBox("3. Calibrate (optional)")
+        g = QGroupBox("3   Calibrate (optional)")
         v = QVBoxLayout(g)
         note = QLabel("Record this camera while balls go in, count them by "
                       "hand, then pick the recording.")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#667085;font-size:11px")
+        note.setObjectName("muted")
         v.addWidget(note)
         b = QPushButton("Calibrate from recording…")
         b.clicked.connect(self.calibrate)
@@ -273,7 +415,8 @@ class HubWindow(QMainWindow):
         right.addWidget(g)
 
         # 4. run
-        g = QGroupBox("4. Run")
+        g = QGroupBox("4   Run")
+        self.steps.append(g)
         v = QVBoxLayout(g)
         form = QFormLayout()
         self.target = QLineEdit(DEFAULT_TARGET)
@@ -288,18 +431,12 @@ class HubWindow(QMainWindow):
             v.addWidget(w)
         row = QHBoxLayout()
         self.start_btn = QPushButton("START")
-        # A style sheet hides Qt's own disabled look, so say it explicitly:
-        # START looked pressable while the feed ran.
-        self.start_btn.setStyleSheet(
-            "QPushButton{background:#43a047;color:white;font:bold 18px;"
-            "padding:8px 20px}QPushButton:disabled{background:#c8e6c9;"
-            "color:#f1f8e9}")
+        # The theme spells out the disabled look: a style sheet hides Qt's
+        # own, and START looked pressable while the feed ran.
+        self.start_btn.setObjectName("start")
         self.start_btn.clicked.connect(self.start)
         self.stop_btn = QPushButton("STOP")
-        self.stop_btn.setStyleSheet(
-            "QPushButton{background:#c62828;color:white;font:bold 18px;"
-            "padding:8px 20px}QPushButton:disabled{background:#ffcdd2;"
-            "color:#fff5f5}")
+        self.stop_btn.setObjectName("stop")
         self.stop_btn.clicked.connect(self.ctl.stop)
         row.addWidget(self.start_btn)
         row.addWidget(self.stop_btn)
@@ -328,7 +465,7 @@ class HubWindow(QMainWindow):
         for i, t, m in s["log"]:
             self.log_id = i
             self.log.appendPlainText(f"{t}  {m}")
-        self.path_lbl.setText(s["path"] or "(unsaved setup)")
+        self.path_lbl.setText(os.path.basename(s["path"]) if s["path"] else "New setup")
         names = [c["name"] for c in s["cfg"]["cameras"]]
         if self.current not in names:
             self.current = names[0] if names else None
@@ -391,21 +528,39 @@ class HubWindow(QMainWindow):
 
     def _live(self, s) -> None:
         v = s["live"]
-        self.red.setText(f"RED {v['counts']['red']}")
-        self.blue.setText(f"BLUE {v['counts']['blue']}")
+        self.red.setText(str(v["counts"]["red"]))
+        self.blue.setText(str(v["counts"]["blue"]))
         if not s["running"]:
-            text, col = "stopped", "#667085"
+            state, col = "Stopped", "#6f7a8f"
+            sub = (s["problems"][0] if s["problems"] else
+                   "Ready. Press Start to send counts to bioarena.")
         elif v["stale"]:
-            text, col = (f"NO PICTURE from {', '.join(v['stale'])} -- bioarena "
-                         f"shows OFFLINE"), "#c62828"
+            state, col = "No picture", "#ef4444"
+            sub = f"{', '.join(v['stale'])} stopped sending frames -- bioarena shows OFFLINE."
         elif v["linked"]:
             r = v["reply"] or {}
-            text, col = (f"bioarena OK  {r.get('match_state', '')} "
-                         f"{r.get('shift', '')}  {v['rtt_ms']} ms"), "#2e7d32"
+            state, col = "Connected to bioarena", "#22c55e"
+            sub = (f"{str(r.get('match_state', '')).replace('_', ' ').lower()} · "
+                   f"{r.get('shift', '')} · {v['rtt_ms']} ms")
         else:
-            text, col = f"no reply from bioarena ({v['target']})", "#c62828"
-        cams = "   ".join(f"{n} {c['fps']} fps" for n, c in v["cameras"].items())
-        self.link.setText(f"<b style='color:{col}'>{text}</b><br>{cams}")
+            state, col = "Sending, no reply yet", "#f59e0b"
+            sub = f"No answer from {v['target']}. Check the cable and address."
+        cams = "   ".join(f"{n}  {c['fps']:.0f} fps" for n, c in v["cameras"].items())
+        self.state_lbl.setText(f"<span style='color:{col}'>●</span>  {state}")
+        self.link.setText(sub + (f"<br><span style='color:#6f7a8f'>{cams}</span>"
+                                 if cams else ""))
+        cams_ = s["cfg"]["cameras"]
+        done = [bool(cams_), bool(cams_) and all(c["zones"] for c in cams_),
+                bool(s["running"])]
+        titles = ("Cameras", "Hub outlines", "Run")
+        nums = ("1", "2", "4")
+        for g, d, t, n in zip(self.steps, done, titles, nums):
+            text = f"{'✓' if d else n}   {t}"
+            if g.title() != text:
+                g.setTitle(text)
+                g.setProperty("done", d)
+                g.style().unpolish(g)
+                g.style().polish(g)
 
     def _job(self, j) -> None:
         if j["running"]:
@@ -595,6 +750,8 @@ class HubWindow(QMainWindow):
 
 def main(setup_path: Optional[str] = None) -> int:
     app = QApplication.instance() or QApplication([])
+    app.setStyle("Fusion")
+    app.setStyleSheet(QSS)
     win = HubWindow(HubController(setup_path))
     win.resize(1400, 900)
     win.show()
