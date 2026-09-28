@@ -318,10 +318,16 @@ class HubWindow(QMainWindow):
         row = QHBoxLayout()
         for text, fn in (("Find cameras", self.find_cameras),
                          ("Add video…", self.add_recording),
-                         ("Remove", self.remove_camera)):
+                         ("Add stream…", self.add_stream)):
             b = QPushButton(text)
             b.clicked.connect(fn)
             row.addWidget(b)
+        v.addLayout(row)
+        row = QHBoxLayout()
+        b = QPushButton("Remove")
+        b.clicked.connect(self.remove_camera)
+        row.addWidget(b)
+        row.addStretch(1)
         v.addLayout(row)
         form = QFormLayout()
         self.f = {}
@@ -539,9 +545,11 @@ class HubWindow(QMainWindow):
             sub = f"{', '.join(v['stale'])} stopped sending frames -- bioarena shows OFFLINE."
         elif v["linked"]:
             r = v["reply"] or {}
-            state, col = "Connected to bioarena", "#22c55e"
+            delayed = "stream" in s["kinds"].values()
+            state, col = "Connected to bioarena", "#f59e0b" if delayed else "#22c55e"
             sub = (f"{str(r.get('match_state', '')).replace('_', ' ').lower()} · "
-                   f"{r.get('shift', '')} · {v['rtt_ms']} ms")
+                   f"{r.get('shift', '')} · {v['rtt_ms']} ms"
+                   + (" · counting from a delayed stream" if delayed else ""))
         else:
             state, col = "Sending, no reply yet", "#f59e0b"
             sub = f"No answer from {v['target']}. Check the cable and address."
@@ -644,6 +652,19 @@ class HubWindow(QMainWindow):
             cam = self._call(lambda: self.ctl.add_camera(p))
             if cam:
                 self.current = cam["name"]
+                self.grab()
+
+    def add_stream(self) -> None:
+        from .hubapp import STREAM_WARNING
+        url, ok = QInputDialog.getText(
+            self, "Add a live stream",
+            "Twitch or YouTube live address:\n\n" + STREAM_WARNING)
+        url = url.strip()
+        if ok and url:
+            cam = self._call(lambda: self.ctl.add_camera(url))
+            if cam:
+                self.current = cam["name"]
+                self.hint.setText("Connecting to the stream…")
                 self.grab()
 
     def remove_camera(self) -> None:

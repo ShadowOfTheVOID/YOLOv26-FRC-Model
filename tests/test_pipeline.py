@@ -2694,6 +2694,30 @@ def test_hub_ui_controller_and_web():
         check("the recording picker lists videos",
               ls["videos"] == ["hub practice.mp4"])
 
+        # A Twitch or YouTube page is a stream, found by host, not a file.
+        from tbavid import hubcount as HC
+        check("Twitch and YouTube pages are streams",
+              all(HC.is_stream_page(u) for u in (
+                  "https://www.twitch.tv/firstinspires", "twitch.tv/frc",
+                  "https://www.youtube.com/watch?v=abc", "youtu.be/abc")))
+        check("files, camera numbers and other URLs are not",
+              not any(HC.is_stream_page(u) for u in (
+                  "match.mp4", "0", "rtsp://cam/1", "https://twitch.tv.evil.com/x",
+                  "/Users/x/twitch.tv.mp4")))
+        check("a stream is named after its channel",
+              HC.stream_name("https://www.twitch.tv/firstinspires_newton/")
+              == "firstinspires_newton"
+              and HC.stream_name("https://www.twitch.tv/videos/414792150")
+              == "vod-414792150")
+        check("source kinds", (A.source_kind("0"), A.source_kind(video),
+                               A.source_kind("twitch.tv/frc"))
+              == ("camera", "file", "stream"))
+        sc = ctl.add_camera("https://www.twitch.tv/firstinspires")
+        check("a stream is added without looking it up (it may be offline)",
+              sc["name"] == "firstinspires"
+              and ctl.state()["kinds"]["firstinspires"] == "stream")
+        ctl.remove_camera("firstinspires")
+
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), W.make_handler(ctl))
         port = httpd.server_address[1]
         threading.Thread(target=httpd.serve_forever, daemon=True).start()

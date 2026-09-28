@@ -45,8 +45,25 @@ def to_canvas(pts: Sequence[Sequence[float]], scale: float) -> List[float]:
 
 
 def is_file_source(source: str) -> bool:
+    from .hubcount import is_stream_page
     s = str(source)
-    return not s.isdigit() and "://" not in s
+    return not s.isdigit() and "://" not in s and not is_stream_page(s)
+
+
+def source_kind(source: str) -> str:
+    """'camera', 'stream' (Twitch / YouTube page) or 'file'."""
+    from .hubcount import is_stream_page
+    s = str(source)
+    if s.isdigit():
+        return "camera"
+    if is_stream_page(s):
+        return "stream"
+    return "file" if is_file_source(s) else "camera"
+
+
+STREAM_WARNING = ("A stream runs several seconds behind the field (Twitch's "
+                  "delay), far past the 200 ms bioarena's AUTO call allows. "
+                  "Use it for practice and scouting, not to decide AUTO.")
 
 
 def next_name(existing: Sequence[str], base: str) -> str:
@@ -268,13 +285,21 @@ class HubController:
             if any(str(c["source"]) == source for c in self.cfg["cameras"]):
                 raise ValueError(f"{source} is already added")
             if not name:
-                name = (f"cam{source}" if source.isdigit() else
-                        os.path.splitext(os.path.basename(source))[0][:20])
+                kind = source_kind(source)
+                if kind == "stream":
+                    from .hubcount import stream_name
+                    name = stream_name(source)
+                elif source.isdigit():
+                    name = f"cam{source}"
+                else:
+                    name = os.path.splitext(os.path.basename(source))[0][:20]
             cam = {"name": next_name([c["name"] for c in self.cfg["cameras"]],
                                      name),
                    "source": source, "ball_area": 0, "zones": []}
             self.cfg["cameras"].append(cam)
         self.say(f"added {cam['name']} ({source})")
+        if source_kind(source) == "stream":
+            self.say(STREAM_WARNING)
         return cam
 
     def remove_camera(self, name: str) -> None:
@@ -421,7 +446,10 @@ class HubController:
         self.stop_evt = threading.Event()
         self.monitor = {}
         self.feed_target = f"{host}:{port}"
-        realtime = realtime and any(is_file_source(c.source) for c in setup.cameras)
+        realtime = realtime and any(source_kind(c.source) in ("file", "stream")
+                                    for c in setup.cameras)
+        if any(source_kind(c.source) == "stream" for c in setup.cameras):
+            self.say("counting from a stream: " + STREAM_WARNING)
 
         def on_frame(name, frame):
             with self.lock:
@@ -461,7 +489,9 @@ class HubController:
             running = self.running
             pictures = {n: tuple(int(v) for v in f.shape[1::-1])
                         for n, f in {**self.frames, **self.live_frames}.items()}
+        kinds = {c["name"]: source_kind(c["source"]) for c in cfg["cameras"]}
         out = {"cfg": cfg, "path": self.path, "running": running, "job": job,
+               "kinds": kinds, "stream_warning": STREAM_WARNING,
                "problems": problems(cfg), "pictures": pictures,
                "log": self.messages_since(last_log)}
         s = self.sender

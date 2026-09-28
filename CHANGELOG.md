@@ -76,6 +76,20 @@ the build rather than publishing an empty release.
   laid out, so no outline could be drawn; it is now sized on the picture's
   load. Neither has been opened on a Mac yet. (A Tk window came first and
   was replaced: Homebrew's Python needs `brew install python-tk` for it.)
+- **Twitch and YouTube streams as a counter source** (`hubcount.open_source`,
+  and *Add stream* in both front ends). A page address is looked up to its
+  HLS stream with yt-dlp -- run from the app's own environment, since a
+  double-clicked launcher does not have `.venv/bin` on PATH -- and opened
+  through OpenCV's FFmpeg backend; a dropped stream reconnects up to five
+  times with the heartbeat held meanwhile. A stream is several seconds
+  behind the field, so the app says so when one is added and turns the
+  status amber while one counts: practice and scouting, not bioarena's AUTO
+  call. Tested end to end in the web page on a real Twitch past broadcast
+  (2019 Championship, Newton): picture in 4.3 s, counting into the test
+  receiver. That run found past broadcasts read unpaced at 315 fps; streams
+  are now paced like recordings, and pacing no longer touches live cameras
+  (it had applied to every camera once any source was a file). Not tested
+  on a channel that was live at the time -- none of FIRST's were.
 - **The counter's interfaces were redesigned** after the first version was
   called "a 1980 application": a dark control-room theme shared by the web
   page and the Qt window, score tiles that pulse on a new ball, a status

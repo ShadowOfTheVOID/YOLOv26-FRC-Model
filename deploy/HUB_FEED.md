@@ -140,6 +140,17 @@ so they behave identically. Work down the right-hand side:
    with *NO PICTURE* if a camera stops. Tick *Practice: send to a test
    receiver here* to try it all without bioarena.
 
+**Twitch / YouTube streams.** *Add stream* takes a live address
+(`https://www.twitch.tv/<channel>`, a YouTube live URL, or a Twitch past
+broadcast `https://www.twitch.tv/videos/<id>`), looks up the video behind it
+with yt-dlp, and counts from it like a camera; a dropped stream reconnects up
+to five times. A stream runs several seconds behind the field -- Twitch's
+delay, nothing here can remove it -- so it is for practice and scouting, never
+for bioarena's AUTO call; the status turns amber while one is counting. A past
+broadcast plays at its own speed. Needs `pip install yt-dlp` (the Mac launcher
+installs it). In a setup file a stream is just `"source":
+"https://www.twitch.tv/<channel>"`.
+
 *Save* writes the same `cams.json` that `run.py hubfeed --setup` reads, so a
 setup made here also runs without it.
 

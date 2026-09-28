@@ -321,14 +321,86 @@ def isolated_ball_areas(frame, box, lo=LOOSE_LO, hi=LOOSE_HI) -> List[float]:
     return out
 
 
+STREAM_SITES = ("twitch.tv", "youtube.com", "youtu.be", "kick.com")
+
+
+def is_stream_page(source: str) -> bool:
+    """A live-stream page (Twitch, YouTube, Kick) rather than a video URL.
+
+    Such a page is HTML; the video behind it has to be looked up first.
+    """
+    s = str(source).strip().lower()
+    if not s.startswith(("http://", "https://")):
+        s = "https://" + s if any(s.startswith(h) or s.startswith("www." + h)
+                                  for h in STREAM_SITES) else s
+    if not s.startswith(("http://", "https://")):
+        return False
+    host = s.split("://", 1)[1].split("/", 1)[0]
+    return any(host == h or host.endswith("." + h) for h in STREAM_SITES)
+
+
+def stream_name(source: str) -> str:
+    """'https://www.twitch.tv/firstinspires' -> 'firstinspires'."""
+    path = str(source).split("://", 1)[-1].split("?", 1)[0].rstrip("/")
+    parts = [p for p in path.split("/")[1:] if p]
+    if len(parts) >= 2 and parts[-2] == "videos":      # a Twitch past broadcast
+        return f"vod-{parts[-1]}"[:24]
+    return (parts[-1] if parts else path.split("/")[0])[:24] or "stream"
+
+
+def resolve_stream(page: str, timeout: float = 45.0) -> str:
+    """The HLS address behind a stream page, via yt-dlp.
+
+    Tried as the module first, from this Python's own environment: a
+    double-clicked launcher runs .venv/bin/python without .venv/bin on PATH,
+    so a `yt-dlp` installed there is not found by name. Same approach as
+    `live.resolve`, which reads the scoreboard off Twitch for `run.py live`.
+    """
+    import importlib.util
+    import shutil
+    import subprocess
+    import sys
+
+    url = page if "://" in page else "https://" + page
+    if importlib.util.find_spec("yt_dlp") is not None:
+        cmd = [sys.executable, "-m", "yt_dlp"]
+    elif shutil.which("yt-dlp"):
+        cmd = [shutil.which("yt-dlp")]
+    else:
+        raise SystemExit("reading a Twitch or YouTube stream needs yt-dlp: "
+                         ".venv/bin/pip install yt-dlp")
+    try:
+        proc = subprocess.run(cmd + ["-g", "--no-playlist", "--no-warnings",
+                                     "-f", "best[height<=1080]/best", url],
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"{url}: no answer from the stream site in {timeout:.0f} s")
+    lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+    if proc.returncode != 0 or not lines:
+        why = (proc.stderr.strip().splitlines() or ["no stream found"])[-1]
+        if "not currently live" in why:
+            raise SystemExit(f"{url}: the channel is not live right now")
+        raise SystemExit(f"{url}: {why.replace('ERROR: ', '')}")
+    return lines[0]
+
+
 def open_source(source: str, fps: float = 0.0, size: str = ""):
     """A cv2.VideoCapture with the driver's queue cut to one frame.
 
     A queue of frames is latency: at 30 fps each queued frame is 33 ms of the
     80 ms budget spent before the ball is even looked at (spec 5.2).
+
+    A Twitch / YouTube page is looked up to its HLS stream first. That stream
+    is seconds behind the field -- Twitch's delay, not ours -- so it suits
+    practice and scouting, never bioarena's AUTO call.
     """
     import cv2
 
+    if is_stream_page(source):
+        cap = cv2.VideoCapture(resolve_stream(str(source)), cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            raise SystemExit(f"could not open the stream behind {source!r}")
+        return cap
     src = int(source) if str(source).isdigit() else source
     cap = cv2.VideoCapture(src)
     if not cap.isOpened():
@@ -432,6 +504,7 @@ class Health:
 
 
 STALE_S = 0.5    # a camera silent this long is blind; stop the heartbeat
+STREAM_RETRIES = 5   # reconnects in a row before a stream counts as gone
 
 
 # -- the camera setup -----------------------------------------------------
@@ -723,18 +796,42 @@ def run(sender, setup: Setup, realtime: bool = False,
         started = time.monotonic()
         n = 0
         hl = health[cam.name]
+        stream = is_stream_page(cam.source)
+        src = str(cam.source)
+        pace = realtime and (stream or (not src.isdigit() and "://" not in src))
+        drops = 0
         while not stop.is_set():
             ok, frame = cap.read()
             now = time.monotonic()
+            if not ok and stream and drops < STREAM_RETRIES:
+                # An HLS stream hiccups (a slow segment, a CDN switch) where a
+                # camera does not. Reconnect rather than end the session; the
+                # heartbeat is held meanwhile, so bioarena sees OFFLINE and
+                # nothing pretends to be watching.
+                drops += 1
+                out(f"{cam.name}: stream dropped, reconnecting "
+                    f"({drops}/{STREAM_RETRIES})")
+                cap.release()
+                stop.wait(2.0 * drops)
+                try:
+                    cap = open_source(cam.source)
+                except SystemExit as e:
+                    out(f"{cam.name}: {e}")
+                continue
             if not ok:
                 errors.append(f"{cam.name} ({cam.source}): the source "
                               f"stopped giving frames")
                 stop.set()
                 break
+            drops = 0
             captured = frame_time(cap.get(cv2.CAP_PROP_POS_MSEC), now)
-            if realtime:
+            if pace:
                 # A recording played at camera speed, so the heartbeat,
                 # age_ms and bioarena's view match what a camera would do.
+                # A Twitch past broadcast is a recording too: unpaced it was
+                # read at 315 fps. A live camera is never paced -- it
+                # already delivers at its own rate, and a wrong reported
+                # fps would slow it down.
                 due = started + n / file_fps
                 if due > now:
                     time.sleep(due - now)
