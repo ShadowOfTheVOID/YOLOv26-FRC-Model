@@ -46,7 +46,10 @@ $PY run.py track --weights $M --source match.mp4          # add --device mps on 
 
 It writes `match_tracked.mp4`: a thin box and a small track number on every
 ball and robot, a short trail behind each ball that is really moving, and a
-hollow circle where a ball briefly lost by the detector should be. `--labels
+hollow circle where a ball briefly lost by the detector should be. Magenta
+boxes are balls the model missed and colour found -- mostly the top of
+shots against the crowd, which the released models never learned
+(`--no-assist` turns it off). `--labels
 none` drops the numbers, `--labels full` adds the class, `--imgsz 1280`
 finds more small balls (slower).
 

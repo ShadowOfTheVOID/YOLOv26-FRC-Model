@@ -830,7 +830,7 @@ def cmd_track(args, cfg):
                         conf=args.conf, labels=args.labels,
                         trails=not args.no_trails, coast=args.coast,
                         device=args.device, max_frames=args.frames,
-                        tracker=args.tracker)
+                        tracker=args.tracker, assist=not args.no_assist)
     print(f"{r['frames']} frames -> {r['out']}")
     return 0
 
@@ -1258,6 +1258,9 @@ def main(argv=None):
                    default="distance",
                    help="distance: follows balls through the top of their arc "
                         "(default). bytetrack: Ultralytics' tracker, tuned.")
+    p.add_argument("--no-assist", dest="no_assist", action="store_true",
+                   help="do not add moving yellow balls the model missed "
+                        "(balls high against the crowd; drawn magenta)")
     p.set_defaults(func=cmd_track)
 
     p = sub.add_parser("hubgui",

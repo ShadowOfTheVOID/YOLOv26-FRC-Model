@@ -106,6 +106,21 @@ the build rather than publishing an empty release.
   - A ball the detector misses for a few frames is drawn where it should
     be, as a hollow circle, for up to `--coast` frames (display only).
   - `run.py shots --annotate` labels are smaller too.
+  - **Balls high against the crowd, without retraining** (`colour_assist`,
+    on by default, `--no-assist` to turn off). The released models miss
+    them outright: `autolabel_fuel.py`'s field line drops every ball more
+    than ~4 ball-widths above the far edge of the field (to keep crowd
+    shirts out), so the top of every shot was in the training frames
+    unlabelled and the model learned it as background. Of 1071 moving
+    ball-shaped yellow blobs without a model box on the Einstein 4 clip,
+    516 had no score at all and 555 only 0.01-0.1, so no threshold brings
+    them back. The assist adds round, ball-sized yellow blobs that are
+    moving (a shot moves; a shirt mostly does not) and not in a model box,
+    at a confidence below the tracker's start threshold: colour can carry
+    on a ball the model found at launch, never invent one. 1021 of 1308
+    offered were used to continue a ball; flights followed through the
+    apex 106 -> 114 on this broadcast; drawn magenta. Retraining on labels
+    that keep balls in flight remains the real fix.
   Not done: `run.py shots` and `run.py count` still track with ByteTrack;
   moving them to `BallTracker` needs its own measurement against a
   scoreboard.
