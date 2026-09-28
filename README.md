@@ -99,7 +99,7 @@ Output lands in these folders:
 | `detect` | run a trained `.pt` over harvested frames and record what it found |
 | `count` | count scored fuel from the detector; `--scoreboard` makes it the scoreboard at a scrimmage |
 | `hubfeed` | count fuel into each hub from a camera and send the counts to bioarena over UDP ([deploy/HUB_FEED.md](deploy/HUB_FEED.md)); `hubfeed-listen` stands in for bioarena |
-| `hubgui` | the hub counter in a window: pick cameras, click hub outlines, measure, calibrate, start the bioarena feed |
+| `hubgui` | the hub counter with a user interface (web page, or `--ui qt` for a desktop window): pick cameras, click hub outlines, measure, calibrate, start the bioarena feed |
 | `shots` | per-robot shots from a model over match video: who shot, how many went in, how many missed |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-#  Hub FUEL counter -- double-click this file in Finder to open the window.
+#  Hub FUEL counter -- double-click this file in Finder. It opens the counter
+#  in your web browser (nothing else to install).
 #
-#  First run only: makes .venv and installs numpy + OpenCV into it. After that
-#  it just opens. The setup you save is cams.json in this folder, and it is
-#  opened again next time.
+#  First run only: makes .venv and installs numpy + OpenCV into it. The setup
+#  you save is cams.json in this folder, and it is opened again next time.
+#  For the desktop window instead: .venv/bin/pip install PySide6, then
+#  change "--ui web" below to "--ui qt".
 #
 cd "$(dirname "$0")" || exit 1
 
@@ -15,10 +17,4 @@ fi
 if ! .venv/bin/python -c "import cv2, numpy" 2>/dev/null; then
     .venv/bin/pip install -q -r requirements.txt opencv-python-headless || { read -r; exit 1; }
 fi
-if ! .venv/bin/python -c "import tkinter" 2>/dev/null; then
-    echo "This Python has no tkinter (the window toolkit)."
-    echo "Homebrew: brew install python-tk   then delete .venv and run this again."
-    echo "Or install Python from python.org, which includes it."
-    read -r; exit 1
-fi
-exec .venv/bin/python run.py hubgui --setup cams.json
+exec .venv/bin/python run.py hubgui --ui web --setup cams.json

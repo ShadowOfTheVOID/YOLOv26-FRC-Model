@@ -107,19 +107,24 @@ the balls on broadcast footage. The area counter needs no model and no GPU,
 counts on the frame a ball crosses the funnel-mouth outline, and spends a few
 ms per frame on a laptop CPU.
 
-## The easy way: the window
+## The easy way: the web page (or the Qt window)
 
 ```bash
-.venv/bin/python run.py hubgui --setup cams.json     # or double-click hubfeed.command on a Mac
+.venv/bin/python run.py hubgui --setup cams.json            # opens in your browser
+.venv/bin/python run.py hubgui --setup cams.json --ui qt    # desktop window (pip install PySide6)
 ```
 
-One window does everything below. Work down the right-hand side:
+On a Mac, double-clicking `hubfeed.command` does the first line, installing
+what it needs the first time. The web page needs nothing but Python and
+OpenCV; the Qt window is the same controls in a native window and needs
+PySide6 (~200 MB). Both are views over one controller (`tbavid/hubapp.py`),
+so they behave identically. Work down the right-hand side:
 
 1. **Cameras.** *Find cameras* lists every camera that answers, with its
    size; pick one. *Add recording…* adds a video file instead, to set up or
-   practise on (the picture is taken a third of the way in, past title cards,
-   or at the second you type). Camera numbers can change when cameras are
-   re-plugged, so always check the picture.
+   practise on (its picture is taken a third of the way in, past title
+   cards, or at the second you type). Camera numbers can change when cameras
+   are re-plugged, so always check the picture.
 2. **Hub outlines.** *Draw RED* / *Draw BLUE*, then click the corners of the
    hub's opening on the picture; double-click, right-click or Enter to
    finish, Esc to cancel. A camera can have several outlines; choose how each
@@ -136,8 +141,12 @@ One window does everything below. Work down the right-hand side:
    receiver here* to try it all without bioarena.
 
 *Save* writes the same `cams.json` that `run.py hubfeed --setup` reads, so a
-setup made in the window also runs without it. Needs tkinter: included with
-the python.org installer; with Homebrew, `brew install python-tk`.
+setup made here also runs without it.
+
+The web page listens on 127.0.0.1 only and refuses other host names and
+non-JSON posts, because it can start cameras and list the disk. `--bind
+0.0.0.0` opens it to the network -- then anyone who can reach the laptop can
+reconfigure the counter.
 
 ## Blur correction and still-yellow removal (per camera)
 

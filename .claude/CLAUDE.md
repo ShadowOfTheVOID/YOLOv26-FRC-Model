@@ -185,9 +185,10 @@ decided at T+23.000 s so camera-to-count must stay under ~200 ms p99.
 `experiments/area_hub_count.py`) implements it; `deploy/HUB_FEED.md` is the
 runbook. Several cameras: `--setup cams.json`
 (`Setup`/`HubTally` in hubcount.py; zones per hub combined by sum/max/median,
-any camera stale holds the heartbeat). `run.py hubgui` (`tbavid/hubgui.py`,
-Tk, composition not inheritance so it imports without tkinter) edits the same
-cams.json. Per-camera `blur`/`remove_static` exist only as calibration
+any camera stale holds the heartbeat). `run.py hubgui` edits the same cams.json: a web page
+(`hubweb.py`, stdlib, default) or a Qt window (`hubqt.py`, `--ui qt`,
+PySide6), both thin views over `hubapp.HubController` -- put logic there, not
+in either view. The user has not yet chosen between them. Per-camera `blur`/`remove_static` exist only as calibration
 against a hand-counted recording -- the best value differed on every Einstein
 match. Plumbing is tested; counting is unvalidated on a practice-field
 camera -- the spec's 20-ball acceptance test comes before bioarena's

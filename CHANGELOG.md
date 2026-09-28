@@ -57,16 +57,25 @@ the build rather than publishing an empty release.
   cameras close to each hub. Checked end to end with two recordings as two
   cameras on one hub under `max`; not yet run on real multi-camera hardware.
 
-- **`run.py hubgui` — the hub counter in a window** (`tbavid/hubgui.py`;
-  `hubfeed.command` opens it from Finder). Find cameras or add a recording,
-  click each hub's outline on the picture, measure the ball, calibrate, and
-  start the feed; the live picture shows each outline's count, the score
-  sent to bioarena, the bioarena link and every camera's frame rate, and
-  says *NO PICTURE* when a camera stops. A practice switch runs a test
-  receiver inside the window. It edits the same `cams.json` that `hubfeed
-  --setup` runs headless. Tk only, frames shown as PNG, no Pillow. Driven
-  end to end on a virtual display with Einstein 4 as the camera; not yet
-  opened on a Mac.
+- **`run.py hubgui` — the hub counter with a user interface**, as a web page
+  (default; `tbavid/hubweb.py`, standard library, any browser) or a Qt
+  window (`--ui qt`, `tbavid/hubqt.py`, needs PySide6). Both are views over
+  one controller (`tbavid/hubapp.py`), so a button does the same thing in
+  each. Find cameras or add a recording, click each hub's outline on the
+  picture, measure the ball, calibrate, and start the feed; the live picture
+  shows each outline's count, the score sent to bioarena, the bioarena link
+  and every camera's frame rate, and says *NO PICTURE* when a camera stops.
+  A practice switch runs a test receiver inside. It edits the same
+  `cams.json` that `hubfeed --setup` runs headless; `hubfeed.command` opens
+  the web page from Finder. The web page listens on 127.0.0.1 and refuses
+  other host names (DNS rebinding) and non-JSON posts (cross-site forms).
+  Both were driven end to end on Einstein 4 as the camera -- the page in
+  Chromium with real mouse clicks, the window on Qt's offscreen platform --
+  and counted the same (red 3, blue 1 at 0:16) into the test receiver. The
+  first browser run found the click layer sized 0x0 before the picture was
+  laid out, so no outline could be drawn; it is now sized on the picture's
+  load. Neither has been opened on a Mac yet. (A Tk window came first and
+  was replaced: Homebrew's Python needs `brew install python-tk` for it.)
 - **Per-camera `blur` and `remove_static`, and calibration** (`run.py
   hubfeed --calibrate VIDEO --camera NAME --count red=N,blue=M`, or the
   window). Both off by default. The best blur fraction was 0 / 0.2-0.3 /

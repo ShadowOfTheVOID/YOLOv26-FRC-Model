@@ -2554,7 +2554,7 @@ def test_hub_calibration_and_gui_helpers():
     """
     import math
     from tbavid import hubcount as HC
-    from tbavid import hubgui as G
+    from tbavid import hubapp as G
 
     sq = [(100.0, 100.0), (300.0, 100.0), (300.0, 300.0), (100.0, 300.0)]
     A1 = 300.0
@@ -2611,7 +2611,7 @@ def test_hub_calibration_and_gui_helpers():
           and c1.zones[0].counter.blur == 0.3)
 
     # The window's pure helpers.
-    check("a 1080p frame is shrunk to the canvas, a small one is not",
+    check("a 1080p frame is shrunk to the view, a small one is not",
           G.fit_scale(1920, 1080) == 0.5 and G.fit_scale(640, 480) == 1.0)
     check("a click on the half-size preview is stored in frame pixels",
           G.to_frame(100, 50, 0.5) == (200.0, 100.0))
@@ -2629,6 +2629,111 @@ def test_hub_calibration_and_gui_helpers():
           len(todo) == 2 and "outline" in todo[0] and "ball" in todo[1])
 
 
+def test_hub_ui_controller_and_web():
+    """The logic both front ends share, and the web page's HTTP surface.
+
+    The web page and the Qt window are views over one HubController, so
+    what a button does is tested here once. The web server controls cameras
+    and lists the disk, so it must refuse other hosts and non-JSON posts.
+    """
+    import json
+    import os
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from tbavid import hubapp as A
+    from tbavid import hubweb as W
+
+    with tempfile.TemporaryDirectory() as tmp:
+        video = os.path.join(tmp, "hub practice.mp4")
+        open(video, "wb").close()
+        ctl = A.HubController()
+        cam = ctl.add_camera(video)
+        check("a recording is added under its file name",
+              cam["name"] == "hub practice" and cam["zones"] == [])
+        try:
+            ctl.add_camera(video)
+            check("the same source twice is refused", False)
+        except ValueError:
+            check("the same source twice is refused", True)
+        try:
+            ctl.add_camera(os.path.join(tmp, "missing.mp4"))
+            check("a recording that does not exist is refused", False)
+        except ValueError:
+            check("a recording that does not exist is refused", True)
+        z = ctl.add_zone(cam["name"], "red",
+                         [[1, 1], [50, 1], [50, 50], [50, 50]])
+        check("a double-click's repeated corner is dropped",
+              len(z["outline"]) == 3 and z["hub"] == "red")
+        try:
+            ctl.add_zone(cam["name"], "red", [[1, 1], [2, 2]])
+            check("an outline of two corners is refused", False)
+        except ValueError:
+            check("an outline of two corners is refused", True)
+        c = ctl.update_camera(cam["name"], {"name": "red-exit", "ball_area": "1800",
+                                            "blur": 0.3, "remove_static": True})
+        check("camera settings are updated, the name included",
+              (c["name"], c["ball_area"], c["blur"], c["remove_static"])
+              == ("red-exit", 1800.0, 0.3, True))
+        try:
+            ctl.update_camera("red-exit", {"blur": 2})
+            check("a blur over 1 is refused", False)
+        except ValueError:
+            check("a blur over 1 is refused", True)
+        st = ctl.state()
+        check("the state a front end draws is plain JSON",
+              json.loads(json.dumps(st))["cfg"]["cameras"][0]["name"] == "red-exit"
+              and st["problems"] == [] and not st["running"])
+        path = ctl.save(os.path.join(tmp, "cams.json"))
+        from tbavid.hubcount import load_setup
+        check("what the controller saves, hubfeed --setup runs",
+              load_setup(path).cameras[0].zones[0].hub == "red")
+        ls = A.list_dir(tmp)
+        check("the recording picker lists videos",
+              ls["videos"] == ["hub practice.mp4"])
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), W.make_handler(ctl))
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{port}"
+
+        def call(path_, body=None, headers=None):
+            req = urllib.request.Request(base + path_, data=body,
+                                         headers=headers or {})
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return r.status, r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+
+        code, page = call("/")
+        check("the page is served", code == 200 and b"Hub FUEL counter" in page)
+        code, body = call("/api/state")
+        check("the state is served as JSON",
+              code == 200 and json.loads(body)["cfg"]["cameras"][0]["name"]
+              == "red-exit")
+        code, _ = call("/api/combine", json.dumps({"hub": "blue", "how": "max"}).encode(),
+                       {"Content-Type": "application/json"})
+        check("a JSON post changes the setup",
+              code == 200 and ctl.cfg["combine"]["blue"] == "max")
+        code, _ = call("/api/combine", json.dumps({"hub": "blue", "how": "avg"}).encode(),
+                       {"Content-Type": "application/json"})
+        check("a bad value is a 400, not a crash", code == 400)
+        code, _ = call("/api/stop", b"hub=blue", {"Content-Type":
+                                                  "application/x-www-form-urlencoded"})
+        check("a form post (what another website could send) is refused",
+              code == 415)
+        code, _ = call("/api/state", headers={"Host": "evil.example:8790"})
+        check("a request for another host name is refused (DNS rebinding)",
+              code == 403)
+        code, _ = call("/frame.jpg?cam=red-exit")
+        check("no picture yet is a 404", code == 404)
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def test_hub_feed_needs_no_opencv_to_load():
     """The sender is stdlib only: it runs on whatever laptop is wired into the
     field switch, and CI has no cv2. hubcount keeps cv2 inside functions."""
@@ -2643,7 +2748,7 @@ def test_hub_feed_needs_no_opencv_to_load():
         elif isinstance(node, ast.ImportFrom) and node.module:
             found |= {node.module.split(".")[0]} & third
     check("hubfeed.py imports no third-party package", not found)
-    for rel in ("tbavid/hubcount.py", "tbavid/hubgui.py"):
+    for rel in ("tbavid/hubcount.py", "tbavid/hubapp.py", "tbavid/hubweb.py"):
         top = ast.parse((root / rel).read_text()).body
         check(f"{rel} imports cv2, numpy and tkinter only inside functions",
               not any(isinstance(n, (ast.Import, ast.ImportFrom)) and
@@ -2678,7 +2783,7 @@ def main() -> int:
                test_model_must_name_its_classes, test_hub_feed_protocol,
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
                test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
-               test_hub_calibration_and_gui_helpers):
+               test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
