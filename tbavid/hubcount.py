@@ -191,10 +191,11 @@ class CrossingCounter:
             used_j.add(j)
             b, c = self.prev[i], cur[j]
             c["v"] = (c["c"][0] - b["c"][0], c["c"][1] - b["c"][1])
-            if b["in"] != c["in"]:
+            way = self.crossed(b, c)
+            if way:
                 big = b if b["a"] >= c["a"] else c
                 n = self.balls_in(big["a"], big["cov"], c["v"])
-                if c["in"]:
+                if way > 0:
                     self.net += n
                     self.entries += n
                 else:
@@ -205,6 +206,71 @@ class CrossingCounter:
         self.reported += rise
         return rise
 
+    def crossed(self, b: Dict, c: Dict) -> int:
+        """+1 if a blob moving from b to c crossed into the outline, -1 out."""
+        if b["in"] == c["in"]:
+            return 0
+        return 1 if c["in"] else -1
+
+
+def _side(a: Point, b: Point, p: Point) -> float:
+    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+
+def segments_cross(p: Point, q: Point, a: Point, b: Point) -> bool:
+    """Does the move p->q cross the segment a-b?
+
+    The move must END strictly on one side and not start on that same side,
+    so a ball that stops exactly on the line counts on the frame it leaves
+    it, and only once.
+    """
+    d1, d2 = _side(a, b, p), _side(a, b, q)
+    if d2 == 0 or (d1 != 0 and (d1 > 0) == (d2 > 0)):
+        return False
+    d3, d4 = _side(p, q, a), _side(p, q, b)
+    return d3 == 0 or d4 == 0 or (d3 > 0) != (d4 > 0)
+
+
+class ExitLineCounter(CrossingCounter):
+    """Balls leaving the hub through an exit, counted across a line.
+
+    Every ball that scores comes back out of the hub, so the exit count IS
+    the score -- and a ball that clips the rim and drops behind the hub, the
+    error that sank the funnel-mouth counts (Einstein 1: 832 net entries over
+    the red hood against 415 real), never reaches an exit.
+
+    `line` is two points across the exit, `out` any point on the side balls
+    go once they are out. A ball counts when its path from one frame to the
+    next crosses the segment towards `out`; one that crosses back (a bounce
+    off whatever is beyond the exit) is taken off again, so it nets zero. The
+    path is tested, not which side each end is on, so a ball moving several
+    of its own widths a frame is still caught -- and the segment's ends limit
+    it, so a ball passing beyond them does not count.
+    """
+
+    def __init__(self, line: Sequence[Point], out: Point, ball_area: float,
+                 blur: float = 0.0):
+        a, b = (tuple(map(float, line[0])), tuple(map(float, line[1])))
+        if math.hypot(b[0] - a[0], b[1] - a[1]) < 1.0:
+            raise ValueError("an exit line needs two different ends")
+        out = tuple(map(float, out))
+        if abs(_side(a, b, out)) < 1e-9:
+            raise ValueError("the 'out' point must be off the line, on the "
+                             "side balls go once they are out")
+        # `poly` is what the search box and the drawings are built from.
+        super().__init__([a, b, out], ball_area, blur)
+        self.line = (a, b)
+        self.out = out
+        self.out_sign = 1 if _side(a, b, out) > 0 else -1
+
+    def crossed(self, b: Dict, c: Dict) -> int:
+        a0, a1 = self.line
+        if not segments_cross(b["c"], c["c"], a0, a1):
+            return 0
+        after = _side(a0, a1, c["c"])
+        if after == 0:
+            return 0
+        return 1 if (after > 0) == (self.out_sign > 0) else -1
 
 # -- the camera side ------------------------------------------------------
 #
@@ -523,13 +589,34 @@ HUB_NAMES = ("red", "blue")
 
 
 class Zone:
-    """One outline on one camera, counting into one hub."""
+    """One outline -- or one exit line -- on one camera, counting into one hub.
+
+    An outline counts balls crossing into the hub's mouth; an exit line
+    (`line` two points, `out` a point beyond it) counts balls coming back
+    out, which is the score and cannot be faked by a ball behind the hub.
+    """
 
     def __init__(self, name: str, hub: str, outline: Sequence[Point],
-                 ball_area: float, blur: float = 0.0):
+                 ball_area: float, blur: float = 0.0,
+                 line: Optional[Sequence[Point]] = None,
+                 out: Optional[Point] = None):
         self.name = name
         self.hub = hub
-        self.counter = CrossingCounter(outline, ball_area, blur)
+        self.line = [tuple(map(float, p)) for p in line] if line else None
+        self.out = tuple(map(float, out)) if out else None
+        self.outline = [tuple(map(float, p)) for p in outline] if outline else None
+        self.counter = self.new_counter(ball_area, blur)
+
+    @property
+    def kind(self) -> str:
+        return "exit" if self.line else "outline"
+
+    def new_counter(self, ball_area: float, blur: float = 0.0) -> CrossingCounter:
+        if self.line:
+            if len(self.line) != 2 or self.out is None:
+                raise ValueError("an exit line is two points plus an 'out' point")
+            return ExitLineCounter(self.line, self.out, ball_area, blur)
+        return CrossingCounter(self.outline or [], ball_area, blur)
 
 
 class Camera:
@@ -642,10 +729,17 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
         for j, z in enumerate(c.get("zones") or []):
             zname = str(z.get("name") or f"{name}/{z.get('hub')}{j}")
             try:
-                zones.append(Zone(zname, str(z.get("hub")),
-                                  _outline(z.get("outline") or []),
-                                  area if area > 0 else 1.0,
-                                  min(max(blur, 0.0), 1.0)))
+                if z.get("line"):
+                    line = _outline(list(z["line"]) + [z.get("out") or [0, 0]])
+                    zones.append(Zone(zname, str(z.get("hub")), [],
+                                      area if area > 0 else 1.0,
+                                      min(max(blur, 0.0), 1.0),
+                                      line=line[:2], out=line[2]))
+                else:
+                    zones.append(Zone(zname, str(z.get("hub")),
+                                      _outline(z.get("outline") or []),
+                                      area if area > 0 else 1.0,
+                                      min(max(blur, 0.0), 1.0)))
             except ValueError as e:
                 raise ValueError(f"zone {zname!r}: {e}")
         cams.append(Camera(name, c["source"], area, zones,
@@ -654,16 +748,22 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
     return Setup(cams, cfg.get("combine"), measuring)
 
 
+def _zone_dict(z: Zone) -> Dict:
+    pt = lambda p: [round(p[0], 1), round(p[1], 1)]
+    if z.line:
+        return {"name": z.name, "hub": z.hub, "line": [pt(p) for p in z.line],
+                "out": pt(z.out)}
+    return {"name": z.name, "hub": z.hub,
+            "outline": [pt(p) for p in z.counter.poly]}
+
+
 def setup_to_dict(setup: "Setup") -> Dict:
     """The inverse of setup_from_dict, for saving what the GUI built."""
     cams = []
     for c in setup.cameras:
         d = {"name": c.name, "source": c.source,
              "ball_area": round(c.ball_area, 1),
-             "zones": [{"name": z.name, "hub": z.hub,
-                        "outline": [[round(x, 1), round(y, 1)]
-                                    for x, y in z.counter.poly]}
-                       for z in c.zones]}
+             "zones": [_zone_dict(z) for z in c.zones]}
         if c.fps:
             d["fps"] = c.fps
         if c.size:
@@ -981,8 +1081,7 @@ def record_blobs(camera: Camera, video: str, remove_static: bool,
 
 def replay_counts(camera: Camera, frames: List[Dict], blur: float) -> Dict[str, int]:
     """Each hub's count from recorded blobs at one blur setting."""
-    counters = {z.name: (z.hub, CrossingCounter(z.counter.poly,
-                                                 camera.ball_area, blur))
+    counters = {z.name: (z.hub, z.new_counter(camera.ball_area, blur))
                 for z in camera.zones}
     for rec in frames:
         for name, (_, c) in counters.items():

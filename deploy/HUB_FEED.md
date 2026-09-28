@@ -157,6 +157,33 @@ non-JSON posts, because it can start cameras and list the disk. `--bind
 0.0.0.0` opens it to the network -- then anyone who can reach the laptop can
 reconfigure the counter.
 
+## Count at the exits (recommended)
+
+Every ball that scores comes back out of the hub, so the number leaving
+through the exits is the score. Counting there removes the error that sank
+the funnel-mouth counts: from in front, a ball that clips the rim and drops
+behind the hub looks exactly like one that went in (Einstein 1: 832 net
+entries over the red hood against 415 real), but it never reaches an exit.
+
+In the website, **Red exit** / **Blue exit**, then three clicks: the two ends
+of a line across the exit, then a point on the side the balls go out to. An
+arrow shows the counting direction. A ball counts when its path between two
+frames crosses the line outward; one that comes back across is taken off. A
+clump crossing together counts by its area, as elsewhere. In `cams.json`:
+
+```json
+{"hub": "red", "line": [[820, 410], [820, 520]], "out": [900, 465]}
+```
+
+Put the camera where it sees each exit squarely, close enough that balls are
+large, with nothing yellow beyond the line. Several exits per hub: one line
+each, combined by `sum`.
+
+**Not measured yet.** The broadcast cannot test it: the Einstein exits are
+mostly behind the hubs, and a line across the visible part of the red
+out-flow caught 9% (Einstein 4), 15% (5) and 34% (1) of the scoreboard. The
+test is the spec's 20 balls through a practice hub's exits.
+
 ## Blur correction and still-yellow removal (per camera)
 
 Two settings per camera, both off by default:

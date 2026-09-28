@@ -193,6 +193,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
   <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.5"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/></symbol>
   <symbol id="i-live" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5"/><path d="M16.2 7.8a6 6 0 010 8.4M7.8 16.2a6 6 0 010-8.4M19.1 4.9a10 10 0 010 14.2M4.9 19.1a10 10 0 010-14.2"/></symbol>
+  <symbol id="i-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16"/><path d="M9 12h11M16 8l4 4-4 4"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
   <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
@@ -263,11 +264,17 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     </section>
 
     <section class="card step" id="st2">
-      <h2><span class="n">2</span>Hub outlines</h2>
+      <h2><span class="n">2</span>Where to count</h2>
       <div class="list" id="zones"></div>
+      <div class="muted" style="margin:2px 0 6px"><b style="color:var(--ink)">Exit lines</b> — recommended: every scored ball comes back out, and a ball that bounces off the rim never does.</div>
       <div class="row">
-        <button class="btn red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Draw red</button>
-        <button class="btn blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Draw blue</button>
+        <button class="btn red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
+        <button class="btn blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
+      </div>
+      <div class="muted" style="margin:10px 0 6px">Or an outline around the hub's opening:</div>
+      <div class="row">
+        <button class="btn sm red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Red outline</button>
+        <button class="btn sm blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Blue outline</button>
       </div>
       <div class="comb"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
       <div class="comb"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
@@ -369,9 +376,9 @@ function renderCams(){const L=$("cams");L.innerHTML="";
 function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
   $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;}
 function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
-  if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">No outlines yet. Draw one around each hub's opening.</div>`;return;}
-  for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";
-    d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+" in":z.outline.length+" corners"}</span><button class="x" title="Delete">✕</button>`;
+  if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an exit line across each hub's exit.</div>`;return;}
+  for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";const ex=!!z.line;
+    d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in"):(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
     d.querySelector(".x").onclick=()=>api("delete_zone",{camera:cur,zone:z.name}).then(refresh);L.appendChild(d);}}
 function renderSteps(){const cams=S.cfg.cameras;
   const done=[cams.length>0,cams.length>0&&cams.every(c=>c.zones.length),cams.length>0&&cams.every(c=>c.ball_area>0),S.running];
@@ -394,7 +401,7 @@ function handleJob(){const j=S.job;
   else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
     else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
   else if(j.name==="calibrate"&&j.result)showCalibration(j.result);
-  else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Draw red</b> or <b>Draw blue</b> and click the corners of the hub's opening.":"");}}
+  else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Red exit</b> or <b>Blue exit</b> and click across the hub's exit.":"");}}
 async function chooseCamera(found){if(!found.length){modal("No camera found","<p>Check the camera is plugged in. On a Mac, the terminal needs permission: <b>System Settings → Privacy &amp; Security → Camera</b>.</p>",[{label:"OK",cls:"primary"}]);return;}
   const body=`<p>Numbers can change when cameras are re-plugged — check the picture after adding.</p><div class="pick">`+
     found.map(c=>`<div class="item" data-i="${c.index}"><span class="icon"><svg><use href="#i-cam"/></svg></span><span class="t">Camera ${c.index}</span><span class="s">${esc(c.size)}</span></div>`).join("")+"</div>";
@@ -413,33 +420,50 @@ function loadImg(){const n=new Image();n.onload=()=>{$("empty").style.display="n
 function sizeCanvas(){const img=$("img"),cv=$("cv");if(!img.clientWidth)return;
   if(cv.width!==img.clientWidth||cv.height!==img.clientHeight){cv.width=img.clientWidth;cv.height=img.clientHeight;}overlay();}
 function scale(){const p=S&&S.pictures[cur];return p?$("img").clientWidth/p[0]:1;}
+function arrowLine(g,a,b,out,col,k,dashed){
+  // the exit line, and an arrow from its middle towards where balls go
+  g.lineWidth=4;g.strokeStyle=col;g.setLineDash(dashed?[6,4]:[]);g.beginPath();g.moveTo(a[0]*k,a[1]*k);g.lineTo(b[0]*k,b[1]*k);g.stroke();g.setLineDash([]);
+  if(!out)return;const mx=(a[0]+b[0])/2*k,my=(a[1]+b[1])/2*k;let nx=-(b[1]-a[1]),ny=b[0]-a[0];const L=Math.hypot(nx,ny)||1;nx/=L;ny/=L;
+  if(nx*(out[0]*k-mx)+ny*(out[1]*k-my)<0){nx=-nx;ny=-ny;}const len=34,tx=mx+nx*len,ty=my+ny*len;
+  g.lineWidth=3;g.beginPath();g.moveTo(mx,my);g.lineTo(tx,ty);g.stroke();
+  g.fillStyle=col;g.beginPath();g.moveTo(tx+nx*10,ty+ny*10);g.lineTo(tx-ny*7,ty+nx*7);g.lineTo(tx+ny*7,ty-nx*7);g.closePath();g.fill();}
 function overlay(){const cv=$("cv"),g=cv.getContext("2d");g.clearRect(0,0,cv.width,cv.height);const c=cam();if(!c)return;const k=scale();
-  for(const z of c.zones){const col=COL[z.hub];g.beginPath();z.outline.forEach(([x,y],i)=>i?g.lineTo(x*k,y*k):g.moveTo(x*k,y*k));g.closePath();
-    g.fillStyle=col+"22";g.fill();g.lineWidth=2.5;g.strokeStyle=col;g.stroke();
-    const n=S.live.zones[z.name];const label=(n!==undefined?n+"  ":"")+z.hub.toUpperCase();
-    const x=Math.min(...z.outline.map(p=>p[0]))*k,y=Math.min(...z.outline.map(p=>p[1]))*k-10;
+  for(const z of c.zones){const col=COL[z.hub];const pts=z.line?[...z.line,z.out]:z.outline;
+    if(z.line)arrowLine(g,z.line[0],z.line[1],z.out,col,k,false);
+    else{g.beginPath();z.outline.forEach(([x,y],i)=>i?g.lineTo(x*k,y*k):g.moveTo(x*k,y*k));g.closePath();
+    g.fillStyle=col+"22";g.fill();g.lineWidth=2.5;g.strokeStyle=col;g.stroke();}
+    const n=S.live.zones[z.name];const label=(n!==undefined?n+"  ":"")+z.hub.toUpperCase()+(z.line?" EXIT":"");
+    const x=Math.min(...pts.map(p=>p[0]))*k,y=Math.min(...pts.map(p=>p[1]))*k-10;
     g.font="700 13px -apple-system,Segoe UI,sans-serif";const w=g.measureText(label).width+14;
     g.fillStyle=col;roundRect(g,x,y-16,w,22,6);g.fill();g.fillStyle="#fff";g.fillText(label,x+7,y);}
-  if(drawing){const col=COL[drawing.hub];g.setLineDash([6,4]);g.lineWidth=2;g.strokeStyle=col;g.beginPath();
+  if(drawing&&drawing.kind==="exit"){const col=COL[drawing.hub],P=drawing.pts,h=drawing.hover?[drawing.hover[0]/k,drawing.hover[1]/k]:null;
+    if(P.length===1&&h)arrowLine(g,P[0],h,null,col,k,true);
+    if(P.length===2)arrowLine(g,P[0],P[1],h,col,k,false);
+    P.forEach(([x,y])=>{g.beginPath();g.arc(x*k,y*k,6,0,7);g.fillStyle="#fff";g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke();});}
+  else if(drawing){const col=COL[drawing.hub];g.setLineDash([6,4]);g.lineWidth=2;g.strokeStyle=col;g.beginPath();
     drawing.pts.forEach(([x,y],i)=>i?g.lineTo(x*k,y*k):g.moveTo(x*k,y*k));if(drawing.hover&&drawing.pts.length)g.lineTo(drawing.hover[0],drawing.hover[1]);g.stroke();g.setLineDash([]);
     drawing.pts.forEach(([x,y],i)=>{g.beginPath();g.arc(x*k,y*k,i===0?7:5,0,7);g.fillStyle=i===0?"#fff":col;g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke();});}}
 function roundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
 $("cv").addEventListener("click",e=>{if(!drawing)return;const r=e.target.getBoundingClientRect(),k=scale();
   const p=[(e.clientX-r.left)/k,(e.clientY-r.top)/k];
+  if(drawing.kind==="exit"){drawing.pts.push(p);if(drawing.pts.length===2)exitBanner(2);if(drawing.pts.length===3)finish();else overlay();return;}
   // clicking the first corner again closes the outline
   if(drawing.pts.length>=3){const f=drawing.pts[0];if(Math.hypot((f[0]-p[0])*k,(f[1]-p[1])*k)<10){finish();return;}}
   drawing.pts.push(p);overlay();});
 $("cv").addEventListener("mousemove",e=>{if(!drawing)return;const r=e.target.getBoundingClientRect();drawing.hover=[e.clientX-r.left,e.clientY-r.top];overlay();});
-$("cv").addEventListener("dblclick",()=>finish());
+$("cv").addEventListener("dblclick",()=>{if(drawing&&drawing.kind!=="exit")finish();});
 $("cv").addEventListener("contextmenu",e=>{e.preventDefault();finish();});
-document.addEventListener("keydown",e=>{if(!drawing)return;if(e.key==="Enter")finish();if(e.key==="Escape")cancelDraw();if(e.key==="Backspace"){drawing.pts.pop();overlay();}});
+document.addEventListener("keydown",e=>{if(!drawing)return;if(e.key==="Enter")finish();if(e.key==="Escape")cancelDraw();if(e.key==="Backspace"){drawing.pts.pop();if(drawing.kind==="exit")exitBanner(drawing.pts.length);overlay();}});
 window.addEventListener("resize",sizeCanvas);
-function draw(hub){if(!cam()||!S.pictures[cur]){toast("Add a camera and show its picture first","warn");return;}
-  drawing={hub,pts:[]};const b=$("banner");b.style.display="block";
+function exitBanner(step){const h=drawing.hub,b=$("banner");b.style.display="block";
+  b.innerHTML=step<2?`Click one end of the <span style="color:${COL[h]}">${h.toUpperCase()}</span> exit, then the other end · <kbd>Esc</kbd> cancel`
+    :`Now click where balls go <b>once they are out</b> · <kbd>⌫</kbd> undo · <kbd>Esc</kbd> cancel`;}
+function draw(hub,kind="outline"){if(!cam()||!S.pictures[cur]){toast("Add a camera and show its picture first","warn");return;}
+  drawing={hub,kind,pts:[]};if(kind==="exit"){exitBanner(0);overlay();return;}const b=$("banner");b.style.display="block";
   b.innerHTML=`Click the corners of the <span style="color:${COL[hub]}">${hub.toUpperCase()}</span> hub's opening · close it on the first corner or <kbd>Enter</kbd> · <kbd>⌫</kbd> undo · <kbd>Esc</kbd> cancel`;overlay();}
 function cancelDraw(){drawing=null;$("banner").style.display="none";overlay();}
 async function finish(){if(!drawing)return;const d=drawing;
-  try{await api("add_zone",{camera:cur,hub:d.hub,points:d.pts});cancelDraw();toast(d.hub.toUpperCase()+" outline saved");
+  try{await api("add_zone",{camera:cur,hub:d.hub,points:d.pts,kind:d.kind});cancelDraw();toast(d.hub.toUpperCase()+(d.kind==="exit"?" exit line saved":" outline saved"));
     const c=cam();hint(c&&!c.ball_area?"Next: put a few balls near the hub and press <b>Measure</b>.":"");}catch(e){}refresh();}
 
 /* ---------- actions ---------- */

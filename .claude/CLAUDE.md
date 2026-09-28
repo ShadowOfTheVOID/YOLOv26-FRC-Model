@@ -190,7 +190,11 @@ any camera stale holds the heartbeat). `run.py hubgui` edits the same cams.json:
 `hubapp.HubController` -- put logic there, not in the page. The user chose
 the website; the Qt window was removed. It also takes a Twitch/YouTube
 stream as a source (`hubcount.is_stream_page`, yt-dlp), which the user
-wants kept; streams are seconds late, so never for the AUTO call. Per-camera `blur`/`remove_static` exist only as calibration
+wants kept; streams are seconds late, so never for the AUTO call.
+Zones are an outline (funnel mouth) or an exit line (`ExitLineCounter`,
+`"line"`+`"out"`); the user wants exits counted -- exits equal entries and
+rim bounces never reach an exit. Exits are not visible enough on broadcasts
+to validate (9-34%); only a practice hub can. Per-camera `blur`/`remove_static` exist only as calibration
 against a hand-counted recording -- the best value differed on every Einstein
 match. Plumbing is tested; counting is unvalidated on a practice-field
 camera -- the spec's 20-ball acceptance test comes before bioarena's

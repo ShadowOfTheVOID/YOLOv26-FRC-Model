@@ -79,6 +79,13 @@ def new_setup() -> Dict:
     return {"combine": {"red": "sum", "blue": "sum"}, "cameras": []}
 
 
+def zone_points(z: Dict) -> List:
+    """The points a zone is drawn and searched around, either kind."""
+    if z.get("line"):
+        return list(z["line"]) + [z["out"]]
+    return list(z.get("outline") or [])
+
+
 def problems(cfg: Dict) -> List[str]:
     """What stops this setup from running, in words a person can act on."""
     out = []
@@ -339,22 +346,36 @@ class HubController:
             return c
 
     def add_zone(self, cam_name: str, hub: str,
-                 points: Sequence[Sequence[float]]) -> Dict:
+                 points: Sequence[Sequence[float]], kind: str = "outline") -> Dict:
+        """An outline (3+ corners around the hub's mouth) or an exit line
+        (`kind="exit"`: the two ends of the exit, then a point outside it)."""
+        from .hubcount import ExitLineCounter
         if hub not in HUBS:
             raise ValueError("hub must be red or blue")
         pts = [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in points]
         # a double-click lands as two clicks on the same spot
         while len(pts) >= 2 and pts[-1] == pts[-2]:
             pts.pop()
-        if len(pts) < 3:
-            raise ValueError("an outline needs at least three corners")
+        if kind == "exit":
+            if len(pts) != 3:
+                raise ValueError("an exit line is three clicks: its two ends, "
+                                 "then a point on the side balls go out to")
+            ExitLineCounter(pts[:2], pts[2], 1.0)   # refuses a bad line
+            body = {"line": pts[:2], "out": pts[2]}
+        elif kind == "outline":
+            if len(pts) < 3:
+                raise ValueError("an outline needs at least three corners")
+            body = {"outline": pts}
+        else:
+            raise ValueError(f"unknown zone kind {kind!r}")
         with self.lock:
             c = self.camera(cam_name)
             names = [z["name"] for x in self.cfg["cameras"] for z in x["zones"]]
-            zone = {"name": next_name(names, f"{c['name']}-{hub}"), "hub": hub,
-                    "outline": pts}
+            base = f"{c['name']}-{hub}" + ("-exit" if kind == "exit" else "")
+            zone = {"name": next_name(names, base), "hub": hub, **body}
             c["zones"].append(zone)
-        self.say(f"outline {zone['name']} saved ({len(pts)} corners)")
+        what = "exit line" if kind == "exit" else f"outline ({len(pts)} corners)"
+        self.say(f"{zone['name']}: {what} saved")
         return zone
 
     def delete_zone(self, cam_name: str, zone_name: str) -> None:
@@ -393,7 +414,7 @@ class HubController:
         if not c.get("zones"):
             raise ValueError("draw the hub outline first: the ball is measured "
                              "near it")
-        polys = {z["name"]: [tuple(p) for p in z["outline"]] for z in c["zones"]}
+        polys = {z["name"]: [tuple(p) for p in zone_points(z)] for z in c["zones"]}
         area = measure(c["source"], polys, seconds, None,
                        float(c.get("fps") or 0), c.get("size", ""), out=self.say)
         if area:

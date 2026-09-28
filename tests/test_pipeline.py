@@ -2758,6 +2758,98 @@ def test_hub_ui_controller_and_web():
         httpd.server_close()
 
 
+def test_hub_exit_line_counter():
+    """Counting balls as they come OUT of the hub.
+
+    Every scored ball leaves through an exit, so the exit count is the score,
+    and a ball that clips the rim and drops behind the hub -- the error that
+    sank the funnel-mouth counts (Einstein 1: 832 net entries over the red
+    hood, 415 real) -- never gets there.
+    """
+    from tbavid import hubcount as HC
+    from tbavid import hubapp as A
+
+    line, out = [(100.0, 100.0), (100.0, 200.0)], (160.0, 150.0)   # out = +x
+    A1 = 300.0
+
+    def run(path, area=A1, counter=None):
+        c = counter or HC.ExitLineCounter(line, out, A1)
+        for x, y in path:
+            c.update([(float(x), float(y), area)])
+        c.update([])
+        return c
+
+    c = run([(60, 150), (80, 150), (100 - 0.001, 150), (115, 150), (135, 150)])
+    check("a ball rolling out through the exit counts once", c.reported == 1)
+    c = run([(140, 150), (120, 150), (100.5, 150), (80, 150)])
+    check("a ball going the other way does not count", c.reported == 0)
+    c = run([(70, 150), (90, 150), (110, 150), (130, 150), (110, 150),
+             (90, 150), (70, 150)])
+    check("out and straight back in nets zero (after one report)",
+          c.net == 0 and c.reported == 1 and c.owed == 1)
+    c = run([(70, 60), (90, 60), (110, 60), (130, 60)])
+    check("a ball passing beyond the end of the line does not count",
+          c.reported == 0)
+    c = run([(70, 150), (90, 150), (110, 150)], area=3 * A1)
+    check("a clump of three through the exit counts three", c.reported == 3)
+    # A ball exactly on the line counts once, on the frame it leaves it.
+    c = run([(80, 150), (100, 150), (100, 150), (120, 150)])
+    check("stopping on the line counts once, not twice", c.reported == 1)
+    # Fast: 70 px a frame, over twice the ball's width, still caught because
+    # the path is tested, not the side each end is on.
+    c = HC.ExitLineCounter(line, out, A1)
+    c.min_reach = 200
+    run([(40, 150), (110, 150)], counter=c)
+    check("a fast ball crossing between frames is caught", c.reported == 1)
+    for bad, why in ((([(1, 1), (1, 1)], (5, 5)), "a line with one point"),
+                     (([(0, 0), (10, 0)], (5, 0)), "an out point on the line")):
+        try:
+            HC.ExitLineCounter(bad[0], bad[1], A1)
+            check(f"{why} is refused", False)
+        except ValueError:
+            check(f"{why} is refused", True)
+    check("segment crossing: through the middle",
+          HC.segments_cross((0, 5), (10, 5), (5, 0), (5, 10)))
+    check("segment crossing: not reaching the line",
+          not HC.segments_cross((0, 5), (4, 5), (5, 0), (5, 10)))
+
+    # Exit lines in a setup file survive a round trip, and replay.
+    cfg = {"cameras": [{"name": "c", "source": "x.mp4", "ball_area": A1,
+                        "zones": [{"name": "red-exit", "hub": "red",
+                                   "line": [list(p) for p in line],
+                                   "out": list(out)}]}]}
+    setup = HC.setup_from_dict(cfg)
+    z = setup.cameras[0].zones[0]
+    check("an exit zone is built as an exit line counter",
+          z.kind == "exit" and isinstance(z.counter, HC.ExitLineCounter))
+    again = HC.setup_to_dict(setup)
+    check("and saved back as a line and an out point",
+          again["cameras"][0]["zones"][0] == {"name": "red-exit", "hub": "red",
+                                              "line": [[100.0, 100.0], [100.0, 200.0]],
+                                              "out": [160.0, 150.0]})
+    frames = [{"red-exit": [(float(x), 150.0, A1)]} for x in (70, 90, 110, 130)]
+    check("replay counts exits too",
+          HC.replay_counts(setup.cameras[0], frames, 0.0) == {"red": 1})
+
+    # The website's controller makes one from three clicks.
+    ctl = A.HubController()
+    ctl.cfg["cameras"].append({"name": "c", "source": "0", "ball_area": A1,
+                               "zones": []})
+    zz = ctl.add_zone("c", "blue", [[100, 100], [100, 200], [160, 150]], "exit")
+    check("three clicks make an exit line",
+          zz["line"] == [[100.0, 100.0], [100.0, 200.0]] and zz["out"] == [160.0, 150.0]
+          and zz["name"] == "c-blue-exit")
+    try:
+        ctl.add_zone("c", "blue", [[100, 100], [100, 200]], "exit")
+        check("an exit line without its out point is refused", False)
+    except ValueError:
+        check("an exit line without its out point is refused", True)
+    check("the exit is drawn and searched around all three points",
+          A.zone_points(zz) == [[100.0, 100.0], [100.0, 200.0], [160.0, 150.0]])
+    check("and the setup the website saves runs headless",
+          HC.setup_from_dict(ctl.cfg).cameras[0].zones[0].kind == "exit")
+
+
 def test_hub_feed_needs_no_opencv_to_load():
     """The sender is stdlib only: it runs on whatever laptop is wired into the
     field switch, and CI has no cv2. hubcount keeps cv2 inside functions."""
@@ -2807,7 +2899,8 @@ def main() -> int:
                test_model_must_name_its_classes, test_hub_feed_protocol,
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
                test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
-               test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web):
+               test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
+               test_hub_exit_line_counter):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

@@ -76,6 +76,18 @@ the build rather than publishing an empty release.
   laid out, so no outline could be drawn; it is now sized on the picture's
   load. Neither has been opened on a Mac yet. (A Tk window came first and
   was replaced: Homebrew's Python needs `brew install python-tk` for it.)
+- **Exit-line counting** (`hubcount.ExitLineCounter`; *Red exit* / *Blue
+  exit* in the website; `"line"` + `"out"` zones in `cams.json`). Every
+  scored ball comes back out of the hub, so balls crossing a line across an
+  exit, outward, are the score -- and a ball that clips the rim and drops
+  behind the hub, which a funnel-mouth outline cannot tell from a score
+  (Einstein 1: 832 entries over the red hood, 415 real), never gets there.
+  The ball's path between frames is tested against the segment, so a fast
+  ball is still caught and one passing beyond the line's ends is not; a ball
+  that crosses back is taken off. Unit-tested and driven in the browser.
+  Not measured on real exits: on the Einstein broadcasts the exits are
+  mostly hidden behind the hubs, and a line across the visible red out-flow
+  caught 9-34% of the scoreboard. A practice hub's exits are the test.
 - **The hub counter's interface is the web page.** The Qt window
   (`tbavid/hubqt.py`, `run.py hubgui --ui qt`) was removed once the website
   was chosen; `run.py hubgui` opens the page and no longer takes `--ui`.
