@@ -2923,6 +2923,18 @@ def test_relabel_video_helpers():
           and SC.yaml_names("names: {0: fuel, 1: hub_red}") == ["fuel", "hub_red"]
           and SC.yaml_names("names: [robot_red, fuel]") == ["robot_red", "fuel"]
           and SC.index_map(["fuel"], SC.yaml_names("names: [robot_red, fuel]")) == {1: 0})
+    moved = Path(tempfile.mkdtemp())
+    (moved / "videos").mkdir()
+    (moved / "videos" / "2026a_qm1_x.mp4").write_bytes(b"")
+    (moved / "raw").mkdir()
+    (moved / "raw" / "rawkey.mkv").write_bytes(b"")
+    j = RV.resolve_source({"stem": "2026a_qm1_x", "clean": "/Users/old/data/videos/2026a_qm1_x.mp4",
+                           "raw": None, "yt_key": "x", "crop": (0, 0, 10, 10)}, moved)
+    r = RV.resolve_source({"stem": "2026a_qm2_y", "clean": None, "raw": "/gone/rawkey.mkv",
+                           "yt_key": "rawkey", "crop": (0, 0, 10, 10)}, moved)
+    check("a moved data folder: clean renders and raw downloads found by name under --data",
+          (j["kind"], Path(j["path"]).name, r["kind"], Path(r["path"]).name)
+          == ("clean", "2026a_qm1_x.mp4", "raw", "rawkey.mkv"))
     check("labels are YOLO-normalised",
           RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
 

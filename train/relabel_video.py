@@ -407,11 +407,20 @@ def frames_of(job: Dict, every: float, length: float):
         cap.release()
 
 
-def resolve_source(job: Dict) -> Dict:
-    """Clean render if it is still on disk, else the raw download."""
-    if job.get("clean") and Path(job["clean"]).exists():
-        return dict(job, kind="clean", path=job["clean"])
-    from tbavid.config import RAW_DIR
+def resolve_source(job: Dict, data: Path) -> Dict:
+    """Clean render if it is still on disk, else the raw download.
+
+    The manifest stores absolute paths from when each file was written, so a
+    data folder that has since moved (another disk, another machine) has
+    stale ones; the same file names are then looked for under `data`.
+    """
+    clean = job.get("clean")
+    if not (clean and Path(clean).exists()):
+        moved = data / "videos" / f"{job['stem']}.mp4"
+        clean = str(moved) if moved.exists() else None
+    if clean:
+        return dict(job, kind="clean", path=clean)
+    RAW_DIR = data / "raw"
     raw = job.get("raw")
     if not (raw and Path(raw).exists()):
         found = sorted(RAW_DIR.glob(f"{job['yt_key']}.*")) if job.get("yt_key") else []
@@ -428,6 +437,10 @@ def main() -> int:
     ap.add_argument("--from-scraper", action="store_true",
                     help="label every video run.py pull kept (data/review/manifest.json; "
                          "TBAVID_DATA moves it)")
+    ap.add_argument("--data", type=Path, default=None,
+                    help="with --from-scraper: the scraper's data folder, the one "
+                         "holding review/manifest.json, videos/ and raw/ (default "
+                         "$TBAVID_DATA, else data/ in this checkout)")
     ap.add_argument("--matches", nargs="*", default=None,
                     help="with --from-scraper: only these videos, by any substring "
                          "of the id (e.g. 2026nhdur)")
@@ -472,17 +485,20 @@ def main() -> int:
         jobs.append({"stem": Path(path).stem, "split": split, "kind": "plain",
                      "path": path, "start": float(start)})
     if args.from_scraper:
-        from tbavid.config import MANIFEST_PATH
+        from tbavid.config import DATA
+        data = (args.data or DATA).expanduser().resolve()
+        MANIFEST_PATH = data / "review" / "manifest.json"
         if not MANIFEST_PATH.exists():
-            raise SystemExit(f"no manifest at {MANIFEST_PATH} -- run `run.py pull`, "
-                             f"or set TBAVID_DATA to where the data lives")
+            raise SystemExit(f"no manifest at {MANIFEST_PATH} -- point --data at the "
+                             f"folder that holds review/manifest.json")
+        print(f"scraper data: {data}")
         known = known_splits(args.split_from) if args.split_from.exists() else {}
         found = scraper_jobs(json.loads(MANIFEST_PATH.read_text()), args.matches or [],
                              known, args.val_frac, args.include_quarantined)
         print(f"scraper: {len(found)} videos; {sum(1 for j in found if j['stem'] in known)} "
               f"keep their split from {args.split_from}")
         for j in found:
-            j = resolve_source(j)
+            j = resolve_source(j, data)
             if j["kind"] is None:
                 print(f"  skip {j['stem']}: neither the clean render nor the raw "
                       f"download is on disk (run.py rerender brings one back)")

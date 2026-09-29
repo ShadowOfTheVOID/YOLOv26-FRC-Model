@@ -147,9 +147,15 @@ labels every kept video:
 
 ```bash
 python3 train/relabel_video.py --out dataset_relabel --from-scraper \
+    --data /path/to/scraper/data \
     --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt --device mps   # Mac
 #   --device 0 on the droplet; --matches 2026nhdur to take one event only
 ```
+
+`--data` is the folder holding `review/manifest.json`, `videos/` and
+`raw/` (default `$TBAVID_DATA`, else `data/` here). The manifest stores
+absolute paths from when each file was written, so after a move the files
+are found by name under `--data` instead.
 
 Videos the scraper quarantined for low main-camera coverage are left out
 unless `--include-quarantined`. Frames with more than 30 balls' worth of
