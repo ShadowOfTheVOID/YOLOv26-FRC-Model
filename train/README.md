@@ -132,13 +132,13 @@ behind each. In short:
 - robots from the scouting model;
 - whole frames plus 960 px full-resolution crops around balls in flight.
 
-On the droplet, in the container, with the three Einstein videos in
+On the droplet, in the container, with the four Einstein videos in
 `videos/` (download them from Drive) and both release models in `models/`:
 
 ```bash
 python3 train/relabel_video.py --out dataset_einstein \
     --video videos/e4.mp4:train:6 --video videos/e5.mp4:train:6 \
-    --video videos/e1.mp4:val:6 --rows 0:700 \
+    --video videos/e8.mp4:train:7 --video videos/e1.mp4:val:6 --rows 0:700 \
     --mask 440,0,1480,165 --mask 15,58,440,122 --mask 1480,58,1905,122 \
     --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt --device 0
 ```
@@ -148,7 +148,12 @@ The arguments are specific to this broadcast:
   camera sits behind a tan stone border that the old colour gate called
   fuel.
 - **`--mask`:** greys out the scoreboard's yellow fuel icon and arrows.
-- **Einstein 8 is left out on purpose:** it is the held-out test match.
+- **Every scored match goes in:** Einstein 4, 5 and 8 train, and Einstein
+  1 validates. Validation only picks the best epoch, so Einstein 1 is the
+  counting test for the retrained model.
+- **More matches:** add each new broadcast with its own run and the same
+  `--out` (the report merges). `START` is when the match clock starts, in
+  video seconds.
 
 **Look at `dataset_einstein/preview/` before training.** Box colours:
 - green: the detector;

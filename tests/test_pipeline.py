@@ -2875,6 +2875,12 @@ def test_relabel_video_helpers():
           [str(p) for p in TR.label_dirs(tmp / "mix.yaml")] ==
           ["/workspace/frc/dataset-scout/labels/train", "/workspace/frc/dataset_einstein/labels/train",
            "/workspace/frc/dataset-scout/labels/val", "/workspace/frc/dataset_einstein/labels/val"])
+    row = [(0, (x, 50, x + 14, 64), "model") for x in range(0, 140, 20)]
+    shirt = (0, (300, 40, 350, 75), "model")
+    near = [(0, (x, 600, x + 30, 630), "model") for x in range(0, 300, 40)]
+    kept = RV.drop_oversized(row + [shirt] + near + [(1, (400, 0, 600, 200), "robot")])
+    check("a shirt-sized 'ball' among 14 px balls is dropped; big near balls and robots stay",
+          shirt not in kept and len(kept) == len(row) + len(near) + 1)
     check("labels are YOLO-normalised",
           RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
 

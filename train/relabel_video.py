@@ -102,6 +102,30 @@ def nms(boxes: Sequence[Tuple[Box, float]], thr: float = 0.5) -> List[Tuple[Box,
     return out
 
 
+def drop_oversized(labels: Sequence[Tuple[int, Box, str]], band: float = 140.0,
+                   limit: float = 2.2) -> List[Tuple[int, Box, str]]:
+    """Fuel boxes far bigger than the balls at the same height in the image.
+
+    The old model boxed a spectator's yellow shirt at conf >= 0.4 on Einstein
+    5 (about 50 px, where balls at that height are about 14). A ball cannot
+    be twice the size of its neighbours at the same distance, and distance
+    goes with image height, so each 140 px band of rows has its own ball size
+    (the median fuel box side there, or the whole frame's). Dropped, not
+    greyed: the shirt stays in as a negative.
+    """
+    sides = lambda b: max(b[2] - b[0], b[3] - b[1])
+    fuel = [b for c, b, _ in labels if c == 0]
+    if not fuel:
+        return list(labels)
+    allmed = sorted(sides(b) for b in fuel)[len(fuel) // 2]
+    bands: Dict[int, List[float]] = {}
+    for b in fuel:
+        bands.setdefault(int((b[1] + b[3]) / 2 // band), []).append(sides(b))
+    med = {k: sorted(v)[len(v) // 2] if len(v) >= 5 else allmed for k, v in bands.items()}
+    return [(c, b, s) for c, b, s in labels
+            if c != 0 or sides(b) <= limit * med[int((b[1] + b[3]) / 2 // band)]]
+
+
 def to_yolo(cls: int, b: Box, w: int, h: int) -> str:
     cx, cy = (b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h
     return f"{cls} {cx:.6f} {cy:.6f} {(b[2] - b[0]) / w:.6f} {(b[3] - b[1]) / h:.6f}"
@@ -174,6 +198,7 @@ def label_frame(frame, prev, fuel_model, robot_model) -> Dict:
         x0, y0, x1, y1 = (int(max(0, b[0])), int(max(0, b[1])), int(min(w, b[2])), int(min(h, b[3])))
         if x1 > x0 and y1 > y0 and (mask[y0:y1, x0:x1] > 0).mean() >= YELLOW_FRAC:
             labels.append((0, b, "model+colour"))
+    labels = drop_oversized(labels)
     sides = sorted(max(b[2] - b[0], b[3] - b[1]) for _, b, _ in labels)
     ball = sides[len(sides) // 2] if sides else 18.0
     one = math.pi / 4 * ball * ball
@@ -296,8 +321,11 @@ def main() -> int:
         (args.out / "labels" / split).mkdir(parents=True, exist_ok=True)
     prev_dir = args.out / "preview"
     prev_dir.mkdir(parents=True, exist_ok=True)
-    report = {"videos": {}, "settings": {k: v for k, v in vars(args).items()
-                                         if k not in ("out", "video")}}
+    # Runs add to an existing dataset (a match downloaded later goes in with
+    # its own run), so the report is merged, not replaced.
+    report_path = args.out / "relabel_report.json"
+    report = json.loads(report_path.read_text()) if report_path.exists() else {"videos": {}}
+    report["settings"] = {k: v for k, v in vars(args).items() if k not in ("out", "video")}
     previews = 0
     for spec in args.video:
         path, split, start = spec.rsplit(":", 2)
@@ -370,7 +398,7 @@ def main() -> int:
     (args.out / "dataset.yaml").write_text(
         f"path: {args.out.resolve()}\ntrain: images/train\nval: images/val\n"
         f"names:\n" + "".join(f"  {i}: {n}\n" for i, n in enumerate(NAMES)))
-    (args.out / "relabel_report.json").write_text(json.dumps(report, indent=2))
+    report_path.write_text(json.dumps(report, indent=2))
     print(f"wrote {args.out}/dataset.yaml; previews in {prev_dir}")
     return 0
 
