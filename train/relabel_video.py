@@ -261,8 +261,14 @@ def paint_grey(img, mask=None, boxes: Sequence[Box] = (), pad: int = 2):
 
 
 def pick_tiles(labels, w: int, h: int, n: int, tw: int, th: int) -> List[Tuple[int, int]]:
-    """Up to n tw x th tiles centred on balls in flight, not overlapping much."""
+    """Up to n tw x th tiles centred on balls in flight, not overlapping much.
+
+    Without motion labels (exported frames have no frame two earlier) the
+    highest fuel boxes stand in: balls in flight are the ones high in the
+    frame, and without these tiles such frames are only ever seen halved."""
     flying = [b for cls, b, src in labels if cls == 0 and src == "motion"]
+    if not flying:
+        flying = [b for cls, b, _ in labels if cls == 0]
     out: List[Tuple[int, int]] = []
     for b in sorted(flying, key=lambda b: b[1]):          # highest first
         cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
@@ -371,10 +377,36 @@ def scraper_jobs(manifest: Dict, matches: Sequence[str], known: Dict[str, str],
     return jobs
 
 
+def frame_jobs(files: Sequence[Path], known: Dict[str, str], val_frac: float,
+               matches: Sequence[str]) -> List[Dict]:
+    """Exported harvest frames ('<event>_<match>_<ytkey>_NNNNNN.jpg', 3 a
+    second, main camera, banner cropped) grouped into one job per match."""
+    by: Dict[str, List[Path]] = {}
+    for f in sorted(files):
+        match, _, idx = f.stem.rpartition("_")
+        if not match or not idx.isdigit():
+            continue
+        if matches and not any(m in match for m in matches):
+            continue
+        by.setdefault(match, []).append(f)
+    return [{"stem": m, "split": split_for(m, known, val_frac), "kind": "frames",
+             "path": str(fs[0].parent), "files": fs} for m, fs in sorted(by.items())]
+
+
 def frames_of(job: Dict, every: float, length: float):
-    """(frame index, frame, frame two earlier) for each sample of a job."""
+    """(frame index, frame, frame two earlier) for each sample of a job.
+
+    Exported frames come with no frame two earlier -- they are 3 a second --
+    so `prev` is None and the motion step is skipped: a ball in flight the
+    detector misses is greyed instead of labelled, never left unboxed."""
     import cv2
 
+    if job["kind"] == "frames":
+        for f in job["files"]:
+            img = cv2.imread(str(f))
+            if img is not None:
+                yield int(f.stem.rpartition("_")[2]), img, None
+        return
     kind, path = job["kind"], job["path"]
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
@@ -437,12 +469,15 @@ def main() -> int:
     ap.add_argument("--from-scraper", action="store_true",
                     help="label every video run.py pull kept (data/review/manifest.json; "
                          "TBAVID_DATA moves it)")
+    ap.add_argument("--frames", type=Path, default=None,
+                    help="a folder of harvest frames (e.g. an exported harvest's "
+                         "frames/): labelled one by one, no motion step")
     ap.add_argument("--data", type=Path, default=None,
                     help="with --from-scraper: the scraper's data folder, the one "
                          "holding review/manifest.json, videos/ and raw/ (default "
                          "$TBAVID_DATA, else data/ in this checkout)")
     ap.add_argument("--matches", nargs="*", default=None,
-                    help="with --from-scraper: only these videos, by any substring "
+                    help="with --from-scraper / --frames: only these videos, by any substring "
                          "of the id (e.g. 2026nhdur)")
     ap.add_argument("--split-from", type=Path, default=ROOT / "dataset",
                     help="with --from-scraper: a built dataset whose train/val "
@@ -504,6 +539,14 @@ def main() -> int:
                       f"download is on disk (run.py rerender brings one back)")
                 continue
             jobs.append(j)
+    if args.frames:
+        folder = args.frames / "frames" if (args.frames / "frames").is_dir() else args.frames
+        known = known_splits(args.split_from) if args.split_from.exists() else {}
+        found = frame_jobs(list(folder.glob("*.jpg")), known, args.val_frac, args.matches or [])
+        print(f"frames: {sum(len(j['files']) for j in found)} in {len(found)} matches from "
+              f"{folder}; {sum(1 for j in found if j['stem'] in known)} keep their split "
+              f"from {args.split_from}")
+        jobs += found
     if not jobs:
         raise SystemExit("nothing to label: give --video, or --from-scraper with "
                          "videos in the manifest")
@@ -534,9 +577,11 @@ def main() -> int:
         for fi, frame, prev in frames_of(job, args.every, args.length):
             for x0, y0, x1, y1 in masks:
                 frame[y0:y1, x0:x1] = 118
-                prev[y0:y1, x0:x1] = 118
+                if prev is not None:
+                    prev[y0:y1, x0:x1] = 118
             if rows:
-                frame, prev = frame[rows[0]:rows[1]], prev[rows[0]:rows[1]]
+                frame = frame[rows[0]:rows[1]]
+                prev = prev[rows[0]:rows[1]] if prev is not None else None
             r = label_frame(frame, prev, fuel_model, robot_model)
             stats["grey_per_frame"].append(round(r["grey_balls"], 1))
             if r["grey_balls"] > args.max_grey:

@@ -2935,6 +2935,13 @@ def test_relabel_video_helpers():
     check("a moved data folder: clean renders and raw downloads found by name under --data",
           (j["kind"], Path(j["path"]).name, r["kind"], Path(r["path"]).name)
           == ("clean", "2026a_qm1_x.mp4", "raw", "rawkey.mkv"))
+    fj = RV.frame_jobs([Path("f/2026a_qm1_x_000030.jpg"), Path("f/2026a_qm1_x_000010.jpg"),
+                        Path("f/2026a_qm2_y_000020.jpg"), Path("f/notaframe.jpg")],
+                       {"2026a_qm2_y": "val"}, 0.0, [])
+    check("exported frames group into one job per match, in frame order, keeping known splits",
+          [(j["stem"], j["split"], [f.name for f in j["files"]]) for j in fj]
+          == [("2026a_qm1_x", "train", ["2026a_qm1_x_000010.jpg", "2026a_qm1_x_000030.jpg"]),
+              ("2026a_qm2_y", "val", ["2026a_qm2_y_000020.jpg"])])
     check("labels are YOLO-normalised",
           RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
 

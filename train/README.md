@@ -163,6 +163,22 @@ unlabelled yellow are skipped (`--max-grey`). That is mostly the wide
 corral shots the old labeller could not handle either; the rest of those
 matches still goes in.
 
+### 1b. An exported harvest (frames only)
+
+A harvest folder with `frames/`, `labels/` and `manifest.json` but no videos
+is labelled frame by frame:
+
+```bash
+python3 train/relabel_video.py --out dataset_relabel --frames "$HOME/Downloads/harvest_good 2" \
+    --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt --device mps
+```
+
+Exported frames are 3 a second, so there is no frame two earlier to
+measure motion from. A ball in flight the detector misses is greyed rather
+than added, and the full-resolution crops centre on the highest balls in
+the frame. The detector on full-resolution tiles is still what finds most
+of the balls in flight.
+
 ### 2. The Einstein broadcasts
 
 With the four Einstein videos in `videos/` (download them from Drive):
