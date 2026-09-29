@@ -212,6 +212,21 @@ the build rather than publishing an empty release.
   Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
   400 ms hold), and three matches are too few to trust the best fit.
 
+- **Live scoreboard at `/board`** (`tbavid/hubboard.html`,
+  `hubapp.board_view`; the **Scoreboard ↗** button on `run.py hubgui`). A
+  full-screen red and blue board that refreshes ten times a second.
+  - Linked to bioarena, it shows bioarena's credited score, match phase,
+    clock, AUTO counts and inactive hubs from the status reply.
+  - Otherwise it shows the camera counts, labelled as not a match score,
+    with a screen-only Zero.
+  - It warns when the counter is stopped, a camera has gone blind, or the
+    page lost the counter.
+
+  The Einstein 4 recording, paced at 60 fps through the whole path in
+  practice mode, ran at 59.9 fps with 5 ms median and 14 ms worst
+  capture-to-count time. Checked at 1920x1080 and at phone width. At the
+  scrimmage, bioarena's own display remains the official scoreboard.
+
 ### Changed
 
 - **The hub counter's outlines count downward entries, with one ball

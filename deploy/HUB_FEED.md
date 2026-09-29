@@ -184,6 +184,44 @@ non-JSON posts, because it can start cameras and list the disk. `--bind
 0.0.0.0` opens it to the network -- then anyone who can reach the laptop can
 reconfigure the counter.
 
+## The live scoreboard (`/board`)
+
+**At the scrimmage, bioarena's own match panel and audience display are the
+scoreboard.** The counter feeds them, and bioarena applies the match clock,
+the shifts and the active and inactive hubs.
+
+`http://127.0.0.1:8790/board`, the **Scoreboard ↗** button on the page, is a
+full-screen red and blue scoreboard. Use it for practice, for commissioning,
+or as a second screen. It refreshes ten times a second. What it shows
+depends on the link:
+
+- **Linked to bioarena:** bioarena's `credited` count, the score. It adds
+  the match phase and clock, AUTO counts, and a dimmed "HUB INACTIVE" half
+  while a hub is dark (all from bioarena's status reply, spec 4.4).
+- **Practice mode:** the same, from the built-in test receiver, labelled
+  "Test receiver (practice)".
+- **Not linked:** the camera counts since the counter started, labelled as
+  such. These are not a match score: nothing here knows when a match
+  starts, and fuel scored into a dark hub is included. **Zero** starts them
+  from 0 on that screen only; the feed is untouched.
+
+A red strip appears when:
+- the counter is stopped;
+- a camera has given no picture for 0.5 s;
+- the page cannot reach the counter (after 1 s; the numbers are then
+  frozen).
+
+Press **F** for full screen.
+
+**Measured 2026-09-29:** the Einstein 4 recording was fed through the whole
+path in practice mode, paced like a 60 fps camera. The counter kept 59.9
+fps, processing a frame in 5 ms median and 14 ms worst (capture-to-counted,
+so camera and USB delay are not included). The spec budget is 200 ms.
+
+To put it on a TV driven by another machine, run with `--bind 0.0.0.0` and
+open `http://<laptop>:8790/board`. The warning above applies: the set-up
+page is then open too.
+
 ## Count at the exits (recommended)
 
 Every ball that scores comes back out of the hub, so the number leaving

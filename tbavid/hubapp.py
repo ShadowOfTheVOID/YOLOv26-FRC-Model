@@ -480,6 +480,7 @@ class HubController:
             raise ValueError("Not ready yet: " + " ".join(issues))
         setup = hubcount.setup_from_dict(cfg)
         host, port = hubfeed.parse_target(target.strip() or DEFAULT_TARGET)
+        self.practice = practice
         if practice:
             host = "127.0.0.1"
             self.listen_stop = threading.Event()
@@ -566,6 +567,60 @@ class HubController:
                              for zs in tally.zones.values() for z in zs}
         out["live"] = live
         return out
+
+    def board(self) -> Dict:
+        """The scoreboard's data: small, since the page asks ten times a second."""
+        with self.lock:
+            running = self.running
+        s = self.sender
+        health = self.monitor.get("health") or {}
+        now = time.monotonic()
+        stale = [n for n, h in health.items()
+                 if running and now - h.last_frame > 0.5]
+        lags = [h.lag_ms() for h in health.values()]
+        return board_view(dict(s.counts) if s else {}, running,
+                          bool(s and s.linked()), s.last_reply if s else None,
+                          stale, round(max(lags)) if lags else None,
+                          list(self.monitor.get("errors", [])),
+                          bool(getattr(self, "practice", False)))
+
+
+BOARD_REPLY_KEYS = ("match_state", "match_time_s", "shift", "hub_active",
+                    "match_count", "credited", "auto_count")
+
+
+def board_view(counts: Dict[str, int], running: bool, linked: bool,
+               reply: Optional[Dict], stale: List[str], lag_ms: Optional[float],
+               errors: List[str], practice: bool = False) -> Dict:
+    """What the scoreboard shows, decided here so the page only draws it.
+
+    Linked to bioarena, the big numbers are its `credited` -- the score, this
+    match, only fuel scored while that hub was active (spec 4.4) -- with its
+    match clock and shift. Otherwise they are the counter's own totals since
+    it started, which are not a match score: nothing here knows when a match
+    starts, and a dark hub's fuel is in them. The page says which it is.
+    """
+    out = {"running": running, "linked": linked, "stale": list(stale),
+           "lag_ms": lag_ms, "errors": errors[-3:],
+           "raw": {h: int(counts.get(h, 0)) for h in HUBS}}
+    r = reply if (linked and isinstance(reply, dict)) else None
+    if r is not None and isinstance(r.get("credited"), dict):
+        # Practice replies come from the built-in stand-in, not the field.
+        out["source"] = "practice" if practice else "bioarena"
+        out["score"] = {h: int(r["credited"].get(h, 0) or 0) for h in HUBS}
+        for k in BOARD_REPLY_KEYS:
+            if k in r:
+                out[k] = r[k]
+    else:
+        out["source"] = "counter"
+        out["score"] = dict(out["raw"])
+    if not running:
+        out["alert"] = "counter stopped"
+    elif stale:
+        out["alert"] = "no picture from " + ", ".join(stale)
+    elif not linked and r is None and errors:
+        out["alert"] = errors[-1]
+    return out
 
 
 def _jsonable(x) -> bool:

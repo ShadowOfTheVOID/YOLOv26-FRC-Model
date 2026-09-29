@@ -218,6 +218,11 @@ only, exits ignored, one ball learned from crossings (30th pct of last 80),
 round up at 0.65, default blur 0.3: held-out 13%, shipped defaults 16% /
 6% / 9%. More knobs (outline size/offset, clump caps) overfit -- 27-28%
 held out -- so do not add knobs without a held-out check.
+End goal is a live scoreboard: bioarena's display is the official one; the
+counter also serves `/board` (`hubboard.html`, `hubapp.board_view`) --
+bioarena's credited score + clock/shift/hub_active from its status reply
+when linked, camera counts (labelled, not a match score) otherwise.
+Measured 59.9 fps, 5 ms median / 14 ms max capture-to-count on 60 fps video.
 
 **Recommended path for the scrimmage** (put to the user, awaiting answers):
 a close camera per hub (entry or exit chute) with a line-crossing counter,

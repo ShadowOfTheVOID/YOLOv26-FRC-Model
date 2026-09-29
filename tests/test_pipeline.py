@@ -2810,8 +2810,48 @@ def test_hub_ui_controller_and_web():
               code == 403)
         code, _ = call("/frame.jpg?cam=red-exit")
         check("no picture yet is a 404", code == 404)
+        code, page = call("/board")
+        check("the scoreboard page is served",
+              code == 200 and b"<title>Hub Scoreboard</title>" in page)
+        code, body = call("/api/board")
+        b = json.loads(body) if code == 200 else {}
+        check("a stopped counter's board says so and shows zeros",
+              b.get("source") == "counter" and b.get("alert") == "counter stopped"
+              and b.get("score") == {"red": 0, "blue": 0})
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_hub_scoreboard_view():
+    """The live scoreboard: bioarena's score when linked, the camera's otherwise.
+
+    Linked, the big numbers are bioarena's `credited` (spec 4.4) -- the
+    match's score, fuel into an inactive hub left out -- not the counter's
+    session totals, which run across matches and include dark-hub fuel.
+    """
+    from tbavid.hubapp import board_view
+
+    reply = {"v": 1, "seq": 9, "match_state": "TELEOP_PERIOD", "match_time_s": 47.3,
+             "shift": "SHIFT2", "hub_active": {"red": True, "blue": False},
+             "match_count": {"red": 60, "blue": 4}, "credited": {"red": 57, "blue": 0},
+             "auto_count": {"red": 12, "blue": 0}}
+    b = board_view({"red": 310, "blue": 290}, True, True, reply, [], 40.0, [])
+    check("linked: the score is bioarena's credited count, with its clock",
+          b["source"] == "bioarena" and b["score"] == {"red": 57, "blue": 0}
+          and b["match_time_s"] == 47.3 and b["hub_active"]["blue"] is False
+          and b["raw"] == {"red": 310, "blue": 290} and "alert" not in b)
+    b = board_view({"red": 310, "blue": 290}, True, False, reply, [], 40.0, [])
+    check("a reply from a bioarena that has gone quiet is not shown as the score",
+          b["source"] == "counter" and b["score"] == {"red": 310, "blue": 290})
+    b = board_view({"red": 3}, True, False, None, ["red-cam"], None, [])
+    check("a blind camera is on the board",
+          b["alert"] == "no picture from red-cam" and b["score"]["blue"] == 0)
+    b = board_view({}, True, True, {"seq": 1}, [], None, [])
+    check("a reply without scores falls back to the camera counts",
+          b["source"] == "counter")
+    b = board_view({"red": 1}, True, True, reply, [], None, [], practice=True)
+    check("practice replies are labelled as the stand-in, not bioarena",
+          b["source"] == "practice" and b["score"]["red"] == 57)
 
 
 def test_hub_exit_line_counter():
@@ -3031,6 +3071,7 @@ def main() -> int:
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
                test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
+               test_hub_scoreboard_view,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")

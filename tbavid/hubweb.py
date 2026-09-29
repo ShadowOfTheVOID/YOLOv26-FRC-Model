@@ -1,6 +1,7 @@
 """The hub counter as a web page: standard library only, any browser.
 
     python3 run.py hubgui                   # opens http://127.0.0.1:8790
+                                            # scoreboard at /board
 
 No toolkit to install -- the Tk window needed `brew install python-tk` on a
 Homebrew Mac -- and it looks the same on every machine. All the logic is in
@@ -58,6 +59,10 @@ def make_handler(ctl: HubController, allow_remote: bool = False):
             q = {k: v[-1] for k, v in parse_qs(u.query).items()}
             if u.path == "/":
                 return self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+            if u.path == "/board":
+                return self._send(200, BOARD.encode(), "text/html; charset=utf-8")
+            if u.path == "/api/board":
+                return self._json(ctl.board())
             if u.path == "/api/state":
                 return self._json(ctl.state(int(q.get("log", 0) or 0)))
             if u.path == "/api/ls":
@@ -153,3 +158,5 @@ def main(setup_path: Optional[str] = None, port: int = 8790,
 # The page lives beside this file so it can be edited as HTML. Read at import:
 # it is ~30 kB and never changes while the server runs.
 PAGE = (Path(__file__).with_name("hubweb.html")).read_text(encoding="utf-8")
+# The scoreboard, for a screen beside the field: /board.
+BOARD = (Path(__file__).with_name("hubboard.html")).read_text(encoding="utf-8")
