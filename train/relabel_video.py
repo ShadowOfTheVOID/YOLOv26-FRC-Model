@@ -189,7 +189,8 @@ def label_frame(frame, prev, fuel_model, robot_model) -> Dict:
     h, w = frame.shape[:2]
     corners = tiles_for(w, h)
     rs = fuel_model.predict([frame[y:y + TILE, x:x + TILE] for x, y in corners],
-                            imgsz=TILE, conf=CHECK_CONF, max_det=1500, verbose=False)
+                            imgsz=TILE, conf=CHECK_CONF, max_det=1500, verbose=False,
+                            classes=[0])   # fuel only: --fuel may be the 3-class model
     dets = []
     for (x0, y0), r in zip(corners, rs):
         for b, c in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist()):
@@ -488,7 +489,9 @@ def main() -> int:
     ap.add_argument("--include-quarantined", action="store_true",
                     help="with --from-scraper: also videos quarantined for low "
                          "main-camera coverage (their shot ranges are least trusted)")
-    ap.add_argument("--fuel", default="models/fuel_best.pt")
+    ap.add_argument("--fuel", default="models/fuel_best.pt",
+                    help="the fuel detector; fuel_withBotbest.pt works too (only its "
+                         "fuel class is used here)")
     ap.add_argument("--robots", default="models/fuel_withBotbest.pt")
     ap.add_argument("--every", type=float, default=0.5, help="seconds between frames")
     ap.add_argument("--length", type=float, default=166.0, help="--video: seconds after START")
