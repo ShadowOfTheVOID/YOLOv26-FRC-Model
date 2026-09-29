@@ -212,6 +212,11 @@ the build rather than publishing an empty release.
   Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
   400 ms hold), and three matches are too few to trust the best fit.
 
+- **Measured on a held-out match, Einstein 8** (`deploy/HUB_FEED.md`).
+  The counter had never been tuned on it. The shipped defaults through
+  `run.py hubcount` measured 9.1% error, buzzer 91% / 94%, AUTO winner
+  right. Re-tuning with four matches, holding each out once, measured 21%
+  against 10.1% for the current settings, so they are unchanged.
 - **Slow-camera warning** on the page's status and on `/board` when a live
   camera delivers under 28 fps (`hubcount.MIN_FPS`, `hubapp.slow_cameras`).
   The Einstein blobs replayed at 60 / 30 / 20 fps measured 10.5% / 12.6% /

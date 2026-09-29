@@ -495,6 +495,44 @@ three matches, more tuning is fitting noise. Better accuracy now needs more
 matches with known scores. YouTube refuses downloads from the build
 server, so further Einstein matches have to come through Drive.
 
+## A truly held-out match: Einstein 8 (2026-09-29)
+
+Einstein 8 (Daly vs Curie) arrived after every setting above was chosen.
+Setup:
+- **Outlines:** Einstein 4's, moved +1 px. Template-matching the hubs
+  against Einstein 4 gave a match score of 0.87; the same method reproduces
+  Einstein 5's and 1's recorded shifts to within a few pixels.
+- **Ball:** measured by the app's own method (328 px).
+- **Run:** `count_recording`, the shipped `run.py hubcount` path, with
+  nothing tuned.
+
+| video s | 30 (AUTO call) | 61 | 101 | 141 | 173 (buzzer) |
+|---|---|---|---|---|---|
+| blue counted / real | 139 / 181 | 280 / 318 | 346 / 382 | 438 / 482 | 591 / 653 (91%) |
+| red counted / real | 183 / 194 | 218 / 228 | 342 / 397 | 399 / 438 | 549 / 581 (94%) |
+
+**Result: 9.1% error, and the AUTO winner right.**
+- The ball on the tuning scale (266 px) gives 8.8%.
+- It ran at 241 fps.
+- While the blue hub was inactive (121-141 s), the counter held flat, as
+  the scoreboard did.
+- Blue ran about 10% low throughout, mostly in AUTO: 22-27 s gained 57
+  real balls against 25 counted.
+
+With four scored matches the tuning was re-run, each match held out once:
+
+| | E4 | E5 | E1 | E8 | mean |
+|---|---|---|---|---|---|
+| current settings (chosen on E4, E5, E1) | 16.2% | 6.2% | 9.1% | **8.8%** | 10.1% |
+| best fit on all four (percentile 15, blur 0.5, ...) | 15.7% | 7.3% | 7.0% | 6.8% | 9.2% |
+| re-tuned on three, scored on the fourth | 16% | 7% | 27% | 12% | 21% |
+
+Re-tuning is worse held out than leaving the settings alone. Among 452
+combinations, the best on three matches is usually one that breaks on the
+fourth. The best fit on all four gains less than a point. **The settings
+are unchanged.** Einstein 8 shows they carry over to a match they were
+not tuned on.
+
 ## What you need
 
 - A laptop wired into the field switch on the management VLAN, static

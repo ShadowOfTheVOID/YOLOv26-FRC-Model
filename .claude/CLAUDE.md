@@ -228,6 +228,12 @@ don't retune on these three -- more scored matches are needed, and YouTube
 refuses downloads here (bot check), so they must come via Drive. Setup
 tolerance: outlines +-10 px / +-15% and ball 0.5-2x cost <=5 points; frame
 rate is what matters (30 fps 12.6%, 20 fps 25.1%) -> MIN_FPS warning.
+Einstein 8 (from Drive, 2026-09-29) was the first match held out from all
+tuning: 9.1% with the shipped defaults via count_recording, AUTO right.
+Four-way leave-one-out re-tuning is WORSE (21%) than keeping the settings
+(10.1% mean); best four-match fit gains <1 point. Settings unchanged.
+Drive videos download with curl from
+drive.usercontent.google.com/download?id=ID&export=download&confirm=t.
 
 **Recommended path for the scrimmage** (put to the user, awaiting answers):
 a close camera per hub (entry or exit chute) with a line-crossing counter,
