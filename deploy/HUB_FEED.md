@@ -533,6 +533,40 @@ fourth. The best fit on all four gains less than a point. **The settings
 are unchanged.** Einstein 8 shows they carry over to a match they were
 not tuned on.
 
+## Every frame at 60 fps, both counters (2026-09-29)
+
+The model counter was earlier run on every 2nd frame to save time
+(`fuel_best.pt` -> `trackvis.BallTracker` -> `count.BallCounter`). It was
+rerun on every frame of all four matches: 40,000 frames, 2 hours of CPU.
+Each match was held out once. The 30 fps rows use every 2nd frame of the
+same run.
+
+| counter | held-out E4 / E5 / E1 / E8 | mean | AUTO winner wrong |
+|---|---|---|---|
+| **colour counter, 60 fps (shipped, not re-tuned)** | 16.2 / 6.2 / 9.1 / 8.8% | **10.1%** | none |
+| colour counter, 30 fps | 16.9 / 11.8 / 8.9 / 6.6% | 11.1% | none |
+| model + colour assist, 30 fps | 22 / 8 / 8 / 14% | 17% | E8 |
+| model + colour assist, 60 fps | 24 / 14 / 16 / 21% | 25% | E1 |
+| model, no assist, 30 fps | 55 / 23 / 13 / 17% | 36% | E4, E1, E8 |
+| model, no assist, 60 fps | 66 / 25 / 22 / 18% | 44% | E4, E1, E8 |
+| mean(colour 60 fps, model 60 fps) | 20.5 / 9.1 / 11.2 / 16.4% | 14.3% | none |
+| lower of the two, 60 fps | 16.2 / 6.2 / 9.1 / 20.7% | 13.1% | none |
+
+The 60 fps model rows include the tracker's hold at both 30 and 60 frames,
+since it is counted in frames and 60 fps halves it in time; the counter's
+windows already scale with fps.
+
+What this settles:
+- **The colour counter at 60 fps is the best counter here**, and it is the
+  one that runs live. It gains a point over 30 fps.
+- **The model counter gets worse at 60 fps**, 17% to 25%. Nothing was
+  tried to find out why. A likely cause is that the colour assist compares
+  each frame with the one 2 frames earlier, only 33 ms at 60 fps, so
+  flying balls barely move and fewer are picked up.
+- **Adding the model makes the result worse:** 13-14% combined, against
+  10.1% for the colour counter alone. It stays offline; there is no reason
+  to add it to the live path.
+
 ## What you need
 
 - A laptop wired into the field switch on the management VLAN, static

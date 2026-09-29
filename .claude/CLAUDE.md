@@ -232,6 +232,11 @@ Einstein 8 (from Drive, 2026-09-29) was the first match held out from all
 tuning: 9.1% with the shipped defaults via count_recording, AUTO right.
 Four-way leave-one-out re-tuning is WORSE (21%) than keeping the settings
 (10.1% mean); best four-match fit gains <1 point. Settings unchanged.
+Every-frame (60 fps) run of the model counter on all four (HUB_FEED.md
+"Every frame at 60 fps"): model+assist 25% held out at 60 fps vs 17% at 30;
+combos with the colour counter 13-14% vs colour alone 10.1% (60 fps) /
+11.1% (30 fps). The colour counter at 60 fps is the best; the model adds
+nothing.
 Drive videos download with curl from
 drive.usercontent.google.com/download?id=ID&export=download&confirm=t.
 

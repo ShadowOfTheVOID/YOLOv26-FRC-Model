@@ -217,6 +217,12 @@ the build rather than publishing an empty release.
   `run.py hubcount` measured 9.1% error, buzzer 91% / 94%, AUTO winner
   right. Re-tuning with four matches, holding each out once, measured 21%
   against 10.1% for the current settings, so they are unchanged.
+- **Both counters measured on every frame at 60 fps**, four matches, each
+  held out once (`deploy/HUB_FEED.md`). The shipped colour counter measured
+  10.1% at 60 fps and 11.1% at 30 fps. The model counter with colour
+  assist measured 25% at 60 fps and 17% at 30 fps. Combining the two
+  measured 13-14%, so the colour counter alone stays the live and scouting
+  counter.
 - **Slow-camera warning** on the page's status and on `/board` when a live
   camera delivers under 28 fps (`hubcount.MIN_FPS`, `hubapp.slow_cameras`).
   The Einstein blobs replayed at 60 / 30 / 20 fps measured 10.5% / 12.6% /
