@@ -217,6 +217,22 @@ the build rather than publishing an empty release.
   `run.py hubcount` measured 9.1% error, buzzer 91% / 94%, AUTO winner
   right. Re-tuning with four matches, holding each out once, measured 21%
   against 10.1% for the current settings, so they are unchanged.
+- **`train/relabel_video.py`: a retraining set with the balls in flight
+  labelled**, the bootstrap step of `train/README.md`. It fixes the two gaps
+  the released models were measured to have: balls high against the crowd
+  (left unlabelled by autolabel_fuel's field line) and only ever having seen
+  the 2026nhdur broadcast. How it labels:
+  - fuel from the detector on full-resolution tiles;
+  - balls in flight it misses added by motion;
+  - other ball-like yellow painted grey rather than left unlabelled;
+  - robots from the scouting model;
+  - whole frames plus 960 px full-resolution flight crops.
+
+  `--rows` / `--mask` handle the Einstein split-screen and the scoreboard's
+  yellow fuel icon; both were being labelled as fuel. `train.py` now counts
+  the labels of every set a mixed `train: [...]` yaml names. Its old check
+  looked only beside the yaml and would have refused the Einstein + scouting
+  mix.
 - **The model measured on full-resolution hub crops** (`deploy/HUB_FEED.md`).
   A 640 px crop around each hub, instead of the frame halved to 960, found
   93% of balls in flight against 84%. Counting error without colour assist

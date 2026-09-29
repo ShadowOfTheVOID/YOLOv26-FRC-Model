@@ -29,3 +29,4 @@ logs/
 # hub counter: a site's camera setup and count logs
 /cams.json
 hubfeed_*.csv
+/dataset_einstein/

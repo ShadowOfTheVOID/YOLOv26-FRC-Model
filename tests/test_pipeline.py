@@ -2837,6 +2837,48 @@ def test_hub_ui_controller_and_web():
         httpd.server_close()
 
 
+def test_relabel_video_helpers():
+    """The bootstrap labeller's pure parts: tiling, merging, clipping, output.
+
+    Tiles are what fix the halved-frame miss (84% -> 93% of balls in flight
+    found on Einstein 4), so they must cover every pixel; a tile that cuts a
+    ball in half must not leave it in the image unlabelled.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import relabel_video as RV
+
+    t = RV.tiles_for(1920, 700)
+    covered = all(any(x <= px < x + RV.TILE and y <= py < y + RV.TILE for x, y in t)
+                  for px in range(0, 1920, 7) for py in range(0, 700, 7))
+    check("tiles cover a 1920x700 main view, inside the frame",
+          covered and all(x + RV.TILE <= 1920 and y + RV.TILE <= 700 for x, y in t))
+    check("a frame smaller than a tile is one tile", RV.tiles_for(500, 400) == [(0, 0)])
+    merged = RV.nms([((0, 0, 20, 20), 0.9), ((1, 1, 21, 21), 0.5), ((100, 100, 120, 120), 0.3)])
+    check("overlapping tiles' duplicate of a ball is merged to the surer box",
+          merged == [((0, 0, 20, 20), 0.9), ((100, 100, 120, 120), 0.3)])
+    keep, grey = RV.clip_labels([(0, (10, 10, 30, 30), "model"),       # inside
+                                 (0, (630, 10, 650, 30), "model"),     # half out
+                                 (0, (636, 10, 656, 30), "motion"),    # mostly out
+                                 (1, (600, 0, 700, 100), "robot")],    # robot, 40% in
+                                0, 0, 640, 640)
+    check("a ball at least half inside a tile is kept, shifted",
+          [(c, b) for c, b, _ in keep] == [(0, (10, 10, 30, 30)), (0, (630, 10, 640, 30))])
+    check("a ball mostly cut off is greyed, not left unlabelled; a cut robot is dropped",
+          grey == [(636, 10, 640, 30)])
+    import tempfile
+    import train as TR
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "mix.yaml").write_text(
+        "path: /workspace/frc\ntrain: [dataset-scout/images/train, dataset_einstein/images/train]\n"
+        "val: [dataset-scout/images/val, dataset_einstein/images/val]\n")
+    check("train.py finds the labels of every set a mixed yaml trains on",
+          [str(p) for p in TR.label_dirs(tmp / "mix.yaml")] ==
+          ["/workspace/frc/dataset-scout/labels/train", "/workspace/frc/dataset_einstein/labels/train",
+           "/workspace/frc/dataset-scout/labels/val", "/workspace/frc/dataset_einstein/labels/val"])
+    check("labels are YOLO-normalised",
+          RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
+
+
 def test_hub_scoreboard_view():
     """The live scoreboard: bioarena's score when linked, the camera's otherwise.
 
@@ -3099,7 +3141,7 @@ def main() -> int:
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
                test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
-               test_hub_scoreboard_view,
+               test_hub_scoreboard_view, test_relabel_video_helpers,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")

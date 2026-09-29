@@ -117,6 +117,68 @@ Everything else needs annotation — but far less than it looks:
 - Load `dataset/` into Label Studio, CVAT or Roboflow; the YOLO layout imports
   directly, fuel boxes and all.
 
+## Relabelling with the detector: balls in flight, Einstein broadcasts
+
+The released models were measured to miss balls in flight, high against the
+crowd, because `autolabel_fuel.py`'s field line left them unlabelled. They
+also have only ever seen the 2026nhdur broadcast. On the four scored
+Einstein matches the fuel model counts 17% off held out, against 10% for the
+colour counter (`deploy/HUB_FEED.md`). `train/relabel_video.py` is the
+bootstrap step for both gaps; its docstring has the rules and the numbers
+behind each. In short:
+- fuel from the detector on full-resolution tiles;
+- balls in flight it still misses added by motion;
+- any other ball-like yellow painted grey, so it is never left unlabelled;
+- robots from the scouting model;
+- whole frames plus 960 px full-resolution crops around balls in flight.
+
+On the droplet, in the container, with the three Einstein videos in
+`videos/` (download them from Drive) and both release models in `models/`:
+
+```bash
+python3 train/relabel_video.py --out dataset_einstein \
+    --video videos/e4.mp4:train:6 --video videos/e5.mp4:train:6 \
+    --video videos/e1.mp4:val:6 --rows 0:700 \
+    --mask 440,0,1480,165 --mask 15,58,440,122 --mask 1480,58,1905,122 \
+    --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt --device 0
+```
+
+The arguments are specific to this broadcast:
+- **`--rows 0:700`:** Einstein broadcasts are split-screen, and the second
+  camera sits behind a tan stone border that the old colour gate called
+  fuel.
+- **`--mask`:** greys out the scoreboard's yellow fuel icon and arrows.
+- **Einstein 8 is left out on purpose:** it is the held-out test match.
+
+**Look at `dataset_einstein/preview/` before training.** Box colours:
+- green: the detector;
+- cyan: the detector, confirmed by colour;
+- magenta: added by motion;
+- orange / red: robots.
+
+Then train on it together with the existing scouting set: both are
+`fuel, robot_blue, robot_red` in that order. Make `dataset_mix.yaml`:
+
+```yaml
+path: /workspace/frc
+train: [dataset-scout/images/train, dataset_einstein/images/train]
+val: [dataset-scout/images/val, dataset_einstein/images/val]
+names: {0: fuel, 1: robot_blue, 2: robot_red}
+```
+
+Fine-tune from the current scouting weights, so the robot detection that was
+checked good is kept:
+
+```bash
+nohup python3 train/train.py --data dataset_mix.yaml --model models/fuel_withBotbest.pt \
+    --imgsz 960 --epochs 60 --name scout_einstein > train.log 2>&1 &
+```
+
+The result is `runs/scout_einstein/weights/best.pt`. Bring it back and test
+it on the four scored Einsteins, held out, the same way the released models
+were. Its validation numbers only measure agreement with these pseudo-labels.
+A fuel-only model comes from `subset_classes.py --classes fuel` on the mix.
+
 ## Detection is not the answer to your actual question
 
 "How many balls went in from a specific bot" is three problems, and YOLO is
