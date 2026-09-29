@@ -455,6 +455,47 @@ What it does not fix:
 - **It is still three broadcasts.** The 20-ball acceptance test on a
   practice hub comes first.
 
+## How forgiving the setup is (2026-09-29)
+
+These tests used the current rules on the recorded Einstein blobs: mean
+error over E4 / E5 / E1, against 10.5% as tuned.
+
+| setup error | mean error |
+|---|---|
+| outline drawn 5-10 px high or low | 8.7-11.6% |
+| outline drawn 7-15% too small or too big | 10.4-11.9% |
+| one ball measured at 0.5x / 0.7x / 0.85x | 15.4% / 12.6% / 11.8% |
+| one ball measured at 1.15x / 1.3x / 1.6x / 2x | 10.3% / 9.7% / 9.5% / 9.7% |
+| **camera at 30 fps** (every 2nd frame) | **12.6%** |
+| **camera at 20 fps** (every 3rd frame) | **25.1%** |
+
+What this means for setting up:
+- **Outlines** can be drawn by hand.
+- **Ball size:** a measurement that is off costs little because the counter
+  learns one ball from the crossings. If in doubt, round it up.
+- **Frame rate** is the one that matters. Under 30 fps, balls jump too far
+  between frames to be followed across the mouth. A webcam drops to 15-24
+  fps by itself in dim light, so the page and `/board` now warn when a live
+  camera runs under 28 fps (`hubcount.MIN_FPS`). Light the hub, or lower
+  the resolution, before the match.
+
+Einstein 1's AUTO was 95-96, so a single ball decides it. Its AUTO winner
+flipped under a 5-10 px outline shift. No counter can call a one-ball AUTO
+reliably, and bioarena's Counted mode should not be trusted for one.
+
+**Tuning has stopped improving.** One more held-out sweep tried:
+- counting a track only once;
+- a minimum downward speed;
+- learning the ball only from entries;
+- percentile 20-40, rounding 0.25-0.5 and blur 0.2-0.4.
+
+It came to 14% held out against 13% for the current rules, and the best
+fit improved by only 1.5 points. The settings are left as they are: on
+three matches, more tuning is fitting noise. Better accuracy now needs more
+matches with known scores. YouTube refuses downloads from the build
+server, so further Einstein matches have to come through Drive.
+
+## What you need
 
 - A laptop wired into the field switch on the management VLAN, static
   `10.0.100.21/24` (the spec's suggestion, beside the e-stop panels at
