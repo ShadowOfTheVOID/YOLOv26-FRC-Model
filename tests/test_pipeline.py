@@ -2881,6 +2881,48 @@ def test_relabel_video_helpers():
     kept = RV.drop_oversized(row + [shirt] + near + [(1, (400, 0, 600, 200), "robot")])
     check("a shirt-sized 'ball' among 14 px balls is dropped; big near balls and robots stay",
           shirt not in kept and len(kept) == len(row) + len(near) + 1)
+    # --from-scraper: samples on a clean render's back-to-back clock, never
+    # just after a cut, where "two frames earlier" is another shot.
+    ranges = [(10.0, 12.0), (50.0, 51.0)]
+    clean = RV.clean_sample_times(ranges, 0.5)
+    check("clean-render samples skip the first 0.1 s after each cut",
+          clean == [0.1, 0.6, 1.1, 1.6, 2.1, 2.6])
+    check("raw samples are the same moments on the download's clock",
+          RV.raw_sample_times(ranges, 0.5) == [10.1, 10.6, 11.1, 11.6, 50.1, 50.6])
+    known = {"2026nhdur_qm7_abc": "val"}
+    check("a match keeps the side it already has in the dataset being extended",
+          RV.split_for("2026nhdur_qm7_abc", known, 0.0) == "val")
+    new = [RV.split_for(f"2026x_qm{i}_k{i}", {}, 0.2) for i in range(200)]
+    check("a new match goes by its hash: stable, about --val-frac of them to val",
+          new == [RV.split_for(f"2026x_qm{i}_k{i}", {}, 0.2) for i in range(200)]
+          and 20 <= new.count("val") <= 60)
+    ds = Path(tempfile.mkdtemp())
+    for split, name in (("train", "2026a_qm1_x_000010.jpg"), ("val", "2026a_qm2_y_000020.jpg")):
+        (ds / "images" / split).mkdir(parents=True)
+        (ds / "images" / split / name).write_bytes(b"")
+    check("known splits are read off prepare_dataset's frame names",
+          RV.known_splits(ds) == {"2026a_qm1_x": "train", "2026a_qm2_y": "val"})
+    manifest = {"videos": {
+        "2026a_qm1_x": {"status": "ok", "yt_key": "x", "clean_path": "/v/a.mp4",
+                        "analysis": {"keep_ranges": [[5, 9]]},
+                        "crop": {"x": 0, "y": 40, "w": 1920, "h": 900}},
+        "2026a_qm3_z": {"status": "quarantined", "analysis": {"keep_ranges": [[0, 1]]}},
+        "2026b_qm4_w": {"status": "ok", "analysis": {"keep_ranges": []}}}}
+    jobs = RV.scraper_jobs(manifest, [], RV.known_splits(ds), 0.2, False)
+    check("the scraper's usable videos become jobs: quarantined and empty ones skipped",
+          [(j["stem"], j["split"], j["crop"]) for j in jobs]
+          == [("2026a_qm1_x", "train", (0, 40, 1920, 900))])
+    check("--include-quarantined takes them too",
+          len(RV.scraper_jobs(manifest, [], {}, 0.2, True)) == 2)
+    check("--matches narrows by substring",
+          RV.scraper_jobs(manifest, ["2026b"], {}, 0.2, True) == [])
+    import subset_classes as SC
+    block = "path: /x\ntrain: images/train\nnames:\n  0: fuel\n  1: robot_blue\n  2: robot_red\n"
+    check("subset_classes reads the source's class order (block, map and list forms)",
+          SC.yaml_names(block) == ["fuel", "robot_blue", "robot_red"]
+          and SC.yaml_names("names: {0: fuel, 1: hub_red}") == ["fuel", "hub_red"]
+          and SC.yaml_names("names: [robot_red, fuel]") == ["robot_red", "fuel"]
+          and SC.index_map(["fuel"], SC.yaml_names("names: [robot_red, fuel]")) == {1: 0})
     check("labels are YOLO-normalised",
           RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
 

@@ -228,6 +228,16 @@ the build rather than publishing an empty release.
   - robots from the scouting model;
   - whole frames plus 960 px full-resolution flight crops.
 
+  `--from-scraper` labels every video `run.py pull` kept:
+  - it reads the manifest and uses each clean render (main camera, banner
+    cropped), or the raw download with the same shot ranges and crop;
+  - it never samples just after a cut;
+  - each match keeps its train/val side from `dataset/`.
+
+  `train/README.md` trains on this set instead of the old one: they label
+  the same matches, and the old labels are the ones that taught balls in
+  flight as background. `subset_classes.py` now reads the class order from
+  the source dataset's yaml instead of assuming the five-class one.
   `--rows` / `--mask` handle the Einstein split-screen and the scoreboard's
   yellow fuel icon; both were being labelled as fuel. `train.py` now counts
   the labels of every set a mixed `train: [...]` yaml names. Its old check

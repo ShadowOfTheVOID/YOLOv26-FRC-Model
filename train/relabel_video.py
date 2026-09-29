@@ -33,12 +33,21 @@ flight, 960 px wide at full resolution (see SAVE_TILE). Frames with more
 than `--max-grey` balls' worth of greyed yellow are skipped: an image that
 is half paint teaches little.
 
-Splits are per VIDEO, never per frame (prepare_dataset.py's rule): name the
-split with each video. Keep a scored match out of every split to test on.
+Splits are per VIDEO, never per frame (prepare_dataset.py's rule).
+
+The videos `run.py pull` already downloaded -- every clean render in the
+manifest, main camera only, banner cropped off -- with each match kept on
+the side of the split it has in dataset/:
+
+    python3 train/relabel_video.py --out dataset_relabel --from-scraper \\
+        --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt
+
+Any other video, e.g. the Einstein broadcasts, naming the split:
 
     python3 train/relabel_video.py --out dataset_einstein \\
         --video e4.mp4:train:6 --video e5.mp4:train:6 --video e1.mp4:val:6 \\
-        --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt
+        --rows 0:700 --mask 440,0,1480,165 --mask 15,58,440,122 \\
+        --mask 1480,58,1905,122
 
 `VIDEO:SPLIT:START` -- START is when the match clock starts, in video
 seconds; frames are taken every `--every` s for `--length` s after it.
@@ -282,32 +291,206 @@ def draw(img, labels):
     return out
 
 
+# -- where the frames come from --------------------------------------------
+#
+# Three sources, one labeller. `--video` takes any file and a match-clock start.
+# `--from-scraper` walks run.py pull's manifest: each video's clean render
+# (data/videos/<vid>.mp4, already cut to main-camera shots with the banner
+# cropped off by the district's layout profile), or, if that was deleted, the
+# raw download with the same shot ranges and crop applied here.
+
+CUT_GUARD_S = 0.1   # no sample this soon after a cut: "2 frames earlier" is
+                    # another shot there, and every ball in it would look moving
+
+
+def clean_sample_times(ranges: Sequence[Sequence[float]], every: float) -> List[float]:
+    """Sample times on a clean render: its clock runs through the kept ranges
+    back to back, so a cut sits at each cumulative range length."""
+    out, offset = [], 0.0
+    for a, b in ranges:
+        length = float(b) - float(a)
+        t = CUT_GUARD_S
+        while t < length:
+            out.append(round(offset + t, 4))
+            t += every
+        offset += length
+    return out
+
+
+def raw_sample_times(ranges: Sequence[Sequence[float]], every: float) -> List[float]:
+    """The same samples on the raw download's own clock."""
+    out = []
+    for a, b in ranges:
+        t = float(a) + CUT_GUARD_S
+        while t < float(b):
+            out.append(round(t, 4))
+            t += every
+    return out
+
+
+def split_for(match: str, known: Dict[str, str], val_frac: float) -> str:
+    """A match keeps the side it already has in the dataset being extended --
+    mixing this set with one that holds the same match on the other side
+    would put near-copies of validation frames in training. A match new to
+    both goes by its hash, so it lands on the same side on every run."""
+    import hashlib
+    if match in known:
+        return known[match]
+    h = int(hashlib.sha256(match.encode()).hexdigest(), 16) / 16 ** 64
+    return "val" if h < val_frac else "train"
+
+
+def known_splits(dataset: Path) -> Dict[str, str]:
+    """match id -> split, read off a built dataset's image names
+    (prepare_dataset.py's '<event>_<match>_<ytkey>_NNNNNN.jpg')."""
+    out: Dict[str, str] = {}
+    for split in ("train", "val"):
+        for f in (dataset / "images" / split).glob("*.jpg"):
+            out[f.stem.rsplit("_", 1)[0]] = split
+    return out
+
+
+def scraper_jobs(manifest: Dict, matches: Sequence[str], known: Dict[str, str],
+                 val_frac: float, quarantined: bool) -> List[Dict]:
+    """One job per usable video in run.py pull's manifest."""
+    jobs = []
+    for vid, e in sorted(manifest.get("videos", {}).items()):
+        if e.get("status") != "ok" and not (quarantined and e.get("status") == "quarantined"):
+            continue
+        if matches and not any(m in vid for m in matches):
+            continue
+        ranges = [tuple(r) for r in (e.get("analysis") or {}).get("keep_ranges") or []]
+        if not ranges:
+            continue
+        crop = e.get("crop") or {}
+        job = {"stem": vid, "split": split_for(vid, known, val_frac), "ranges": ranges,
+               "clean": e.get("clean_path"), "raw": e.get("raw_path"),
+               "yt_key": e.get("yt_key", ""),
+               "crop": tuple(crop[k] for k in ("x", "y", "w", "h")) if "w" in crop else None}
+        jobs.append(job)
+    return jobs
+
+
+def frames_of(job: Dict, every: float, length: float):
+    """(frame index, frame, frame two earlier) for each sample of a job."""
+    import cv2
+
+    kind, path = job["kind"], job["path"]
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise SystemExit(f"could not open {path}")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    if kind == "plain":
+        times, t = [], float(job["start"])
+        while t <= float(job["start"]) + length:
+            times.append(t)
+            t += every
+    elif kind == "clean":
+        times = clean_sample_times(job["ranges"], every)
+    else:
+        times = raw_sample_times(job["ranges"], every)
+    crop = job.get("crop") if kind == "raw" else None
+    try:
+        for t in times:
+            fi = int(round(t * fps))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, fi - 2))
+            ok_p, prev = cap.read()
+            cap.read()
+            ok, frame = cap.read()
+            if not (ok and ok_p):
+                break
+            if crop:
+                x, y, w, h = crop
+                frame, prev = frame[y:y + h, x:x + w], prev[y:y + h, x:x + w]
+            yield fi, frame, prev
+    finally:
+        cap.release()
+
+
+def resolve_source(job: Dict) -> Dict:
+    """Clean render if it is still on disk, else the raw download."""
+    if job.get("clean") and Path(job["clean"]).exists():
+        return dict(job, kind="clean", path=job["clean"])
+    from tbavid.config import RAW_DIR
+    raw = job.get("raw")
+    if not (raw and Path(raw).exists()):
+        found = sorted(RAW_DIR.glob(f"{job['yt_key']}.*")) if job.get("yt_key") else []
+        raw = str(found[0]) if found else None
+    if raw and job.get("crop"):
+        return dict(job, kind="raw", path=raw)
+    return dict(job, kind=None, path=None)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--video", action="append", required=True, metavar="VIDEO:SPLIT:START")
+    ap.add_argument("--video", action="append", default=[], metavar="VIDEO:SPLIT:START")
+    ap.add_argument("--from-scraper", action="store_true",
+                    help="label every video run.py pull kept (data/review/manifest.json; "
+                         "TBAVID_DATA moves it)")
+    ap.add_argument("--matches", nargs="*", default=None,
+                    help="with --from-scraper: only these videos, by any substring "
+                         "of the id (e.g. 2026nhdur)")
+    ap.add_argument("--split-from", type=Path, default=ROOT / "dataset",
+                    help="with --from-scraper: a built dataset whose train/val "
+                         "assignment each match keeps (default dataset/)")
+    ap.add_argument("--val-frac", type=float, default=0.2,
+                    help="with --from-scraper: share of matches new to --split-from "
+                         "that go to val, by hash")
+    ap.add_argument("--include-quarantined", action="store_true",
+                    help="with --from-scraper: also videos quarantined for low "
+                         "main-camera coverage (their shot ranges are least trusted)")
     ap.add_argument("--fuel", default="models/fuel_best.pt")
     ap.add_argument("--robots", default="models/fuel_withBotbest.pt")
     ap.add_argument("--every", type=float, default=0.5, help="seconds between frames")
-    ap.add_argument("--length", type=float, default=166.0, help="seconds after START")
+    ap.add_argument("--length", type=float, default=166.0, help="--video: seconds after START")
     ap.add_argument("--tiles", type=int, default=2, help="flight tiles per frame")
-    ap.add_argument("--max-grey", type=float, default=12.0,
+    ap.add_argument("--max-grey", type=float, default=30.0,
                     help="skip frames with more greyed yellow than this many balls")
-    ap.add_argument("--preview", type=int, default=12)
+    ap.add_argument("--preview", type=int, default=24)
     ap.add_argument("--rows", default="",
                     help="Y0:Y1 -- label only these rows. Einstein broadcasts are "
                          "split-screen: the main camera is rows 0:700, a second "
                          "camera behind a stone border below")
     ap.add_argument("--mask", action="append", default=[], metavar="X0,Y0,X1,Y1",
-                    help="paint this full-frame rectangle grey before labelling: "
-                         "the broadcast's scoreboard carries a yellow fuel icon "
-                         "and yellow arrows that the detector boxes on every "
-                         "frame. Einstein 2026: 440,0,1480,165 15,58,440,122 "
-                         "1480,58,1905,122")
+                    help="paint this rectangle grey before labelling: the Einstein "
+                         "scoreboard carries a yellow fuel icon and yellow arrows "
+                         "that the detector boxes on every frame. Einstein 2026: "
+                         "440,0,1480,165 15,58,440,122 1480,58,1905,122. Not needed "
+                         "with --from-scraper: its clean renders have the banner "
+                         "cropped off")
     ap.add_argument("--device", default=None)
     args = ap.parse_args()
     masks = [tuple(int(v) for v in m.split(",")) for m in args.mask]
     rows = tuple(int(v) for v in args.rows.split(":")) if args.rows else None
+
+    jobs: List[Dict] = []
+    for spec in args.video:
+        path, split, start = spec.rsplit(":", 2)
+        if split not in ("train", "val"):
+            raise SystemExit(f"{spec}: the split is train or val")
+        jobs.append({"stem": Path(path).stem, "split": split, "kind": "plain",
+                     "path": path, "start": float(start)})
+    if args.from_scraper:
+        from tbavid.config import MANIFEST_PATH
+        if not MANIFEST_PATH.exists():
+            raise SystemExit(f"no manifest at {MANIFEST_PATH} -- run `run.py pull`, "
+                             f"or set TBAVID_DATA to where the data lives")
+        known = known_splits(args.split_from) if args.split_from.exists() else {}
+        found = scraper_jobs(json.loads(MANIFEST_PATH.read_text()), args.matches or [],
+                             known, args.val_frac, args.include_quarantined)
+        print(f"scraper: {len(found)} videos; {sum(1 for j in found if j['stem'] in known)} "
+              f"keep their split from {args.split_from}")
+        for j in found:
+            j = resolve_source(j)
+            if j["kind"] is None:
+                print(f"  skip {j['stem']}: neither the clean render nor the raw "
+                      f"download is on disk (run.py rerender brings one back)")
+                continue
+            jobs.append(j)
+    if not jobs:
+        raise SystemExit("nothing to label: give --video, or --from-scraper with "
+                         "videos in the manifest")
 
     import cv2
     from ultralytics import YOLO
@@ -325,29 +508,14 @@ def main() -> int:
     # its own run), so the report is merged, not replaced.
     report_path = args.out / "relabel_report.json"
     report = json.loads(report_path.read_text()) if report_path.exists() else {"videos": {}}
-    report["settings"] = {k: v for k, v in vars(args).items() if k not in ("out", "video")}
+    report["settings"] = {k: (str(v) if isinstance(v, Path) else v)
+                          for k, v in vars(args).items() if k not in ("out", "video")}
     previews = 0
-    for spec in args.video:
-        path, split, start = spec.rsplit(":", 2)
-        if split not in ("train", "val"):
-            raise SystemExit(f"{spec}: the split is train or val")
-        stem = Path(path).stem
-        cap = cv2.VideoCapture(path)
-        if not cap.isOpened():
-            raise SystemExit(f"could not open {path}")
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    for job in jobs:
+        stem, split = job["stem"], job["split"]
         stats = {"frames": 0, "skipped_grey": 0, "tiles": 0, "fuel": 0, "motion": 0,
                  "model+colour": 0, "robots": 0, "greyed_balls": 0.0, "grey_per_frame": []}
-        t = float(start)
-        while t <= float(start) + args.length:
-            fi = int(round(t * fps))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, fi - 2))
-            ok_p, prev = cap.read()
-            cap.read()
-            ok, frame = cap.read()
-            t += args.every
-            if not (ok and ok_p):
-                break
+        for fi, frame, prev in frames_of(job, args.every, args.length):
             for x0, y0, x1, y1 in masks:
                 frame[y0:y1, x0:x1] = 118
                 prev[y0:y1, x0:x1] = 118
@@ -360,6 +528,8 @@ def main() -> int:
                 continue
             h, w = frame.shape[:2]
             img = paint_grey(frame, r["grey"])
+            # '<match>_<frame>': prepare_dataset.match_of() recovers the match
+            # by splitting off the last '_'; tiles keep that ('..._007373t1280-13').
             name = f"{stem}_{fi:06d}"
             cv2.imwrite(str(args.out / "images" / split / f"{name}.jpg"), img,
                         [cv2.IMWRITE_JPEG_QUALITY, 92])
@@ -369,7 +539,7 @@ def main() -> int:
             for x0, y0 in pick_tiles(r["labels"], w, h, args.tiles, tw, th):
                 keep, cut = clip_labels(r["labels"], x0, y0, tw, th)
                 tile = paint_grey(img[y0:y0 + th, x0:x0 + tw], boxes=cut)
-                tname = f"{name}_t{x0}_{y0}"
+                tname = f"{name}t{x0}-{y0}"
                 cv2.imwrite(str(args.out / "images" / split / f"{tname}.jpg"), tile,
                             [cv2.IMWRITE_JPEG_QUALITY, 92])
                 (args.out / "labels" / split / f"{tname}.txt").write_text(
@@ -387,18 +557,19 @@ def main() -> int:
             if previews < args.preview and stats["frames"] % 25 == 1:
                 cv2.imwrite(str(prev_dir / f"{name}.jpg"), draw(img, r["labels"]))
                 previews += 1
-        cap.release()
         stats["greyed_balls"] = round(stats["greyed_balls"], 1)
-        report["videos"][stem] = dict(stats, split=split, start=float(start))
-        print(f"{stem} ({split}): {stats['frames']} frames + {stats['tiles']} tiles, "
-              f"{stats['fuel']} fuel ({stats['motion']} in flight added by motion, "
-              f"{stats['model+colour']} low-confidence confirmed by colour), "
-              f"{stats['robots']} robots; {stats['skipped_grey']} frames skipped "
-              f"for too much unlabelled yellow", flush=True)
+        report["videos"][stem] = dict(stats, split=split, source=job["kind"],
+                                      path=str(job["path"]))
+        report_path.write_text(json.dumps(report, indent=2))   # after each video
+        print(f"{stem} ({split}, {job['kind']}): {stats['frames']} frames + "
+              f"{stats['tiles']} tiles, {stats['fuel']} fuel ({stats['motion']} in "
+              f"flight added by motion, {stats['model+colour']} low-confidence "
+              f"confirmed by colour), {stats['robots']} robots; "
+              f"{stats['skipped_grey']} frames skipped for too much unlabelled yellow",
+              flush=True)
     (args.out / "dataset.yaml").write_text(
         f"path: {args.out.resolve()}\ntrain: images/train\nval: images/val\n"
         f"names:\n" + "".join(f"  {i}: {n}\n" for i, n in enumerate(NAMES)))
-    report_path.write_text(json.dumps(report, indent=2))
     print(f"wrote {args.out}/dataset.yaml; previews in {prev_dir}")
     return 0
 
