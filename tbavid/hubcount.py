@@ -33,17 +33,39 @@ acceptance test -- twenty balls by hand-count against each tally, zero
 disagreement -- is the first measurement, and until it passes the count must
 not decide the AUTO winner (bioarena's "Counted" mode).
 
-## Monotonic out, signed in
+## Downward entries, one ball learned from the crossings
 
-The experiment counts +n when a blob crosses into the outline and -n when one
-crosses out: a ball that flies across the mouth or bounces off the hood nets
-zero. The feed may never go down within a session (spec 4.2), so what is
-reported is the high-water mark of that net: a ball that goes in and comes
-back out is reported on entry, and its exit is absorbed by the next ball in,
-which is then not reported again. The cumulative total is right as soon as
-the hub scores again; in between it is one high, and bioarena credits that
-one to the shift the false entry happened in. `owed` in the status line is
-how many are being absorbed at the moment.
+A funnel-mouth outline counts n when a blob crosses INTO it moving DOWN the
+picture, and nothing when one crosses out. n is the blob's area over one
+ball, and one ball is learned from the crossings themselves: the 30th
+percentile of the last 80 crossing blobs, once 10 have been seen (before
+that, the measured `ball_area`). Measured 2026-09-29 on Einstein 4, 5 and 1,
+error against the scoreboard from the end of AUTO to the buzzer, settings
+picked on two matches and scored on the third:
+
+  the experiment's rules (signed, measured ball)     30% held-out mean
+  these rules, blur 0.3                              13% (16% / 6% / 10%)
+
+Why each rule:
+- Balls crossing the mouth were 1.5-2.3x the measured still ball (motion
+  blur, and the ball is nearer the camera at the rim than where it was
+  measured), and the ratio differed per match: Einstein 1's AUTO had 85
+  crossings for 85 real balls, but 56 of them were counted as two. Learning
+  the size from the crossings takes the ratio out.
+- The experiment counted outward crossings as -n. On Einstein 1 blue, 60-100 s
+  had 161 entries and 171 exits against 108 real balls: balls bouncing about
+  the hood, not scores coming back out. Up- and sideways-moving entries were
+  the same kind of noise (a ball across the mouth, a bounce off the hood).
+- n rounds up only at 0.65 of a ball: a blob of 1.5 balls' area is more
+  often one blurred ball than two.
+
+An exit line (`ExitLineCounter`) keeps the signed rule -- a ball across it
+towards `out` is +1, one crossing back is -1 -- and the measured ball: the
+broadcasts cannot see the exits well enough to test anything else.
+
+The feed may never go down within a session (spec 4.2), so what is reported
+is the high-water mark of the net count. `owed` in the status line is how
+many signed exits are being absorbed by later entries (always 0 on outlines).
 """
 from __future__ import annotations
 
@@ -79,6 +101,24 @@ MIN_AREA_FRAC = 80.0 / REF_BALL_AREA      # smaller yellow specks are noise
 PAD_BALLS = 60.0 / math.sqrt(REF_BALL_AREA)   # search margin, in ball widths
 MIN_REACH_BALLS = 37.5 / math.sqrt(REF_BALL_AREA)
 REACH_PER_BLOB = 2.25   # reach also grows with the blob: x sqrt(its area)
+
+# One ball learned from the crossings (module docstring). Held-out error was
+# flat from the 20th to the 35th percentile, memory 30-400, warm-up 5-10;
+# warm-up 50 left Einstein 1's AUTO on the measured ball and cost 14 points.
+LEARN_PERCENTILE = 30
+LEARN_MEMORY = 80
+LEARN_WARMUP = 10
+# A blob of k.65 balls' area counts k+1: floor(area / one + ROUND_UP).
+ROUND_UP = 0.35
+# A camera's blur fraction when its setup gives none. With the learned ball,
+# 0.3 measured 16% / 6% / 10% on Einstein 4 / 5 / 1 and 0 measured 20% / 30%
+# / 34%; 0.5 was 17% / 12% / 5%.
+DEFAULT_BLUR = 0.3
+
+
+def balls_for(area: float, one: float) -> int:
+    """How many balls a blob of `area` is, at `one` ball's area."""
+    return max(1, int(math.floor(area / one + ROUND_UP)))
 
 
 def parse_poly(text: str) -> List[Point]:
@@ -127,8 +167,17 @@ class CrossingCounter:
     balls to report NOW -- the rise in the high-water mark, never negative.
     """
 
+    # Outline rules (module docstring); ExitLineCounter turns both off.
+    signed = False      # outward crossings subtract; any direction counts in
+    learn = True        # one ball from the crossings, not the measured area
+
     def __init__(self, poly: Sequence[Point], ball_area: float,
-                 blur: float = 0.0):
+                 blur: float = 0.0, signed: Optional[bool] = None,
+                 learn: Optional[bool] = None):
+        if signed is not None:
+            self.signed = signed
+        if learn is not None:
+            self.learn = learn
         if ball_area <= 0:
             raise ValueError("ball_area must be positive; measure it with "
                              "run.py hubfeed --measure")
@@ -145,6 +194,14 @@ class CrossingCounter:
         self.reported = 0       # what the feed has been told: max(net) so far
         self.entries = 0
         self.exits = 0
+        self.seen: List[float] = []     # recent crossing blob areas
+
+    def one_ball(self) -> float:
+        """One ball's area: learned from the crossings once enough are seen."""
+        if self.learn and len(self.seen) >= LEARN_WARMUP:
+            srt = sorted(self.seen)
+            return srt[int(LEARN_PERCENTILE / 100.0 * (len(srt) - 1))]
+        return self.ball_area
 
     @property
     def owed(self) -> int:
@@ -160,11 +217,12 @@ class CrossingCounter:
         blur = 1 halved every Einstein total (the long blobs are mostly real
         trains of drum-fed balls); the right fraction differed per match
         (Einstein 4 best at 0, 5 at 0.2-0.3, 1 at 0.5-0.7), and a value
-        picked on two matches did no better than 0 on the third. So it is a
-        per-camera calibration, set against a hand-counted recording from
-        that camera (`calibrate`), never a constant.
+        picked on two matches did no better than 0 on the third. Once one
+        ball was learned from the crossings (`one_ball`), 0.3 held on all
+        three (DEFAULT_BLUR); `calibrate` still fits it per camera against a
+        hand-counted recording.
         """
-        one = self.ball_area
+        one = self.one_ball()
         speed = math.hypot(vel[0], vel[1])
         if self.blur > 0 and cov is not None and speed > 0:
             ux, uy = vel[0] / speed, vel[1] / speed
@@ -172,7 +230,7 @@ class CrossingCounter:
             var = cxx * ux * ux + cyy * uy * uy + 2 * cxy * ux * uy
             length = 4.0 * math.sqrt(max(var, 0.0))
             one += self.blur * self.diameter * max(0.0, length - self.diameter)
-        return max(1, int(round(area / one)))
+        return balls_for(area, one)
 
     def update(self, blobs: Sequence[Blob]) -> int:
         cur = [{"c": (b[0], b[1]), "a": b[2], "v": (0.0, 0.0),
@@ -202,12 +260,15 @@ class CrossingCounter:
             if way:
                 big = b if b["a"] >= c["a"] else c
                 n = self.balls_in(big["a"], big["cov"], c["v"])
-                if way > 0:
+                self.seen.append(big["a"])
+                del self.seen[:-LEARN_MEMORY]
+                if way > 0 and (self.signed or c["v"][1] > 0):
                     self.net += n
                     self.entries += n
-                else:
-                    self.net -= n
+                elif way < 0:
                     self.exits += n
+                    if self.signed:
+                        self.net -= n
         self.prev = cur
         rise = max(0, self.net - self.reported)
         self.reported += rise
@@ -265,7 +326,7 @@ class ExitLineCounter(CrossingCounter):
             raise ValueError("the 'out' point must be off the line, on the "
                              "side balls go once they are out")
         # `poly` is what the search box and the drawings are built from.
-        super().__init__([a, b, out], ball_area, blur)
+        super().__init__([a, b, out], ball_area, blur, signed=True, learn=False)
         self.line = (a, b)
         self.out = out
         self.out_sign = 1 if _side(a, b, out) > 0 else -1
@@ -637,7 +698,7 @@ class Zone:
     """
 
     def __init__(self, name: str, hub: str, outline: Sequence[Point],
-                 ball_area: float, blur: float = 0.0,
+                 ball_area: float, blur: float = DEFAULT_BLUR,
                  line: Optional[Sequence[Point]] = None,
                  out: Optional[Point] = None):
         self.name = name
@@ -662,7 +723,7 @@ class Zone:
 class Camera:
     def __init__(self, name: str, source: str, ball_area: float,
                  zones: List[Zone], fps: float = 0.0, size: str = "",
-                 blur: float = 0.0, remove_static: bool = False):
+                 blur: float = DEFAULT_BLUR, remove_static: bool = False):
         self.name = name
         self.source = str(source)
         self.ball_area = float(ball_area)
@@ -764,7 +825,7 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
         if "source" not in c:
             raise ValueError(f"camera {name!r} has no source")
         area = float(c.get("ball_area") or 0)
-        blur = float(c.get("blur") or 0)
+        blur = float(DEFAULT_BLUR if c.get("blur") in (None, "") else c["blur"])
         zones = []
         for j, z in enumerate(c.get("zones") or []):
             zname = str(z.get("name") or f"{name}/{z.get('hub')}{j}")
@@ -808,8 +869,7 @@ def setup_to_dict(setup: "Setup") -> Dict:
             d["fps"] = c.fps
         if c.size:
             d["size"] = c.size
-        if c.blur:
-            d["blur"] = c.blur
+        d["blur"] = c.blur          # always: 0 is a choice, absent means 0.3
         if c.remove_static:
             d["remove_static"] = True
         cams.append(d)

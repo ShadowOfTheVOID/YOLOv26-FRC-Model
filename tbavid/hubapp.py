@@ -19,6 +19,8 @@ import time
 from collections import deque
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from .hubcount import DEFAULT_BLUR
+
 HUBS = ("red", "blue")
 COMBINE = ("sum", "max", "median")
 DEFAULT_TARGET = "10.0.100.5:8411"
@@ -326,7 +328,8 @@ class HubController:
                     name = os.path.splitext(os.path.basename(source))[0][:20]
             cam = {"name": next_name([c["name"] for c in self.cfg["cameras"]],
                                      name),
-                   "source": source, "ball_area": 0, "zones": []}
+                   "source": source, "ball_area": 0, "blur": DEFAULT_BLUR,
+                   "zones": []}
             self.cfg["cameras"].append(cam)
         self.say(f"added {cam['name']} ({redact(source)})")
         if source_kind(source) == "stream":

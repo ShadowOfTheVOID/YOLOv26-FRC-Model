@@ -213,7 +213,11 @@ budget. Full sweep (HUB_FEED.md "Every fix together"), held-out mean error
 over Einstein 4/5/1: mouth tuned 30%, model+BallTracker+assist 16%,
 mean of both 13%, exits 76% (hidden on broadcasts); AUTO winner right in
 every fold. The model path is offline only. Sweep scripts were scratch,
-not in the repo.
+not in the repo. Then (2026-09-29) outlines changed to downward entries
+only, exits ignored, one ball learned from crossings (30th pct of last 80),
+round up at 0.65, default blur 0.3: held-out 13%, shipped defaults 16% /
+6% / 9%. More knobs (outline size/offset, clump caps) overfit -- 27-28%
+held out -- so do not add knobs without a held-out check.
 
 **Recommended path for the scrimmage** (put to the user, awaiting answers):
 a close camera per hub (entry or exit chute) with a line-crossing counter,

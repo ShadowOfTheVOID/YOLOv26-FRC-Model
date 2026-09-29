@@ -2375,18 +2375,52 @@ def test_hub_crossing_counter():
     fly(c, [(150, 60), (150, 85), (150, 110)], area=3 * 280.0)
     check("a drum shooter's clump of three counts three", c.reported == 3)
 
-    # A ball across the mouth -- or off the hood -- goes in and comes out.
-    # The feed may not go down, so it is reported on entry and the exit is
-    # owed against the next ball in, which is then not reported again.
+    # An outline counts balls moving DOWN into it and ignores outward
+    # crossings: on Einstein 1 blue, 60-100 s, the signed rule saw 161 in and
+    # 171 out against 108 real balls -- bounces about the hood, not scores.
     c = HC.CrossingCounter(square, ball_area=280.0)
     fly(c, [(x, 150) for x in range(60, 241, 20)])
-    check("a pass-over is reported once, its exit owed",
+    check("a ball sideways across the mouth is not a score", c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 240), (150, 215), (150, 190), (150, 165)])
+    check("a ball rising into the outline from below is not a score",
+          c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110), (150, 112), (150, 95), (150, 80)])
+    check("a ball in then back out stays counted, the exit only noted",
+          c.reported == 1 and c.exits == 1 and c.owed == 0)
+
+    # The experiment's signed rule, which exit lines still use: a pass-over
+    # is reported on entry, its exit owed against the next ball in.
+    c = HC.CrossingCounter(square, ball_area=280.0, signed=True)
+    fly(c, [(x, 150) for x in range(60, 241, 20)])
+    check("signed: a pass-over is reported once, its exit owed",
           c.reported == 1 and c.net == 0 and c.owed == 1)
     rises = fly(c, [(150, 60), (150, 85), (150, 110)])
-    check("and the next real ball settles it without a second report",
+    check("signed: the next real ball settles it without a second report",
           sum(rises) == 0 and c.reported == 1 and c.owed == 0)
     fly(c, [(170, 60), (170, 85), (170, 110)])
-    check("after which balls count again", c.reported == 2)
+    check("signed: after which balls count again", c.reported == 2)
+
+    # One ball is learned from the crossings: balls at the mouth measured
+    # 1.5-2.3x the still ball, and 56 of Einstein 1's 85 AUTO crossings on
+    # blue were counted as two.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    for i in range(HC.LEARN_WARMUP + 5):
+        fly(c, [(110 + 5 * i, 60), (110 + 5 * i, 85), (110 + 5 * i, 110)],
+            area=2 * 280.0)
+    check("before the warm-up a blob of two balls' area counts two, "
+          "after it the blob size is learned as one ball",
+          c.reported == 2 * HC.LEARN_WARMUP + 5)
+    c = HC.CrossingCounter(square, ball_area=280.0, learn=False)
+    for i in range(HC.LEARN_WARMUP + 5):
+        fly(c, [(110 + 5 * i, 60), (110 + 5 * i, 85), (110 + 5 * i, 110)],
+            area=2 * 280.0)
+    check("without learning every one counts two",
+          c.reported == 2 * (HC.LEARN_WARMUP + 5))
+    check("a blob rounds up to the next ball only at 0.65 of one",
+          (HC.balls_for(1.6 * 280, 280), HC.balls_for(1.7 * 280, 280),
+           HC.balls_for(0.2 * 280, 280)) == (1, 2, 1))
 
     c = HC.CrossingCounter(square, ball_area=280.0)
     fly(c, [(150, 150), (152, 152), (151, 160)])
@@ -2564,19 +2598,21 @@ def test_hub_calibration_and_gui_helpers():
     streak_area = A1 + d * (L - d)
     cov = (L * L / 16.0, d * d / 16.0, 0.0)          # uniform ellipse spread
 
+    cov = (d * d / 16.0, L * L / 16.0, 0.0)          # smeared along y
+
     def cross(blur, area, cov_):
         c = HC.CrossingCounter(sq, A1, blur)
-        c.update([(60.0, 200.0, area) + cov_])
-        c.update([(90.0, 200.0, area) + cov_])            # outside, moving +x
-        c.update([(120.0, 200.0, area) + cov_])           # crosses in
+        c.update([(200.0, 60.0, area) + cov_])
+        c.update([(200.0, 90.0, area) + cov_])            # outside, falling
+        c.update([(200.0, 120.0, area) + cov_])           # crosses in
         return c.reported
 
     check("uncorrected, one smeared ball counts as its area in balls",
-          cross(0.0, streak_area, cov) == round(streak_area / A1))
+          cross(0.0, streak_area, cov) == HC.balls_for(streak_area, A1) > 1)
     check("fully corrected, the same streak is one ball",
           cross(1.0, streak_area, cov) == 1)
     check("a blob with no shape recorded is never corrected",
-          cross(1.0, streak_area, ()) == round(streak_area / A1))
+          cross(1.0, streak_area, ()) == HC.balls_for(streak_area, A1))
     try:
         HC.CrossingCounter(sq, A1, 1.5)
         check("a blur fraction over 1 is refused", False)
@@ -2588,10 +2624,10 @@ def test_hub_calibration_and_gui_helpers():
         "name": "c", "source": "x.mp4", "ball_area": A1, "blur": 0.5,
         "remove_static": True,
         "zones": [{"hub": "red", "outline": [list(p) for p in sq]}]}]}).cameras[0]
-    frames = [{cam.zones[0].name: [(60.0 + 30 * i, 200.0, streak_area) + cov]}
+    frames = [{cam.zones[0].name: [(200.0, 60.0 + 30 * i, streak_area) + cov]}
               for i in range(3)]
     check("replay_counts: no correction", HC.replay_counts(cam, frames, 0.0)
-          == {"red": round(streak_area / A1)})
+          == {"red": HC.balls_for(streak_area, A1)})
     check("replay_counts: full correction", HC.replay_counts(cam, frames, 1.0)
           == {"red": 1})
 
@@ -2609,6 +2645,14 @@ def test_hub_calibration_and_gui_helpers():
           == (0.3, True, 60.0, A1, "max")
           and c1.zones[0].counter.poly == c0.zones[0].counter.poly
           and c1.zones[0].counter.blur == 0.3)
+    plain = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0",
+                                             "ball_area": A1, "zones": [
+                                                 {"hub": "red", "outline": [list(p) for p in sq]}]}]})
+    check("a camera with no blur given gets the measured default",
+          plain.cameras[0].blur == HC.DEFAULT_BLUR)
+    plain.cameras[0].blur = 0.0
+    check("and a chosen blur of 0 survives saving and loading",
+          HC.setup_from_dict(HC.setup_to_dict(plain)).cameras[0].blur == 0.0)
 
     # The window's pure helpers.
     check("a 1080p frame is shrunk to the view, a small one is not",

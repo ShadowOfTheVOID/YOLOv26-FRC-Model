@@ -310,7 +310,74 @@ What this does not fix:
   counter. On a practice hub with a camera on the chute, they are still
   the recommended zone.
 
-## What you need
+## Downward entries and a learned ball (2026-09-29, the current rules)
+
+The sweep above left the mouth counter at 30% held out. Two findings from
+the recorded Einstein blobs led to a better counter:
+
+- **Balls crossing the mouth are bigger than the measured ball.** They were
+  1.5-2.3x the still ball, and by a different ratio on each match. In
+  Einstein 1's AUTO the blue outline saw 85 crossings for 85 real balls,
+  but 56 of them were counted as two balls.
+- **Outward crossings are not scores coming back out.** On Einstein 1 blue,
+  60-100 s, there were 161 entries and 171 exits against 108 real balls.
+
+So an outline now:
+- counts only blobs moving **down** into it;
+- ignores outward crossings;
+- learns one ball as the 30th percentile of its last 80 crossing blobs
+  (after 10);
+- rounds a blob up to the next ball only at 0.65 of a ball;
+- uses blur 0.3 when a camera doesn't set one.
+
+About 1,900 more configurations were swept, scored the same way as above:
+
+| rules | held out E4 / E5 / E1 | held-out mean |
+|---|---|---|
+| mouth, previous rules, tuned | 43% / 7% / 39% | 30% |
+| + gates (direction, exits, clump cap, speed) | 19-20% / 10-13% / 39% | 23-24% |
+| + outline size and position, rounding | 16% / 18-20% / 48% | 27-28% (overfit) |
+| **learned ball, downward entries, no exits** | 18% / 7% / 14% | **13%** |
+
+The shipped defaults, with no per-match setting except the measured ball,
+on the recorded blobs:
+
+| match | error | buzzer, blue / red | AUTO at the decision (real) |
+|---|---|---|---|
+| E4 | 16% | 518 / 636 (108% / 79%) | 86-133 (91-193), right |
+| E5 | 6% | 603 / 630 (103% / 94%) | 78-135 (90-161), right |
+| E1 | 9% | 614 / 487 (99% / 117%) | 101-104 (95-96), right |
+
+The model counter's 16% was held out the same way, so the live mouth
+counter now matches it with no model and no GPU.
+
+Neighbouring settings all land within a few points of each other:
+- percentile 20-35;
+- memory 30-400;
+- warm-up 5-10;
+- still-yellow removal on or off.
+
+The exceptions:
+- **blur 0** measured 20% / 30% / 34%, hence the 0.3 default;
+- **warm-up 50** left E1's AUTO on the measured ball and cost 14 points.
+
+What it does not fix:
+- **Einstein 4's red AUTO** reads 133 against 193. From 26 to 29 s the
+  scoreboard rose 36 with not one crossing at the mouth, so the scoreboard
+  lags the balls. No lag fitted all three matches (E4 was best at 0 s, E1
+  at 6 s), so none is applied.
+- **"Down" means down the picture.** A camera mounted upside down or on
+  its side needs its picture turned first.
+- **Exit lines are unchanged.** They are signed, use the measured ball and
+  are unvalidated.
+- **The learned ball assumes most crossings are single balls.** On the
+  broadcasts the 30th percentile was one ball. A camera where nearly every
+  crossing is a train of drum-fed balls would learn the train as one ball
+  and count low. The hand-count calibration catches that. Build a counter
+  with `learn=False` if it happens.
+- **It is still three broadcasts.** The 20-ball acceptance test on a
+  practice hub comes first.
+
 
 - A laptop wired into the field switch on the management VLAN, static
   `10.0.100.21/24` (the spec's suggestion, beside the e-stop panels at

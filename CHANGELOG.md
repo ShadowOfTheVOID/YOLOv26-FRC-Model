@@ -212,6 +212,26 @@ the build rather than publishing an empty release.
   Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
   400 ms hold), and three matches are too few to trust the best fit.
 
+### Changed
+
+- **The hub counter's outlines count downward entries, with one ball
+  learned from the crossings** (`hubcount.CrossingCounter`,
+  `deploy/HUB_FEED.md` "Downward entries and a learned ball"). Held-out
+  error over Einstein 4 / 5 / 1 went from 30% to 13%. The shipped
+  defaults measure 16% / 6% / 9%, with the AUTO winner right on all three.
+  - **Direction:** an outline counts only blobs moving down into it, and
+    outward crossings no longer subtract. On Einstein 1 blue, 161 entries
+    against 171 exits had wiped out 108 real balls.
+  - **Ball size:** one ball is the 30th percentile of the zone's last 80
+    crossing blobs. Balls at the mouth were 1.5-2.3x the measured still
+    ball, and most of Einstein 1's AUTO crossings were being counted as two.
+  - **Rounding:** a blob rounds up to the next ball at 0.65.
+  - **Blur:** cameras default to blur 0.3 (it was 0; blur 0 measured
+    20% / 30% / 34%). Saved setups now always write their blur, so a chosen
+    0 stays 0.
+  - **Exit lines keep the signed rule and the measured ball**
+    (`signed=True, learn=False`). The broadcasts cannot test them.
+
 ### Fixed
 
 - **QUICKSTART's "see what the model sees" was killed part-way through a
