@@ -2942,6 +2942,20 @@ def test_relabel_video_helpers():
           [(j["stem"], j["split"], [f.name for f in j["files"]]) for j in fj]
           == [("2026a_qm1_x", "train", ["2026a_qm1_x_000010.jpg", "2026a_qm1_x_000030.jpg"]),
               ("2026a_qm2_y", "val", ["2026a_qm2_y_000020.jpg"])])
+    import numpy as np
+    rng = np.random.default_rng(1)
+    def balls(h, s_lo, s_hi, n=2000):
+        return np.stack([rng.integers(h[0], h[1] + 1, n), rng.integers(s_lo, s_hi + 1, n),
+                         rng.integers(200, 256, n)], 1)
+    washed = RV.gate_from(balls((27, 31), 26, 90), 40)       # 2026inmis, measured
+    rich = RV.gate_from(balls((27, 30), 159, 255), 40)       # Einstein 4, measured
+    inside = lambda g, px: g[0][0] <= px[0] <= g[1][0] and px[1] >= g[0][1] and px[2] >= g[0][2]
+    check("the colour gate follows a washed-out broadcast's fuel down (S 26-90 passes)",
+          inside(washed, (29, 40, 230)) and not inside(RV.gate_from(balls((27, 30), 159, 255), 40), (29, 40, 230)))
+    check("and still keeps the Einstein stone border out on either (H 13-19)",
+          not inside(washed, (16, 100, 170)) and not inside(rich, (16, 100, 170)))
+    check("grey never passes, and too few confident balls means no measured gate",
+          washed[0][1] >= 20 and RV.gate_from(balls((27, 31), 26, 90), 5) is None)
     check("labels are YOLO-normalised",
           RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
 

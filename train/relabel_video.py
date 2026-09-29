@@ -167,15 +167,39 @@ FUEL_LO = (22, 120, 70)
 FUEL_HI = (36, 255, 255)
 
 
-def fuel_mask(img):
+def gate_from(pixels, n_boxes: int, min_boxes: int = 15):
+    """The fuel-colour gate measured on this broadcast's own confident balls.
+
+    One fixed gate does not travel: Einstein fuel had saturation 159-255,
+    2026inmis (a washed-out broadcast) 26-90 with the same hue (27-31), so
+    the fixed S >= 120 passed 1% of real ball pixels there and nothing was
+    confirmed or greyed. Hue stays narrow (5th-95th percentile, +-2, never
+    below 21): that is what keeps the Einstein stone border (H 13-19) out;
+    fuel measured H 27-31 on both broadcasts.
+    Saturation and value floors follow the balls down, with fixed floors so
+    grey and black never pass. None when too few confident balls to measure.
+    """
+    import numpy as np
+    if n_boxes < min_boxes or pixels is None or len(pixels) < 50:
+        return None
+    h5, h95 = np.percentile(pixels[:, 0], (5, 95))
+    s5 = np.percentile(pixels[:, 1], 5)
+    v5 = np.percentile(pixels[:, 2], 5)
+    lo = (int(max(21, h5 - 2)), int(max(20, 0.8 * s5)), int(max(40, 0.4 * v5)))
+    hi = (int(min(40, h95 + 2)), 255, 255)
+    return lo, hi
+
+
+def fuel_mask(img, gate=None):
     import cv2
     import numpy as np
+    lo, hi = gate or (FUEL_LO, FUEL_HI)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    m = cv2.inRange(hsv, np.array(FUEL_LO, np.uint8), np.array(FUEL_HI, np.uint8))
+    m = cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
     return cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
 
-def label_frame(frame, prev, fuel_model, robot_model) -> Dict:
+def label_frame(frame, prev, fuel_model, robot_model, state: Dict = None) -> Dict:
     """Every label and grey region for one frame (full-frame pixels).
 
     Grey is per PIXEL: yellow outside every fuel and robot box. Covering a
@@ -197,8 +221,23 @@ def label_frame(frame, prev, fuel_model, robot_model) -> Dict:
             dets.append(((b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0), float(c)))
     dets = nms(dets)
 
-    mask = fuel_mask(frame)
-    pmask = fuel_mask(prev) if prev is not None else None
+    # This frame's confident balls set the colour gate; `state` carries the
+    # last good one through frames with too few to measure.
+    state = state if state is not None else {}
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    patches = []
+    sure = [b for b, c in dets if c >= 0.6]
+    for b in sure:
+        cx, cy = int((b[0] + b[2]) / 2), int((b[1] + b[3]) / 2)
+        k = max(2, int((b[2] - b[0]) / 4))
+        if 0 <= cy - k and cy + k < h and 0 <= cx - k and cx + k < w:
+            patches.append(hsv[cy - k:cy + k, cx - k:cx + k].reshape(-1, 3))
+    gate = gate_from(np.vstack(patches) if patches else None, len(sure))
+    if gate:
+        state["gate"] = gate
+    gate = state.get("gate")
+    mask = fuel_mask(frame, gate)
+    pmask = fuel_mask(prev, gate) if prev is not None else None
 
     labels: List[Tuple[int, Box, str]] = []
     for b, c in dets:
@@ -245,7 +284,7 @@ def label_frame(frame, prev, fuel_model, robot_model) -> Dict:
         # negatives the model needs to stop calling them fuel.
     grey = cv2.dilate(grey, np.ones((5, 5), np.uint8))
     return {"labels": labels + robots, "grey": grey, "grey_balls": float(grey.sum()) / one,
-            "ball_px": ball}
+            "ball_px": ball, "gate": gate}
 
 
 def paint_grey(img, mask=None, boxes: Sequence[Box] = (), pad: int = 2):
@@ -575,6 +614,7 @@ def main() -> int:
     previews = 0
     for job in jobs:
         stem, split = job["stem"], job["split"]
+        gate_state: Dict = {}      # per video: its broadcast's fuel colour
         stats = {"frames": 0, "skipped_grey": 0, "tiles": 0, "fuel": 0, "motion": 0,
                  "model+colour": 0, "robots": 0, "greyed_balls": 0.0, "grey_per_frame": []}
         for fi, frame, prev in frames_of(job, args.every, args.length):
@@ -585,7 +625,9 @@ def main() -> int:
             if rows:
                 frame = frame[rows[0]:rows[1]]
                 prev = prev[rows[0]:rows[1]] if prev is not None else None
-            r = label_frame(frame, prev, fuel_model, robot_model)
+            r = label_frame(frame, prev, fuel_model, robot_model, gate_state)
+            if r["gate"]:
+                stats["colour_gate"] = [list(r["gate"][0]), list(r["gate"][1])]
             stats["grey_per_frame"].append(round(r["grey_balls"], 1))
             if r["grey_balls"] > args.max_grey:
                 stats["skipped_grey"] += 1
