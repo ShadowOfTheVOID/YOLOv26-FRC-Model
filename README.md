@@ -99,7 +99,8 @@ Output lands in these folders:
 | `detect` | run a trained `.pt` over harvested frames and record what it found |
 | `count` | count scored fuel from the detector; `--scoreboard` makes it the scoreboard at a scrimmage |
 | `hubfeed` | count fuel into each hub from a camera and send the counts to bioarena over UDP ([deploy/HUB_FEED.md](deploy/HUB_FEED.md)); `hubfeed-listen` stands in for bioarena |
-| `hubgui` | the hub counter as a web page: pick cameras or a Twitch stream, click hub outlines, measure, calibrate, start the bioarena feed |
+| `hubgui` | the hub counter as a web page: pick cameras or a Twitch stream, click hub outlines, measure, calibrate, start the bioarena feed; live scoreboard at `/board` |
+| `hubcount` | count recordings for scouting with the same counter: every frame, as fast as it decodes, each hub's count against video time in a CSV |
 | `shots` | per-robot shots from a model over match video: who shot, how many went in, how many missed |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |

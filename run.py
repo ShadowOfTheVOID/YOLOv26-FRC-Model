@@ -734,6 +734,8 @@ def cmd_hubfeed(args, cfg):
             setup = hubcount.load_setup(args.setup, measuring=bool(args.measure))
         except (OSError, ValueError) as e:
             raise SystemExit(f"--setup {args.setup}: {e}")
+        for note in setup.notes:
+            print(f"! {note}")
     else:
         polys = {}
         for hub in ("red", "blue"):
@@ -818,6 +820,33 @@ def cmd_hubfeed(args, cfg):
     hubcount.run(sender, setup, realtime=args.realtime, log_path=args.log)
     print(f"stopped: red {sender.counts['red']}, blue {sender.counts['blue']} "
           f"in session {sender.session}")
+    return 0
+
+
+def cmd_hubcount(args, cfg):
+    """Count fuel into each hub from recordings, for scouting: fast, on video time."""
+    from tbavid import hubcount
+
+    try:
+        setup = hubcount.load_setup(args.setup)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"--setup {args.setup}: {e}")
+    for note in setup.notes:
+        print(f"! {note}")
+    if args.csv and len(args.videos) > 1:
+        raise SystemExit("--csv names one file; with several videos each gets "
+                         "<video>_hubcount.csv")
+    for video in args.videos:
+        try:
+            r = hubcount.count_recording(setup, video, args.camera or "",
+                                         args.start, args.end, args.every)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        out = args.csv or str(Path(video).with_suffix("")) + "_hubcount.csv"
+        hubcount.write_timeline(r, out)
+        print(f"{video}: red {r['red']}, blue {r['blue']} over {r['seconds']} s "
+              f"({r['frames']} frames at {r['speed']} fps, "
+              f"{r['speed'] / r['fps']:.1f}x real time) -> {out}")
     return 0
 
 
@@ -1235,6 +1264,24 @@ def main(argv=None):
                                    "red=23,blue=0")
     p.add_argument("--log", help="append every count to this CSV")
     p.set_defaults(func=cmd_hubfeed)
+
+    p = sub.add_parser("hubcount",
+                       help="count fuel into each hub from recordings for "
+                            "scouting: every frame, as fast as it decodes, "
+                            "counts against video time in a CSV; sends nothing")
+    p.add_argument("videos", nargs="+", help="recordings of a match")
+    p.add_argument("--setup", required=True, metavar="CAMS.JSON",
+                   help="the outlines and ball size, from run.py hubgui "
+                        "(draw them on the recording itself)")
+    p.add_argument("--camera", help="which of the setup's cameras made the "
+                                    "recording (not needed with one)")
+    p.add_argument("--start", type=float, default=0.0, help="seconds in to start")
+    p.add_argument("--end", type=float, default=0.0, help="seconds in to stop")
+    p.add_argument("--every", type=float, default=0.5,
+                   help="seconds between timeline rows (default 0.5)")
+    p.add_argument("--csv", help="where to write the timeline (default "
+                                 "<video>_hubcount.csv)")
+    p.set_defaults(func=cmd_hubcount)
 
     p = sub.add_parser("track",
                        help="draw a model's tracks on a video: small labels, "

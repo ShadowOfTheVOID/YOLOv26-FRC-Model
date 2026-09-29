@@ -114,6 +114,8 @@ ROUND_UP = 0.35
 # 0.3 measured 16% / 6% / 10% on Einstein 4 / 5 / 1 and 0 measured 20% / 30%
 # / 34%; 0.5 was 17% / 12% / 5%.
 DEFAULT_BLUR = 0.3
+# Setup files saved under these rules say so; see setup_from_dict.
+RULES = 2
 
 
 def balls_for(area: float, one: float) -> int:
@@ -751,6 +753,7 @@ class Setup:
                  combine: Optional[Dict[str, str]] = None,
                  measuring: bool = False):
         self.cameras = cameras
+        self.notes: List[str] = []      # what loading changed, to be shown
         self.combine = {h: "sum" for h in HUB_NAMES}
         self.combine.update(combine or {})
         self.validate(measuring)
@@ -818,14 +821,33 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
             "zones": [{"hub": "red", "outline": [[100,80],[520,80],[520,300]]}]},
            {"name": "blue-high", "source": "1", "ball_area": 950,
             "zones": [{"hub": "blue", "outline": "40,60,600,60,600,200"}]}]}
+
+    A file without `"rules": 2` was saved before the counting rules of
+    2026-09-29, by a page that wrote every camera's blur slider -- 0 unless
+    moved -- so its `"blur": 0` is the old default, not a choice. Under the
+    current rules blur 0 measured 20% / 30% / 34% on Einstein 4 / 5 / 1
+    against 16% / 6% / 9% at DEFAULT_BLUR, so such a 0 is read as unset, and
+    `Setup.notes` says so.
     """
     cams = []
+    notes: List[str] = []
+    legacy = cfg.get("rules") != RULES
     for i, c in enumerate(cfg.get("cameras") or []):
         name = str(c.get("name") or f"cam{i}")
         if "source" not in c:
             raise ValueError(f"camera {name!r} has no source")
         area = float(c.get("ball_area") or 0)
-        blur = float(DEFAULT_BLUR if c.get("blur") in (None, "") else c["blur"])
+        raw = c.get("blur")
+        if raw in (None, ""):
+            blur = DEFAULT_BLUR
+        elif legacy and float(raw) == 0:
+            blur = DEFAULT_BLUR
+            notes.append(f"camera {name!r}: blur 0 in a setup saved before the "
+                         f"current rules is taken as unset -> {DEFAULT_BLUR}. "
+                         f"Save the setup to keep it; set blur 0 again only if "
+                         f"a hand-counted calibration picks it.")
+        else:
+            blur = float(raw)
         zones = []
         for j, z in enumerate(c.get("zones") or []):
             zname = str(z.get("name") or f"{name}/{z.get('hub')}{j}")
@@ -846,7 +868,9 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
         cams.append(Camera(name, c["source"], area, zones,
                            float(c.get("fps") or 0), str(c.get("size") or ""),
                            blur, bool(c.get("remove_static", False))))
-    return Setup(cams, cfg.get("combine"), measuring)
+    setup = Setup(cams, cfg.get("combine"), measuring)
+    setup.notes = notes
+    return setup
 
 
 def _zone_dict(z: Zone) -> Dict:
@@ -873,7 +897,7 @@ def setup_to_dict(setup: "Setup") -> Dict:
         if c.remove_static:
             d["remove_static"] = True
         cams.append(d)
-    return {"combine": dict(setup.combine), "cameras": cams}
+    return {"rules": RULES, "combine": dict(setup.combine), "cameras": cams}
 
 
 def load_setup(path: str, measuring: bool = False) -> Setup:
@@ -1187,6 +1211,87 @@ def record_blobs(camera: Camera, video: str, remove_static: bool,
             progress((fi - first) / (last - first))
     cap.release()
     return frames
+
+
+def count_recording(setup: Setup, video: str, camera: str = "",
+                    start: float = 0.0, end: float = 0.0, every: float = 0.5,
+                    progress: Optional[Callable[[float], None]] = None,
+                    stop: Optional[threading.Event] = None) -> Dict:
+    """Count a recording for scouting: as fast as it decodes, on VIDEO time.
+
+    `run` paces a file like a live camera, sends it to bioarena and logs wall
+    time, which is right for rehearsing the feed and wrong for scouting: a
+    6-minute recording takes 6 minutes and the log cannot be lined up with
+    the match. This decodes every frame (skipping frames would miss balls
+    that cross between them), counts with the same zones and rules as the
+    live counter, and returns each hub's count every `every` seconds of
+    video time. Nothing is sent anywhere.
+
+    `camera` picks which of the setup's cameras the recording was made from
+    (its outlines and ball size are used; its source is replaced by
+    `video`); a setup with one camera needs no name.
+    """
+    import cv2
+
+    cams = [c for c in setup.cameras if not camera or c.name == camera]
+    if len(cams) != 1:
+        raise ValueError("name the camera this recording was made from: "
+                         + ", ".join(c.name for c in setup.cameras))
+    d = setup_to_dict(setup)
+    cd = next(c for c in d["cameras"] if c["name"] == cams[0].name)
+    one = setup_from_dict({"combine": d["combine"],
+                           "cameras": [dict(cd, source=video)]})
+    cam = one.cameras[0]
+    tally = HubTally(one)
+    cap = cv2.VideoCapture(video)
+    if not cap.isOpened():
+        raise ValueError(f"could not open {video!r}")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    first = int(start * fps)
+    last = int(end * fps) if end else total
+    if first:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, first)
+    eyes = None
+    timeline: List[Tuple[float, int, int]] = []
+    fi, next_mark, began = first, start, time.monotonic()
+    while (not last or fi < last) and not (stop and stop.is_set()):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if eyes is None:
+            h, w = frame.shape[:2]
+            eyes = [(z, ZoneEye(region_of(z.counter.poly, cam.ball_area, w, h),
+                                cam.remove_static, fps)) for z in cam.zones]
+        for z, eye in eyes:
+            z.counter.update(eye.blobs(frame))
+        t = fi / fps
+        if t >= next_mark:
+            timeline.append((round(t, 3), tally.value("red"), tally.value("blue")))
+            next_mark += every
+        fi += 1
+        if progress and fi % 60 == 0 and last > first:
+            progress((fi - first) / (last - first))
+    cap.release()
+    took = time.monotonic() - began
+    t = fi / fps
+    final = (round(t, 3), tally.value("red"), tally.value("blue"))
+    if not timeline or timeline[-1][0] != final[0]:
+        timeline.append(final)
+    return {"video": video, "camera": cam.name, "fps": fps,
+            "frames": fi - first, "seconds": round(t - start, 2),
+            "took_s": round(took, 2),
+            "speed": round((fi - first) / took, 1) if took > 0 else 0.0,
+            "red": final[1], "blue": final[2], "timeline": timeline,
+            "zones": {z.name: z.counter.reported for z in cam.zones}}
+
+
+def write_timeline(result: Dict, path: str) -> None:
+    """A count_recording result as CSV: video seconds, red, blue."""
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["video_s", "red", "blue"])
+        w.writerows(result["timeline"])
 
 
 def replay_counts(camera: Camera, frames: List[Dict], blur: float) -> Dict[str, int]:

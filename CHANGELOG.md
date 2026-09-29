@@ -212,6 +212,16 @@ the build rather than publishing an empty release.
   Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
   400 ms hold), and three matches are too few to trust the best fit.
 
+- **`run.py hubcount VIDEO... --setup cams.json` counts recordings for
+  scouting** (`hubcount.count_recording`, `write_timeline`). Previously a
+  file went through `hubfeed`, paced like a live camera, sent over UDP and
+  logged against wall time.
+  - It decodes every frame as fast as it can and sends nothing.
+  - It writes each hub's count against video time (`video_s,red,blue`
+    every 0.5 s) and prints the totals.
+
+  Einstein 4: 4.4x real time on 4 cores; 650 / 515 at the buzzer, the same
+  as the evaluation.
 - **Live scoreboard at `/board`** (`tbavid/hubboard.html`,
   `hubapp.board_view`; the **Scoreboard ↗** button on `run.py hubgui`). A
   full-screen red and blue board that refreshes ten times a second.
@@ -244,6 +254,10 @@ the build rather than publishing an empty release.
   - **Blur:** cameras default to blur 0.3 (it was 0; blur 0 measured
     20% / 30% / 34%). Saved setups now always write their blur, so a chosen
     0 stays 0.
+  - **Old setup files:** the page used to save every camera's blur
+    slider, 0 unless moved. A setup without `"rules": 2`, which saves now
+    write, has its blur 0 read as 0.3, with a note printed. A blur 0
+    saved from now on is kept.
   - **Exit lines keep the signed rule and the measured ball**
     (`signed=True, learn=False`). The broadcasts cannot test them.
 

@@ -2653,6 +2653,21 @@ def test_hub_calibration_and_gui_helpers():
     plain.cameras[0].blur = 0.0
     check("and a chosen blur of 0 survives saving and loading",
           HC.setup_from_dict(HC.setup_to_dict(plain)).cameras[0].blur == 0.0)
+    # The old page saved every camera's blur slider, 0 unless moved: in a
+    # file from before the current rules a 0 is the old default, not a choice.
+    old = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0",
+                                           "ball_area": A1, "blur": 0,
+                                           "zones": [{"hub": "red", "outline":
+                                                      [list(p) for p in sq]}]}]})
+    check("an old setup's blur 0 is read as unset, and says so",
+          old.cameras[0].blur == HC.DEFAULT_BLUR and len(old.notes) == 1
+          and "'c'" in old.notes[0])
+    old2 = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0",
+                                            "ball_area": A1, "blur": 0.5,
+                                            "zones": [{"hub": "red", "outline":
+                                                       [list(p) for p in sq]}]}]})
+    check("an old setup's chosen non-zero blur is kept",
+          old2.cameras[0].blur == 0.5 and not old2.notes)
 
     # The window's pure helpers.
     check("a 1080p frame is shrunk to the view, a small one is not",

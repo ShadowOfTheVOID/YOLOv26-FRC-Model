@@ -98,7 +98,8 @@ def next_name(existing: Sequence[str], base: str) -> str:
 
 
 def new_setup() -> Dict:
-    return {"combine": {"red": "sum", "blue": "sum"}, "cameras": []}
+    from .hubcount import RULES
+    return {"rules": RULES, "combine": {"red": "sum", "blue": "sum"}, "cameras": []}
 
 
 def zone_points(z: Dict) -> List:
@@ -279,11 +280,14 @@ class HubController:
     # -- setup file ------------------------------------------------------------
     def load(self, path: str) -> None:
         from .hubcount import load_setup, setup_to_dict
-        cfg = setup_to_dict(load_setup(path, measuring=True))
+        setup = load_setup(path, measuring=True)
+        cfg = setup_to_dict(setup)
         with self.lock:
             self.cfg = cfg
             self.path = path
             self.frames.clear()
+        for note in setup.notes:
+            self.say(note)
         self.say(f"opened {path}")
 
     def save(self, path: Optional[str] = None) -> str:

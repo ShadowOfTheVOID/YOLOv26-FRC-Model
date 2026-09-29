@@ -222,6 +222,45 @@ To put it on a TV driven by another machine, run with `--bind 0.0.0.0` and
 open `http://<laptop>:8790/board`. The warning above applies: the set-up
 page is then open too.
 
+## Counting recordings for scouting (`run.py hubcount`)
+
+The same counter runs in two ways:
+- **Live on the M4 Max at the scrimmage:** `hubfeed.command` or `run.py
+  hubgui` feeds bioarena.
+- **On recordings afterwards, for scouting:**
+
+```bash
+run.py hubcount match_q12.mp4 match_q13.mp4 --setup cams.json [--camera NAME]
+# match_q12: red 650, blue 515 over 214.5 s (12856 frames at 261 fps, 4.4x real time)
+#   -> match_q12_hubcount.csv   (video_s, red, blue every 0.5 s)
+```
+
+How it counts:
+- Every frame is decoded; skipping frames would miss balls crossing
+  between them.
+- It runs as fast as the machine decodes, with no pacing and nothing sent.
+- The zones and rules are those of the live counter.
+
+Draw the outlines on the recording itself in `run.py hubgui` (Add
+recording) and save them. A recording from another camera position needs
+its own outlines and ball size.
+
+The CSV is against **video time**, so the score at any moment of the match
+can be read off it. The totals include whatever the video shows before the
+start and after the buzzer, replays included. Read the timeline at the
+match's start and end, or pass `--start` / `--end`.
+
+**Measured 2026-09-29** on the Einstein 4 broadcast:
+- **Speed:** 4.4x real time on a 4-core container, so the M4 Max should be
+  faster.
+- **Counts:** 650 / 515 red / blue at the buzzer, the same as the
+  evaluation above (scoreboard 804 / 479).
+
+**Older setup files:** before these rules the page saved every camera's blur
+slider, 0 unless moved, which pins the setting that measured 20-34%. A
+setup file without `"rules": 2` has its blur 0 read as 0.3, with a note
+printed. Save it once from the page and it keeps what it has from then on.
+
 ## Count at the exits (recommended)
 
 Every ball that scores comes back out of the hub, so the number leaving
