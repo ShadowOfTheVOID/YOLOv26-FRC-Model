@@ -212,6 +212,13 @@ the build rather than publishing an empty release.
   Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
   400 ms hold), and three matches are too few to trust the best fit.
 
+- **Slow-camera warning** on the page's status and on `/board` when a live
+  camera delivers under 28 fps (`hubcount.MIN_FPS`, `hubapp.slow_cameras`).
+  The Einstein blobs replayed at 60 / 30 / 20 fps measured 10.5% / 12.6% /
+  25.1% error, and webcams drop to 15-24 fps on their own in dim light.
+  The other setup errors tested were outlines 10 px off or 15% mis-sized,
+  and one ball measured anywhere from 0.5x to 2x. Each cost at most 5
+  points (`deploy/HUB_FEED.md`, "How forgiving the setup is").
 - **`run.py hubcount VIDEO... --setup cams.json` counts recordings for
   scouting** (`hubcount.count_recording`, `write_timeline`). Previously a
   file went through `hubfeed`, paced like a live camera, sent over UDP and

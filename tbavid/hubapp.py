@@ -565,6 +565,7 @@ class HubController:
                                   "lag_ms": round(h.lag_ms())}
             if running and now - h.last_frame > 0.5:
                 live["stale"].append(n)
+        live["slow"] = slow_cameras(health) if running else {}
         tally = self.monitor.get("tally")
         if tally is not None:
             live["zones"] = {z.name: z.counter.reported
@@ -586,16 +587,29 @@ class HubController:
                           bool(s and s.linked()), s.last_reply if s else None,
                           stale, round(max(lags)) if lags else None,
                           list(self.monitor.get("errors", [])),
-                          bool(getattr(self, "practice", False)))
+                          bool(getattr(self, "practice", False)),
+                          slow_cameras(health) if running else {})
 
 
 BOARD_REPLY_KEYS = ("match_state", "match_time_s", "shift", "hub_active",
                     "match_count", "credited", "auto_count")
 
 
+def slow_cameras(health: Dict) -> Dict[str, float]:
+    """Cameras delivering under hubcount.MIN_FPS, once a second of frames is in."""
+    from .hubcount import MIN_FPS
+    out = {}
+    for n, h in health.items():
+        fps = h.fps()
+        if len(h.stamps) >= 30 and 0 < fps < MIN_FPS:
+            out[n] = round(fps, 1)
+    return out
+
+
 def board_view(counts: Dict[str, int], running: bool, linked: bool,
                reply: Optional[Dict], stale: List[str], lag_ms: Optional[float],
-               errors: List[str], practice: bool = False) -> Dict:
+               errors: List[str], practice: bool = False,
+               slow: Optional[Dict[str, float]] = None) -> Dict:
     """What the scoreboard shows, decided here so the page only draws it.
 
     Linked to bioarena, the big numbers are its `credited` -- the score, this
@@ -622,6 +636,9 @@ def board_view(counts: Dict[str, int], running: bool, linked: bool,
         out["alert"] = "counter stopped"
     elif stale:
         out["alert"] = "no picture from " + ", ".join(stale)
+    elif slow:
+        out["alert"] = ("slow camera: " + ", ".join(f"{n} {f:.0f} fps" for n, f in slow.items())
+                        + " -- counts run low under 30 fps; add light or lower the resolution")
     elif not linked and r is None and errors:
         out["alert"] = errors[-1]
     return out

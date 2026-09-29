@@ -673,6 +673,11 @@ class Health:
 
 
 STALE_S = 0.5    # a camera silent this long is blind; stop the heartbeat
+# Below this a camera is flagged as slow. The Einstein broadcasts replayed at
+# 60 / 30 / 20 fps (every 1st / 2nd / 3rd frame) measured 10.5% / 12.6% /
+# 25.1% mean error: balls jump too far between frames to be followed across
+# the mouth. Webcams drop to 15-24 fps on their own in dim light.
+MIN_FPS = 28.0
 STREAM_RETRIES = 5   # reconnects in a row before a stream counts as gone
 
 

@@ -223,6 +223,11 @@ counter also serves `/board` (`hubboard.html`, `hubapp.board_view`) --
 bioarena's credited score + clock/shift/hub_active from its status reply
 when linked, camera counts (labelled, not a match score) otherwise.
 Measured 59.9 fps, 5 ms median / 14 ms max capture-to-count on 60 fps video.
+Tuning has plateaued on E4/E5/E1 (another sweep: 14% held out vs 13%);
+don't retune on these three -- more scored matches are needed, and YouTube
+refuses downloads here (bot check), so they must come via Drive. Setup
+tolerance: outlines +-10 px / +-15% and ball 0.5-2x cost <=5 points; frame
+rate is what matters (30 fps 12.6%, 20 fps 25.1%) -> MIN_FPS warning.
 
 **Recommended path for the scrimmage** (put to the user, awaiting answers):
 a close camera per hub (entry or exit chute) with a line-crossing counter,

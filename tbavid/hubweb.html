@@ -392,6 +392,7 @@ function renderLive(){const v=S.live;
   for(const h of["red","blue"]){const e=$(h);if(v.counts[h]!==lastCounts[h]){e.textContent=v.counts[h];e.classList.remove("bump");void e.offsetWidth;if(v.counts[h]>lastCounts[h])e.classList.add("bump");lastCounts[h]=v.counts[h];}}
   if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:"Ready. Press Start to send counts to bioarena.");
   else if(v.stale.length)setStatus("bad","No picture",`${v.stale.join(", ")} stopped sending frames — bioarena shows OFFLINE.`);
+  else if(Object.keys(v.slow||{}).length)setStatus("warn","Camera too slow",Object.entries(v.slow).map(([n,f])=>`${n} ${Math.round(f)} fps`).join(", ")+" — counts run low under 30 fps. Add light or lower the resolution.");
   else if(v.linked){const r=v.reply||{};const delayed=Object.values(S.kinds).includes("stream");
     // a Wi-Fi camera is not flagged here: its delay is small and shown as fps
     setStatus(delayed?"warn":"ok","Connected to bioarena",`${(r.match_state||"").replace(/_/g," ").toLowerCase()} · ${r.shift||""} · ${v.rtt_ms} ms`+(delayed?" · counting from a delayed stream":""));}

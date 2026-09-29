@@ -2864,6 +2864,19 @@ def test_hub_scoreboard_view():
     b = board_view({}, True, True, {"seq": 1}, [], None, [])
     check("a reply without scores falls back to the camera counts",
           b["source"] == "counter")
+    b = board_view({"red": 1}, True, True, reply, [], None, [], slow={"red-cam": 19.6})
+    check("a camera under 30 fps is flagged: 20 fps measured 25% error, 60 fps 10.5%",
+          "red-cam 20 fps" in b.get("alert", ""))
+    from tbavid.hubapp import slow_cameras
+    from tbavid.hubcount import Health
+    fast, slow_h, young = Health(), Health(), Health()
+    for i in range(60):
+        fast.frame(i / 60.0, i / 60.0 + 0.005)
+        slow_h.frame(i / 20.0, i / 20.0 + 0.005)
+    for i in range(5):
+        young.frame(i / 10.0, i / 10.0)
+    check("slow_cameras finds the 20 fps camera only, once it has a second of frames",
+          slow_cameras({"a": fast, "b": slow_h, "c": young}) == {"b": 20.0})
     b = board_view({"red": 1}, True, True, reply, [], None, [], practice=True)
     check("practice replies are labelled as the stand-in, not bioarena",
           b["source"] == "practice" and b["score"]["red"] == 57)
