@@ -69,9 +69,16 @@ LOOSE_HI = (40, 255, 255)
 # ~19 px ball on a 1080p broadcast), kept as fractions of a ball so a close
 # camera with 2000 px balls gets the same geometry.
 REF_BALL_AREA = 272.0
-MIN_AREA_FRAC = 40.0 / REF_BALL_AREA      # smaller yellow specks are noise
+# The floor and reach were doubled / x1.5 by the leave-one-out sweep over the
+# three Einstein matches (2026-09-29): the experiment's 40 px floor let rim
+# spray and crowd specks cross the mouth as balls, and the 25 px reach broke
+# fast 60 fps balls into two tracks. Two of the three held-out folds chose
+# exactly these; mouth error at the buzzer-side checkpoints went 30% -> 21%
+# best fit. The third fold (Einstein 4 held out) chose reach x0.75.
+MIN_AREA_FRAC = 80.0 / REF_BALL_AREA      # smaller yellow specks are noise
 PAD_BALLS = 60.0 / math.sqrt(REF_BALL_AREA)   # search margin, in ball widths
-MIN_REACH_BALLS = 25.0 / math.sqrt(REF_BALL_AREA)
+MIN_REACH_BALLS = 37.5 / math.sqrt(REF_BALL_AREA)
+REACH_PER_BLOB = 2.25   # reach also grows with the blob: x sqrt(its area)
 
 
 def parse_poly(text: str) -> List[Point]:
@@ -178,7 +185,7 @@ class CrossingCounter:
         pairs = []
         for i, b in enumerate(self.prev):
             px, py = b["c"][0] + b["v"][0], b["c"][1] + b["v"][1]
-            reach = max(self.min_reach, 1.5 * math.sqrt(b["a"]))
+            reach = max(self.min_reach, REACH_PER_BLOB * math.sqrt(b["a"]))
             for j, c in enumerate(cur):
                 d = math.hypot(c["c"][0] - px, c["c"][1] - py)
                 if d <= reach:

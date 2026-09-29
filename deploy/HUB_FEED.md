@@ -235,6 +235,81 @@ Neither setting can fix what the Einstein tests found the real error to be:
 from in front, a ball that clips the rim and drops behind the hub looks like
 one that went in. That needs the camera somewhere it can see the difference.
 
+## Every fix together, tuned on all three Einstein matches (2026-09-29)
+
+About 850 configurations were swept on Einstein 4, 5 and 1:
+- The mouth counter over ball size x0.8-1.4, blur 0-0.5, still-yellow
+  removal, speck floor x0.5-2 and matching reach x0.75-1.5.
+- The model counter (`fuel_best.pt` -> `trackvis.BallTracker` ->
+  `count.BallCounter`) with and without colour assist, over the track,
+  vanish, reacquire, entry and padding settings.
+- The exit lines.
+- Their combinations: mean, min, max, and the median of mouth, model and
+  exit.
+
+Error is the mean |count / scoreboard - 1| over every checkpoint from the
+end of AUTO to the buzzer, both hubs. "Held out" means every setting was
+chosen on the other two matches and then scored on this one. This is the
+only honest number with three matches: the best fit on all three is
+tuned to the answer.
+
+| method | best fit (E4 / E5 / E1) | held out E4 / E5 / E1 | held-out mean |
+|---|---|---|---|
+| mouth, settings before this sweep | 12% / 31% / 69% | -- | -- |
+| mouth, tuned | 11% / 7% / 33% | 43% / 7% / 39% | 30% |
+| exit lines | -- | -- | 76% |
+| model + BallTracker + BallCounter, no assist | 53% / 23% / 14% | -- | 36% |
+| model + BallTracker + colour assist | 19% / 8% / 4% | 25% / 8% / 13% | 16% |
+| **mean(mouth, model + assist)** | -- | 17% / 6% / 16% | **13%** |
+| min(mouth, model + assist) | 8% / 5% / 5% | 41% / 5% / 5% | 17% |
+| max(mouth, model + assist) | -- | 23% / 7% / 39% | 23% |
+| median(mouth, model, exit) | -- | 41% / 5% / 6% | 17% |
+
+Held-out buzzer counts, blue / red against the scoreboard
+(E4 479 / 804, E5 585 / 669, E1 621 / 415):
+
+| method | E4 | E5 | E1 |
+|---|---|---|---|
+| model + assist | 617 / 686 | 655 / 693 | 485 / 346 |
+| mean(mouth, model) | 457 / 630 | 567 / 586 | 506 / 430 |
+
+**The AUTO winner at T+23 s was right in every held-out run of every
+method.** That includes Einstein 1's 95-96 AUTO.
+
+What changed in the code:
+- `hubcount.MIN_AREA_FRAC` doubled (the speck floor, 40 -> 80 px at the
+  272 px reference ball).
+- `MIN_REACH_BALLS` and the per-blob reach grew 1.5x (`REACH_PER_BLOB`
+  2.25).
+
+Two of the three held-out folds chose exactly these values.
+
+The shipped `CrossingCounter` rerun on the recorded blobs gives:
+
+| settings | E4 | E5 | E1 |
+|---|---|---|---|
+| camera defaults | 7% | 34% | 71% |
+| ball area x0.9, `"blur": 0.3`, `"remove_static": true` | 8% | 7% | 39% |
+
+Those are the settings to start a broadcast-like camera on before
+calibrating.
+
+What this does not fix:
+
+- **Three matches tune too easily.** A spread of 5-43% between folds
+  means the next match can land anywhere in that range. The "held out"
+  column is the one to quote.
+- **The model counter is offline only.** `run.py hubfeed` still runs the
+  mouth counter alone. The model counter needs `fuel_best.pt` at ~960 px,
+  about 18 fps on the M4 Max against 60 fps video. `BallCounter` also
+  holds a ball ~400 ms before counting it, which breaks the AUTO budget.
+  The combination is the better scorekeeper after the fact, not the live
+  feed.
+- **Exit lines stay unmeasurable on broadcasts.** The exits are behind the
+  hubs, 9-34% visible. Their 76% error is the camera angle, not the
+  counter. On a practice hub with a camera on the chute, they are still
+  the recommended zone.
+
 ## What you need
 
 - A laptop wired into the field switch on the management VLAN, static

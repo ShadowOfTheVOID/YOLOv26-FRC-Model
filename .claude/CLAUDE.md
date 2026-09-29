@@ -209,7 +209,11 @@ against a hand-counted recording -- the best value differed on every Einstein
 match. Plumbing is tested; counting is unvalidated on a practice-field
 camera -- the spec's 20-ball acceptance test comes before bioarena's
 `counted` mode. Do not swap in `BallCounter`: its 400 ms hold breaks the
-budget.
+budget. Full sweep (HUB_FEED.md "Every fix together"), held-out mean error
+over Einstein 4/5/1: mouth tuned 30%, model+BallTracker+assist 16%,
+mean of both 13%, exits 76% (hidden on broadcasts); AUTO winner right in
+every fold. The model path is offline only. Sweep scripts were scratch,
+not in the repo.
 
 **Recommended path for the scrimmage** (put to the user, awaiting answers):
 a close camera per hub (entry or exit chute) with a line-crossing counter,

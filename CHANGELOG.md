@@ -187,6 +187,31 @@ the build rather than publishing an empty release.
   Einstein 1: red identical at all 22 settings, blue within 2 (the offline
   cache stored positions as float32).
 
+- **Hub counter tuned with every fix together** (`deploy/HUB_FEED.md`,
+  "Every fix together"). About 850 configurations were swept on Einstein 4,
+  5 and 1 and scored leave-one-out:
+  - the mouth counter, the model counter and the exit lines;
+  - their mean, min, max and median.
+
+  Held-out mean error per method:
+
+  | method | held-out mean error |
+  |---|---|
+  | mouth, tuned | 30% |
+  | model + BallTracker + colour assist | 16% |
+  | mean of the two | 13% |
+  | exit lines on broadcasts | 76% (exits hidden) |
+
+  The AUTO winner was right in every held-out run.
+
+  In `hubcount`, the speck floor doubled and the matching reach grew 1.5x.
+  Two of three folds chose exactly these. With ball area x0.9, blur 0.3
+  and still-yellow removal, the live counter measures 8% / 7% / 39%
+  (defaults: 7% / 34% / 71%).
+
+  Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
+  400 ms hold), and three matches are too few to trust the best fit.
+
 ### Fixed
 
 - **QUICKSTART's "see what the model sees" was killed part-way through a
