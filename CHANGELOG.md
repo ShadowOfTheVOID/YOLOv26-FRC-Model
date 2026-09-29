@@ -217,6 +217,12 @@ the build rather than publishing an empty release.
   `run.py hubcount` measured 9.1% error, buzzer 91% / 94%, AUTO winner
   right. Re-tuning with four matches, holding each out once, measured 21%
   against 10.1% for the current settings, so they are unchanged.
+- **The model measured on full-resolution hub crops** (`deploy/HUB_FEED.md`).
+  A 640 px crop around each hub, instead of the frame halved to 960, found
+  93% of balls in flight against 84%. Counting error without colour assist
+  fell from 36% to 21%; with the assist it stayed at 17%. Averaged with
+  the colour counter it measured 9.0% against 10.1% for the colour counter
+  alone. Not yet built into `run.py`.
 - **Both counters measured on every frame at 60 fps**, four matches, each
   held out once (`deploy/HUB_FEED.md`). The shipped colour counter measured
   10.1% at 60 fps and 11.1% at 30 fps. The model counter with colour

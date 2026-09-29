@@ -567,6 +567,42 @@ What this settles:
   10.1% for the colour counter alone. It stays offline; there is no reason
   to add it to the live path.
 
+## The model on full-resolution hub crops (2026-09-29)
+
+At `imgsz 960` a 1080p frame is halved before the model sees it, so an
+18 px ball reaches it as about 9 px. Instead, a 640x640 window around each
+hub was cut at full resolution and passed at `imgsz 640`: two crops, about
+the same cost as one 960 frame (227 ms against 205 ms on 4 CPU cores). On
+60 Einstein 4 frames the model found 93% of the moving ball-sized yellow
+blobs near the hubs, against 84% on the halved frame.
+
+For counting, all four matches were run at 30 fps and each held out once:
+
+| model counter | E4 / E5 / E1 / E8 | mean |
+|---|---|---|
+| full frame at 960, no colour assist | 55 / 23 / 13 / 17% | 36% |
+| **hub crops, no colour assist** | 17 / 15 / 18 / 14% | **21%** |
+| full frame at 960, colour assist | 22 / 8 / 8 / 14% | 17% |
+| hub crops, colour assist | 9 / 17 / 15 / 10% | 17% |
+| colour counter alone (shipped) | 16.2 / 6.2 / 9.1 / 8.8% | 10.1% |
+| **mean(colour counter, hub crops + assist)** | 12.6 / 5.7 / 9.3 / 8.3% | **9.0%** |
+
+What this shows:
+- **The crops make the model a better detector.** Without colour assist
+  its error fell from 36% to 21%; the assist had been hiding how many
+  balls the halved frame missed.
+- **It is still not a better counter on its own:** 17% either way with the
+  assist, and the AUTO winner was wrong on Einstein 8 in both.
+- **The mean of the colour counter and the crop model is the first
+  combination to beat the colour counter:** 9.0% against 10.1%, with the
+  AUTO winner right on all four. That is one point on four matches, too
+  small to call settled.
+
+The rest of the gap is in training: the labeller's field line left balls
+high against the crowd unlabelled, and the model has never seen an Einstein
+frame. Retraining with balls in flight labelled (`train/README.md`, the
+bootstrap) is the next step for the model.
+
 ## What you need
 
 - A laptop wired into the field switch on the management VLAN, static
