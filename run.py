@@ -803,13 +803,17 @@ def cmd_hubfeed(args, cfg):
                       f'"ball_area": {area:.0f}')
         return 0
 
+    from tbavid import fmslink
     try:
-        target = hubfeed.parse_target(args.target)
-    except ValueError:
-        raise SystemExit(f"--target wants HOST or HOST:PORT (got {args.target!r})")
-    sender = hubfeed.FeedSender(target)
-    print(f"session {sender.session}: sending to udp {target[0]}:{target[1]}. "
-          f"Ctrl-C to stop.")
+        sender = fmslink.make_sender(args.target)
+    except ValueError as e:
+        raise SystemExit(f"--target wants HOST[:PORT] for bioarena or "
+                         f"http://KEY@HOST:PORT for frc-fms: {e}")
+    if isinstance(sender, fmslink.FmsSender):
+        print(f"sending fuel events to frc-fms at {sender.url}. Ctrl-C to stop.")
+    else:
+        print(f"session {sender.session}: sending to udp {sender.target[0]}:"
+              f"{sender.target[1]}. Ctrl-C to stop.")
     for cam in setup.cameras:
         print(f"  {cam.name}: {cam.source}, ball {cam.ball_area:.0f} px, "
               f"zones {', '.join(f'{z.name}->{z.hub}' for z in cam.zones)}")
@@ -818,6 +822,10 @@ def cmd_hubfeed(args, cfg):
         if n > 1:
             print(f"  {hub}: {n} zones combined by {setup.combine[hub]}")
     hubcount.run(sender, setup, realtime=args.realtime, log_path=args.log)
+    if hasattr(sender, "close"):
+        sender.close()
+        if sender.pending():
+            print(f"! {sender.pending()} fuel events never reached frc-fms: {sender.last_error}")
     print(f"stopped: red {sender.counts['red']}, blue {sender.counts['blue']} "
           f"in session {sender.session}")
     return 0
@@ -1237,7 +1245,8 @@ def main(argv=None):
                    help="pixel area of one ball under the colour gate; "
                         "measure it with --measure")
     p.add_argument("--target", default="10.0.100.5:8411",
-                   help="bioarena's HOST:PORT (default 10.0.100.5:8411)")
+                   help="bioarena's HOST:PORT (default 10.0.100.5:8411), or "
+                        "frc-fms as http://VISIONKEY@HOST:8000")
     p.add_argument("--cam-fps", dest="cam_fps", type=float, default=0.0,
                    help="ask the camera for this frame rate (60 halves the "
                         "wait for the next frame)")

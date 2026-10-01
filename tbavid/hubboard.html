@@ -88,7 +88,8 @@ function clock(t){t=Math.max(0,+t||0);const m=Math.floor(t/60),s=Math.floor(t%60
 function draw(b){
   const bio=b.source==="bioarena"||b.source==="practice";
   $("dot").className="dot "+(!b.running?"bad":b.stale.length?"warn":b.linked?"ok":"warn");
-  $("src").textContent=b.source==="practice"?"Test receiver (practice)":bio?"bioarena score":(b.running?"Camera counts · not linked to bioarena":"Counter stopped");
+  if(b.source==="fms")$("zero").hidden=false;
+  $("src").textContent=b.source==="fms"?(b.linked?"Camera counts · sent to frc-fms (its /display has the match score)":"Camera counts · frc-fms not answering"):b.source==="practice"?"Test receiver (practice)":bio?"bioarena score":(b.running?"Camera counts · not linked to bioarena":"Counter stopped");
   $("zero").hidden=bio;
   const ph=bio?[PHASE[b.match_state]||b.match_state,SHIFT[b.shift]||""].filter(Boolean).join(" · "):"";
   $("phase").hidden=!ph; $("phase").textContent=ph;

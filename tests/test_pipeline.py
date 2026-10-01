@@ -2837,6 +2837,54 @@ def test_hub_ui_controller_and_web():
         httpd.server_close()
 
 
+def test_frc_fms_sender():
+    """Fuel events to frc-fms (github.com/arnan-bajaj/frc-fms).
+
+    frc-fms adds timestamped events and buckets them into periods by their
+    wall-clock time, so a ball must carry the time it was SEEN, and an event
+    lost in a failed POST is a ball lost -- unlike bioarena's cumulative feed,
+    where the next datagram carries everything.
+    """
+    from tbavid import fmslink as FL
+
+    check("a URL target is frc-fms, host:port is bioarena",
+          FL.is_fms_target("http://k@10.0.0.2:8000") and not FL.is_fms_target("10.0.100.5:8411"))
+    check("the vision key rides in the URL",
+          FL.split_target("http://s3cret@192.168.1.10:8000/") == ("http://192.168.1.10:8000", "s3cret"))
+    try:
+        FL.FmsSender("http://192.168.1.10:8000", start=False)
+        check("a URL without the vision key is refused", False)
+    except ValueError:
+        check("a URL without the vision key is refused", True)
+
+    calls, fail = [], [True]
+    def post(url, body, key):
+        calls.append((url, body, key))
+        if fail[0]:
+            raise OSError("connection refused")
+        return {"record": None}
+    mono = [100.0]
+    s = FL.FmsSender("http://k@fms:8000", post=post, clock=lambda: mono[0],
+                     wall=lambda: 1_700_000_000.0 + mono[0], start=False)
+    s.score("red", 2, captured_at=99.5)          # seen 0.5 s ago
+    s.score("blue", 1, captured_at=100.0)
+    check("an event carries the wall-clock time it was seen, not sent",
+          s._buf["red"] == [[1_700_000_099.5, 2]])
+    check("a failed POST keeps every event queued",
+          not s.flush() and s.pending() == 2 and s.send_errors == 1 and not s.linked())
+    fail[0] = False
+    s.score("red", 1, captured_at=100.0)
+    ok = s.flush()
+    url, body, key = calls[-1]
+    check("the next POST carries all of it, in frc-fms's shape, with the key header",
+          ok and url == "http://fms:8000/api/vision/events" and key == "k"
+          and body["events"] == {"red": [[1_700_000_099.5, 2], [1_700_000_100.0, 1]],
+                                 "blue": [[1_700_000_100.0, 1]]}
+          and body["source"] == "live" and s.pending() == 0 and s.linked())
+    check("cumulative counts stay for the page and the board",
+          s.counts == {"red": 3, "blue": 1})
+
+
 def test_relabel_video_helpers():
     """The bootstrap labeller's pure parts: tiling, merging, clipping, output.
 
@@ -3222,7 +3270,7 @@ def main() -> int:
                test_hub_feed_receiver_rules, test_hub_crossing_counter,
                test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
-               test_hub_scoreboard_view, test_relabel_video_helpers,
+               test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")

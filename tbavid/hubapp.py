@@ -483,7 +483,12 @@ class HubController:
         if issues:
             raise ValueError("Not ready yet: " + " ".join(issues))
         setup = hubcount.setup_from_dict(cfg)
-        host, port = hubfeed.parse_target(target.strip() or DEFAULT_TARGET)
+        from .fmslink import FmsSender, is_fms_target, split_target
+        fms = is_fms_target(target)
+        if fms and practice:
+            self.say("practice mode is for bioarena's UDP feed; sending to frc-fms instead")
+            practice = False
+        host, port = ("", 0) if fms else hubfeed.parse_target(target.strip() or DEFAULT_TARGET)
         self.practice = practice
         if practice:
             host = "127.0.0.1"
@@ -497,10 +502,16 @@ class HubController:
             base = os.path.dirname(os.path.abspath(self.path)) if self.path else os.getcwd()
             log_path = os.path.join(base, time.strftime("hubfeed_%Y%m%d_%H%M%S.csv"))
             self.say(f"logging counts to {log_path}")
-        self.sender = hubfeed.FeedSender((host, port))
+        if fms:
+            # frc-fms: timestamped events over HTTP (tbavid/fmslink.py). The
+            # key is in the URL; it is not shown or logged.
+            self.sender = FmsSender(target.strip())
+            self.feed_target = split_target(target)[0]
+        else:
+            self.sender = hubfeed.FeedSender((host, port))
+            self.feed_target = f"{host}:{port}"
         self.stop_evt = threading.Event()
         self.monitor = {}
-        self.feed_target = f"{host}:{port}"
         realtime = realtime and any(source_kind(c.source) in ("file", "stream")
                                     for c in setup.cameras)
         if any(source_kind(c.source) == "stream" for c in setup.cameras):
@@ -525,6 +536,11 @@ class HubController:
                     self.listen_stop.set()
                     self.listen_stop = None
                 s = self.sender
+                if hasattr(s, "close"):
+                    s.close()          # frc-fms: deliver what is still queued
+                    if s.pending():
+                        self.say(f"! {s.pending()} fuel events never reached frc-fms: "
+                                 f"{s.last_error}")
                 self.say(f"stopped: red {s.counts['red']}, blue {s.counts['blue']}")
         with self.lock:
             self.running = True
@@ -583,6 +599,16 @@ class HubController:
         stale = [n for n, h in health.items()
                  if running and now - h.last_frame > 0.5]
         lags = [h.lag_ms() for h in health.values()]
+        from .fmslink import FmsSender
+        if isinstance(s, FmsSender):
+            v = board_view(dict(s.counts), running, False, None, stale,
+                           round(max(lags)) if lags else None,
+                           list(self.monitor.get("errors", [])), False,
+                           slow_cameras(health) if running else {})
+            v["source"], v["linked"] = "fms", s.linked()
+            if running and not s.linked() and "alert" not in v:
+                v["alert"] = f"frc-fms not answering: {s.last_error or 'no reply yet'}"
+            return v
         return board_view(dict(s.counts) if s else {}, running,
                           bool(s and s.linked()), s.last_reply if s else None,
                           stale, round(max(lags)) if lags else None,

@@ -242,6 +242,12 @@ frame): moving-ball recall 84% -> 93%; counting held out, no assist 36% ->
 21%, with assist 17% -> 17%; mean(colour, crop model) 9.0% vs colour 10.1%
 (first combo to beat colour, 1 point on 4 matches). Not built into run.py
 yet. User chose: if crops don't clearly work, retrain (option 2).
+frc-fms (github.com/arnan-bajaj/frc-fms, the team's own scrimmage FMS;
+2026-10-01) is supported alongside bioarena (deploy/FRC_FMS.md): plugin
+tbavid.fms_counter:ColourCounter for its run_vision.py, and fmslink.FmsSender
+when --target is http://KEY@host:8000 (wall-clock event times, never-dropped
+queue). Both verified against a running frc-fms. Its `zone` counter takes all
+model classes -- a 3-class model would count robots as fuel.
 Drive videos download with curl from
 drive.usercontent.google.com/download?id=ID&export=download&confirm=t.
 

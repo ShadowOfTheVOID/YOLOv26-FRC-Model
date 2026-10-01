@@ -212,6 +212,25 @@ the build rather than publishing an empty release.
   Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
   400 ms hold), and three matches are too few to trust the best fit.
 
+- **frc-fms support** (`deploy/FRC_FMS.md`). frc-fms is a scrimmage FMS
+  whose vision side posts timestamped fuel events. Two ways in:
+  - **Plugin:** `tbavid.fms_counter:ColourCounter` is a counter for
+    frc-fms's own `run_vision.py`. It is the measured colour counter (10.1%
+    held out on four Einsteins, against 17-25% for the model + tracker
+    approach of frc-fms's `zone` counter), configured from frc-fms's `roi`,
+    a polygon, an exit line, or a `cams.json` camera.
+  - **Sender:** a `http://KEY@host:8000` target makes `run.py hubfeed`
+    and the web page post to frc-fms (`tbavid/fmslink.py`). Events carry
+    the wall-clock time they were seen and stay queued until a POST that
+    carried them succeeds.
+
+  Both were run against a real frc-fms server on the Einstein 4 recording:
+  - the sender's stored totals matched the offline count exactly;
+  - the plugin ran at 59.9 fps and matched the offline count at the point
+    each hub reached.
+
+  `ball_area` is required by the plugin: measuring it from the first
+  frames read the title card (98 px against 272).
 - **Measured on a held-out match, Einstein 8** (`deploy/HUB_FEED.md`).
   The counter had never been tuned on it. The shipped defaults through
   `run.py hubcount` measured 9.1% error, buzzer 91% / 94%, AUTO winner
