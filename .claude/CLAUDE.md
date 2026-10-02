@@ -147,10 +147,7 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
 ## Current work (as of 2026-09-26 — delete this section once stale)
 
 **Goal**: per-robot scouting (who shot, made, missed) and replacing FMS
-scoring at the 10th Street Throwdown scrimmage, **Saturday 2026-10-10**
-(TBA `2026catstd`; Piedmont Makers Field, Oakland CA; 12 teams: 114, 2035,
-3045, 4159, 4669, 5026, 5940, 6059, 7419, 8033, 8793, 9470. Webcast via TBA
-GameDay; no schedule or match videos on TBA as of 2026-10-02).
+scoring at the 10-st-throwdown scrimmage, **Saturday 2026-10-10**.
 
 **v0.3.0 is prepared but not yet tagged** (this session cannot push tags; the
 user tags `main` after merging PR #8). Two models become release assets (not in git; checksums in
