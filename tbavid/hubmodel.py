@@ -214,6 +214,22 @@ def too_slow(offered: int, skipped: int) -> bool:
     return offered >= MODEL_WARMUP_FRAMES and skipped > MODEL_MAX_SKIP * offered
 
 
+def _close_all() -> None:
+    """At exit, let each model thread finish its frame. A daemon thread
+    still inside torch when Python shuts down aborts the process
+    ("terminate called without an active exception"); the plugin run lost
+    its printed result that way, and frc-fms's runner would end the same
+    way on Ctrl-C."""
+    for w in list(_LIVE):
+        w.close(wait=2.0)
+
+
+import atexit as _atexit
+import weakref as _weakref
+_LIVE: "_weakref.WeakSet" = _weakref.WeakSet()
+_atexit.register(_close_all)
+
+
 class ModelWorker:
     """The model half on its own thread, fed the newest frame.
 
@@ -251,6 +267,7 @@ class ModelWorker:
         self._ready = threading.Condition()
         self._thread = threading.Thread(target=self._loop, daemon=True, name=name)
         self._thread.start()
+        _LIVE.add(self)
 
     def offer(self, frame, t: float, tag=None) -> None:
         if self.off or self._done:
@@ -277,10 +294,12 @@ class ModelWorker:
                and time.monotonic() < end):
             time.sleep(0.002)
 
-    def close(self) -> None:
+    def close(self, wait: float = 0.0) -> None:
         with self._ready:
             self._done = True
             self._ready.notify()
+        if wait:
+            self._thread.join(wait)
 
     def _loop(self) -> None:
         import time
