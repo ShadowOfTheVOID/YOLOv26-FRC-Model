@@ -24,6 +24,13 @@ the build rather than publishing an empty release.
   9.1%. Needs a GPU or Apple silicon (picked automatically: CUDA, then MPS);
   on 4 CPU cores it ran at 2.6 fps.
   Not yet checked against a hand-counted practice-hub recording.
+- **The web page (`run.py hubgui`) can turn the fuel model on**: step 3,
+  *Fuel model*, a .pt picker and the model's share. Each zone shows its
+  colour and model halves while counting, and the page says when the model
+  is falling behind. A model that skips more than 20% of its frames after a
+  10 s warm-up is dropped for the session and counting goes on by colour:
+  on 4 CPU cores a lagging model had held the page at 52 against colour's
+  103.
 
 - **`run.py hubfeed` — feed hub fuel counts to bioarena** (`tbavid/hubfeed.py`,
   `tbavid/hubcount.py`, `deploy/HUB_FEED.md`), for the 2026-10-10 scrimmage.
@@ -366,6 +373,8 @@ the build rather than publishing an empty release.
 
 ### Fixed
 
+- **The page's *Scoreboard* button was dark blue on black.** Buttons now
+  take the page's text colour; a link styled as one had kept the browser's.
 - **`run.py hubfeed` printed `bioarena ?` when posting to frc-fms.** It now
   prints `frc-fms took it, rtt N ms`, or `no reply from frc-fms`. Seen on
   the 2026-10-02 run against frc-fms 20524ce, where both connection methods

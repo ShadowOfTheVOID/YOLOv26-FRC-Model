@@ -44,7 +44,7 @@ button,input,select{font:inherit;color:inherit}
 
 /* ---------- buttons ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;
-  border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-weight:600;font-size:13px;transition:.15s;white-space:nowrap}
+  border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-weight:600;font-size:13px;transition:.15s;white-space:nowrap;color:inherit}
 .btn:hover{border-color:color-mix(in srgb,var(--accent) 60%,var(--line));background:color-mix(in srgb,var(--accent) 8%,var(--panel2))}
 .btn:active{transform:translateY(1px)}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
@@ -296,6 +296,12 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <label class="switch"><span>Ignore yellow that stays still</span><input type="checkbox" id="f_remove_static"><i></i></label>
         <button class="btn sm" onclick="pickFile('calibrate')"><svg><use href="#i-tune"/></svg>Calibrate from a hand-counted recording</button>
       </details>
+      <details class="adv" id="modelbox"><summary>Fuel model <span class="muted" id="modelstate">(off)</span></summary>
+        <p class="muted" style="margin:10px 0 8px">Blends a trained model's count with the colour count. On four Einstein matches: 6.8% error against 10.1% for colour alone. Needs Apple silicon or a GPU.</p>
+        <div class="row"><button class="btn sm" onclick="pickFile('model')"><svg><use href="#i-open"/></svg><span id="modelpick">Choose model (.pt)</span></button>
+          <button class="btn sm" id="modeloff" onclick="setModel('')">Turn off</button></div>
+        <div class="slider" id="mwrow" style="margin-top:10px"><span class="muted" style="width:92px">Model's share</span><input type="range" id="f_model_weight" min="0" max="1" step="0.1"><b class="tnum" id="mwv">0.5</b></div>
+      </details>
     </section>
 
     <section class="card step" id="st4">
@@ -378,20 +384,28 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   document.querySelectorAll(".seg").forEach(g=>{const v=S.cfg.combine[g.dataset.hub]||"sum";g.querySelectorAll("button").forEach(b=>b.className=b.textContent===v?"on":"");});
   $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";}
 function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
-  $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;}
+  $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;
+  const m=c.model||null;$("modelstate").textContent=m?"("+m.weights.split("/").pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
+  $("modeloff").style.display=m?"":"none";$("mwrow").style.display=m?"":"none";if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}}
 function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
   if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an exit line across each hub's exit.</div>`;return;}
   for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";const ex=!!z.line;
-    d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in"):(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
+    const pt=(S.live.parts||{})[z.name];const both=pt?` (colour ${pt.colour} · model ${pt.model})`:"";
+    d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in")+both:(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
     d.querySelector(".x").onclick=()=>api("delete_zone",{camera:cur,zone:z.name}).then(refresh);L.appendChild(d);}}
 function renderSteps(){const cams=S.cfg.cameras;
   const done=[cams.length>0,cams.length>0&&cams.every(c=>c.zones.length),cams.length>0&&cams.every(c=>c.ball_area>0),S.running];
   done.forEach((d,i)=>{const s=$("st"+(i+1));s.classList.toggle("done",d);s.querySelector(".n").textContent=d?"✓":i+1;});}
+let behindSeen={},behindAt={};
+function modelBehind(v){const now=Date.now();for(const[n,k]of Object.entries(v.model_behind||{})){if(k>(behindSeen[n]||0))behindAt[n]=now;behindSeen[n]=k;}
+  return Object.keys(behindAt).filter(n=>now-behindAt[n]<5000);}
 function setStatus(kind,text,sub){$("sdot").className="dot "+kind;$("stext").textContent=text;$("ssub").textContent=sub||"";}
 function renderLive(){const v=S.live;
   for(const h of["red","blue"]){const e=$(h);if(v.counts[h]!==lastCounts[h]){e.textContent=v.counts[h];e.classList.remove("bump");void e.offsetWidth;if(v.counts[h]>lastCounts[h])e.classList.add("bump");lastCounts[h]=v.counts[h];}}
   if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:"Ready. Press Start to send counts to bioarena.");
   else if(v.stale.length)setStatus("bad","No picture",`${v.stale.join(", ")} stopped sending frames — bioarena shows OFFLINE.`);
+  else if((v.model_off||[]).length)setStatus("warn","Fuel model turned off",v.model_off.join(", ")+" — too slow to keep up, so it was dropped for this run. Counting by colour only.");
+  else if(modelBehind(v).length)setStatus("warn","Model falling behind",modelBehind(v).join(", ")+" — the model is skipping frames, so its half of the count runs low. Use Apple silicon or a GPU, or turn the model off.");
   else if(Object.keys(v.slow||{}).length)setStatus("warn","Camera too slow",Object.entries(v.slow).map(([n,f])=>`${n} ${Math.round(f)} fps`).join(", ")+" — counts run low under 30 fps. Add light or lower the resolution.");
   else if(v.linked){const r=v.reply||{};const delayed=Object.values(S.kinds).includes("stream");
     // a Wi-Fi camera is not flagged here: its delay is small and shown as fps
@@ -477,7 +491,9 @@ async function storeForm(){const c=cam();if(!c)return;const f={};for(const k of[
   f.blur=$("f_blur").value;f.remove_static=$("f_remove_static").checked;try{const r=await api("update_camera",{name:cur,fields:f});cur=r.name;}catch(e){}refresh();}
 for(const k of["name","source","fps","size","ball_area"])$("f_"+k).addEventListener("change",storeForm);
 $("f_blur").addEventListener("input",()=>$("blurv").textContent=(+$("f_blur").value).toFixed(1));
-$("f_blur").addEventListener("change",storeForm);$("f_remove_static").addEventListener("change",storeForm);
+$("f_blur").addEventListener("change",storeForm);
+$("f_model_weight").addEventListener("input",()=>$("mwv").textContent=(+$("f_model_weight").value).toFixed(1));
+$("f_model_weight").addEventListener("change",async()=>{try{await api("update_camera",{name:cur,fields:{model_weight:$("f_model_weight").value}});}catch(e){}refresh();});$("f_remove_static").addEventListener("change",storeForm);
 document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>api("combine",{hub:g.dataset.hub,how:b.textContent}).then(refresh)));
 function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
 function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
@@ -510,16 +526,19 @@ async function save(){let p=null;if(!S.path){p=await ask("Save setup","File name
   await api("save",{path:p});savedCfg=JSON.stringify(S.cfg);toast("Setup saved");refresh();}
 async function openSetup(){const p=await ask("Open setup","Setup file",S&&S.path||"cams.json");if(p){await api("load",{path:p});cur=null;lastPic="";savedCfg=null;refresh();}}
 async function pickFile(mode,path=""){pickMode=mode;const L=await(await fetch("/api/ls?path="+encodeURIComponent(path))).json();
-  const title=mode==="add"?"Add a recording":"Pick the hand-counted recording";
+  const title=mode==="add"?"Add a recording":mode==="model"?"Pick the fuel model":"Pick the hand-counted recording";
+  const files=mode==="model"?(L.models||[]):L.videos;
   let body=`<div class="crumbs">${esc(L.path)}${L.error?" — "+esc(L.error):""}</div><div class="pick">`+
     `<div class="item" data-d="${esc(L.parent)}"><span class="icon"><svg><use href="#i-up"/></svg></span><span class="t">Up one folder</span></div>`+
     L.dirs.map(d=>`<div class="item" data-d="${esc(L.path+"/"+d)}"><span class="icon"><svg><use href="#i-folder"/></svg></span><span class="t">${esc(d)}</span></div>`).join("")+
-    L.videos.map(v=>`<div class="item" data-v="${esc(L.path+"/"+v)}"><span class="icon"><svg><use href="#i-film"/></svg></span><span class="t">${esc(v)}</span></div>`).join("")+
-    (L.videos.length||L.dirs.length?"":`<div class="muted">No videos here.</div>`)+"</div>";
+    files.map(v=>`<div class="item" data-v="${esc(L.path+"/"+v)}"><span class="icon"><svg><use href="#i-${mode==="model"?"tune":"film"}"/></svg></span><span class="t">${esc(v)}</span></div>`).join("")+
+    (files.length||L.dirs.length?"":`<div class="muted">${mode==="model"?"No .pt files here.":"No videos here."}</div>`)+"</div>";
   const p=modal(title,body,[{label:"Cancel",value:null}]);
   document.querySelectorAll("#mBody .item").forEach(e=>e.onclick=()=>{closeModal(null);if(e.dataset.d!==undefined)pickFile(mode,e.dataset.d);else chose(e.dataset.v);});
   await p;}
-async function chose(p){if(pickMode==="add"){try{const c=await api("add_camera",{source:p});cur=c.name;lastPic="";grab();}catch(e){}return;}
+async function setModel(p){if(!cur)return;try{await api("update_camera",{name:cur,fields:{model:p}});toast(p?"Fuel model on":"Fuel model off");}catch(e){}refresh();}
+async function chose(p){if(pickMode==="model"){setModel(p);return;}
+  if(pickMode==="add"){try{const c=await api("add_camera",{source:p});cur=c.name;lastPic="";grab();}catch(e){}return;}
   const c=cam();if(!c)return;const hubs=[...new Set(c.zones.map(z=>z.hub))];
   const body=`<p>How many balls went into each hub in this recording, counted by hand?</p>`+hubs.map(h=>`<label class="field" style="margin-top:8px"><span>${h.toUpperCase()} hub</span><input class="input" type="number" min="0" id="hand_${h}"></label>`).join("");
   const ok=await modal("Hand count",body,[{label:"Cancel",value:false},{label:"Calibrate",cls:"primary",value:true}]);if(!ok)return;

@@ -46,6 +46,13 @@ MODEL_IMGSZ = 640
 MODEL_FPS = 30.0        # tuned at 30 fps: every other frame of a 60 fps source
 DET_CONF = 0.05         # what the model reports; the tracker uses >= KEEP_CONF
 KEEP_CONF = 0.1
+# A model that cannot keep up is worse than none: its half of the blend
+# stops rising, so the zone reads about half the colour count. Run on 4 CPU
+# cores it skipped ~90% of frames and the page read 52 against colour's 103
+# after 40 s of Einstein 1. Past MODEL_WARMUP_FRAMES offered, a model that
+# has skipped more than MODEL_MAX_SKIP of them is dropped for the session.
+MODEL_WARMUP_FRAMES = 300       # 10 s at 30 fps: loading and first inference
+MODEL_MAX_SKIP = 0.2
 
 # Tuned on Einstein 4/5/8/1 with fuel_relabel.pt (deploy/HUB_FEED.md, "The
 # combo, tuned"): the BallCounter windows in 30 fps frames, the hub box's pad
@@ -200,6 +207,11 @@ def pick_device() -> str:
     if mps is not None and mps.is_available():
         return "mps"
     return "cpu"
+
+
+def too_slow(offered: int, skipped: int) -> bool:
+    """Has the model fallen far enough behind to be dropped?"""
+    return offered >= MODEL_WARMUP_FRAMES and skipped > MODEL_MAX_SKIP * offered
 
 
 def model_stride(fps: float) -> int:

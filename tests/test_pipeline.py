@@ -3326,6 +3326,12 @@ def test_hub_model_blend():
         ok &= v >= last
         last = v
     check("a blend of rising counts never falls", ok)
+    check("a model that skips most frames is dropped after its warm-up",
+          HM.too_slow(HM.MODEL_WARMUP_FRAMES, HM.MODEL_WARMUP_FRAMES // 2)
+          and not HM.too_slow(HM.MODEL_WARMUP_FRAMES - 1, HM.MODEL_WARMUP_FRAMES - 1)
+          and not HM.too_slow(1000, 100))
+    check("and colour alone takes over: weight 0 is the colour count",
+          HM.blend(103, 1, 0.0) == 103)
     check("weight 0 is colour alone, 1 the model alone",
           HM.blend(10, 4, 0.0) == 10 and HM.blend(10, 4, 1.0) == 4
           and HM.blend(10, 4, 0.5) == 7)
@@ -3361,6 +3367,43 @@ def test_hub_model_blend():
             check(f"{why} is refused", False)
         except ValueError:
             check(f"{why} is refused", True)
+    # The web page's side: a model chosen on the page is saved and run.
+    import os
+    from tbavid import hubapp as A
+    with tempfile.TemporaryDirectory() as tmp:
+        video = os.path.join(tmp, "practice.mp4")
+        weights = os.path.join(tmp, "fuel_relabel.pt")
+        open(video, "wb").close()
+        open(weights, "wb").close()
+        ctl = A.HubController()
+        name = ctl.add_camera(video)["name"]
+        ctl.add_zone(name, "red", sq)
+        ctl.update_camera(name, {"ball_area": 300})
+        c = ctl.update_camera(name, {"model": weights})
+        check("choosing a model on the page turns the blend on at the tuned share",
+              c["model"] == {"weights": weights, "weight": HM.DEFAULT_WEIGHT})
+        c = ctl.update_camera(name, {"model_weight": 0.3})
+        check("and its share can be set", c["model"]["weight"] == 0.3)
+        try:
+            ctl.update_camera(name, {"model_weight": 2})
+            check("a share above 1 is refused", False)
+        except ValueError:
+            check("a share above 1 is refused", True)
+        check("the folder listing offers .pt files for the picker",
+              A.list_dir(tmp)["models"] == ["fuel_relabel.pt"])
+        if A._has_ultralytics():
+            check("a model that is there is ready to start", ctl.state()["problems"] == [])
+        else:
+            check("without Ultralytics the page says why before Start",
+                  any("Ultralytics" in p for p in ctl.state()["problems"]))
+        os.remove(weights)
+        check("a model file that has gone is caught before Start",
+              any("not there" in p for p in ctl.state()["problems"]))
+        saved = HC.load_setup(ctl.save(os.path.join(tmp, "cams.json")), measuring=True)
+        check("what the page saves, hubfeed --setup reads with the model",
+              saved.cameras[0].model["weight"] == 0.3)
+        c = ctl.update_camera(name, {"model": ""})
+        check("turning it off removes it", "model" not in c)
     plain = HC.setup_from_dict({"cameras": [dict(cfg["cameras"][0], model=None)]})
     check("no model entry: colour only, as before",
           plain.cameras[0].model is None and plain.cameras[0].model_zones() == []

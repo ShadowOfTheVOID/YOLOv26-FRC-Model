@@ -1105,6 +1105,23 @@ def run(sender, setup: Setup, realtime: bool = False,
             for z in zones:
                 if z.model.update(t, dets, assist):
                     report(cam, z, captured)
+            from .hubmodel import too_slow
+            if too_slow(slot["offered"], slot["dropped"]):
+                # Colour only from here. The zone's count jumps from the blend
+                # to the colour count; if that is lower, HubTally.rise holds
+                # the feed until colour passes what was already sent, so the
+                # feed still never goes down.
+                for z in zones:
+                    z.weight = 0.0
+                slot["off"] = True
+                if monitor is not None:
+                    monitor.setdefault("model_off", []).append(cam.name)
+                out(f"{cam.name}: the model skipped {slot['dropped']} of "
+                    f"{slot['offered']} frames -- turned off for this session, "
+                    f"counting by colour only. Use Apple silicon or a GPU.")
+                for z in zones:
+                    report(cam, z, captured)
+                break
             if slot["dropped"] and time.monotonic() - said > 10.0:
                 said = time.monotonic()
                 out(f"{cam.name}: the model is behind -- {slot['dropped']} "
@@ -1134,7 +1151,8 @@ def run(sender, setup: Setup, realtime: bool = False,
             stop.set()
             return
         file_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        slot: Dict = {"job": None, "dropped": 0, "reset": False}
+        slot: Dict = {"job": None, "dropped": 0, "offered": 0, "reset": False,
+                      "off": False}
         ready = threading.Condition()
         stride = 1
         if eye is not None:
@@ -1211,10 +1229,13 @@ def run(sender, setup: Setup, realtime: bool = False,
             for z in cam.zones:
                 if z.counter.update(eyes[z.name].blobs(frame)):
                     report(cam, z, captured)
-            if eye is not None and (n - 1) % stride == 0:
+            if eye is not None and not slot["off"] and (n - 1) % stride == 0:
                 with ready:
+                    slot["offered"] += 1
                     if slot["job"] is not None:
                         slot["dropped"] += 1
+                        if monitor is not None:
+                            monitor.setdefault("model_dropped", {})[cam.name] = slot["dropped"]
                     slot["job"] = (frame, (n - 1) / file_fps, captured)
                     ready.notify()
             hl.frame(captured, time.monotonic())

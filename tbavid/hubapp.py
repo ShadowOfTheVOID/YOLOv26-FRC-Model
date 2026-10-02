@@ -20,6 +20,7 @@ from collections import deque
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .hubcount import DEFAULT_BLUR
+from .hubmodel import DEFAULT_WEIGHT
 
 HUBS = ("red", "blue")
 COMBINE = ("sum", "max", "median")
@@ -121,14 +122,28 @@ def problems(cfg: Dict) -> List[str]:
         if not float(c.get("ball_area") or 0) > 0:
             out.append(f"{c['name']}: measure the ball size "
                        f"(put a few balls near the hub, then Measure).")
+        m = c.get("model") or {}
+        if m.get("weights") and not os.path.exists(m["weights"]):
+            out.append(f"{c['name']}: the fuel model {m['weights']} is not there "
+                       f"-- pick it again, or turn the model off.")
+    if any((c.get("model") or {}).get("weights") for c in cams) and not _has_ultralytics():
+        # Found here, not at Start: the counter would open, run a moment
+        # and die in its camera thread, which reads as a camera fault.
+        out.append("The fuel model needs Ultralytics: start this page from "
+                   ".venv-train (run.py hubgui), or turn the model off.")
     return out
+
+
+def _has_ultralytics() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("ultralytics") is not None
 
 
 def list_dir(path: str) -> Dict:
     """Folders and videos in `path`, for picking a recording from a page
     that cannot see the disk itself."""
     path = os.path.abspath(os.path.expanduser(path or "."))
-    dirs, videos = [], []
+    dirs, videos, models = [], [], []
     try:
         for name in sorted(os.listdir(path), key=str.lower):
             if name.startswith("."):
@@ -138,11 +153,13 @@ def list_dir(path: str) -> Dict:
                 dirs.append(name)
             elif name.lower().endswith(VIDEO_EXT):
                 videos.append(name)
+            elif name.lower().endswith(".pt"):
+                models.append(name)
     except OSError as e:
         return {"path": path, "parent": os.path.dirname(path), "dirs": [],
-                "videos": [], "error": str(e)}
+                "videos": [], "models": [], "error": str(e)}
     return {"path": path, "parent": os.path.dirname(path), "dirs": dirs,
-            "videos": videos}
+            "videos": videos, "models": models}
 
 
 # -- camera access (OpenCV, imported lazily) ----------------------------------
@@ -376,6 +393,21 @@ class HubController:
                 c["blur"] = round(b, 2)
             if "remove_static" in fields:
                 c["remove_static"] = bool(fields["remove_static"])
+            if "model" in fields:
+                # A path to turn the model blend on, "" to turn it off. The
+                # counter settings tuned in hubmodel are kept unless a setup
+                # file already overrides them.
+                w = str(fields["model"] or "").strip()
+                if w:
+                    c["model"] = dict(c.get("model") or {}, weights=w)
+                    c["model"].setdefault("weight", DEFAULT_WEIGHT)
+                else:
+                    c.pop("model", None)
+            if "model_weight" in fields and c.get("model"):
+                mw = float(fields["model_weight"])
+                if not 0 <= mw <= 1:
+                    raise ValueError("the model's share is 0 to 1")
+                c["model"]["weight"] = round(mw, 2)
             return c
 
     def add_zone(self, cam_name: str, hub: str,
@@ -586,6 +618,14 @@ class HubController:
         if tally is not None:
             live["zones"] = {z.name: z.reported
                              for zs in tally.zones.values() for z in zs}
+            # Both halves of a blended zone, so a page can show which one
+            # moved: a model half stuck at 0 is a model that is not running.
+            live["parts"] = {z.name: {"colour": z.counter.reported,
+                                      "model": z.model.reported}
+                             for zs in tally.zones.values() for z in zs
+                             if z.model is not None}
+        live["model_behind"] = dict(self.monitor.get("model_dropped") or {})
+        live["model_off"] = list(self.monitor.get("model_off") or [])
         out["live"] = live
         return out
 

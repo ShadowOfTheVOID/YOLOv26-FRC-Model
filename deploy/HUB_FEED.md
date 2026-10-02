@@ -637,6 +637,21 @@ or per camera in cams.json: `"model": {"weights": "fuel_relabel.pt",
 "weight": 0.5}` (also `device`, and the counter settings below by name).
 Exit lines stay colour only.
 
+**On the web page** (`run.py hubgui`, started from `.venv-train` so
+Ultralytics is there): step 3, *Fuel model* -> *Choose model (.pt)*. The
+slider is the model's share. While counting, each zone shows both halves
+(`103 in (colour 103 · model 98)`); a model half stuck near 0 is a model
+that is not keeping up. The page refuses to start, and says why, when the
+model file has gone or Ultralytics is missing.
+
+**A model that cannot keep up turns itself off.** Its half stops rising, so
+the zone reads about half the colour count: on 4 CPU cores the page read
+52 against colour's 103 after 40 s of Einstein 1. After 10 s, a model that
+has skipped more than 20% of its frames is dropped for the session, the
+count becomes the colour count, and the page says *Fuel model turned off*.
+The feed still never goes down (only rises are sent). Checked on this
+container: dropped at ~10 s, then 103 / 108, equal to colour alone.
+
 The model sees a 640 px square cut around each outline at full resolution
 (3.2 outline widths, shifted 0.7 widths up), at ~30 fps -- every other
 frame of a 60 fps camera. Live, it runs on its own thread and always takes
