@@ -688,6 +688,12 @@ Read it carefully:
   unchanged. A longer hold (reacquire 6, 300 ms) scored no better.
 - `run.py hubcount --model` on 30 s of E1 gave 84 - 102 at 30 s (official
   95 - 96), in line with the replay that produced the table.
+- **The model half is noisy by frame phase.** It sees every other frame at
+  60 fps; started one frame later (odd frames instead of even) on E1 6-36 s,
+  red's model half read 106 instead of 94 (+13%), blue's 84 instead of 87.
+  The blend moved about half that (red 107 against 101), and colour did
+  not move. The table above was measured on one phase, so treat
+  differences of a few points between settings as noise.
 
 What would settle it is the same thing as for colour alone: a hand-counted
 recording from the real camera position. Run it with and without `--model`

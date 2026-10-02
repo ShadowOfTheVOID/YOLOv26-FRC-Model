@@ -32,7 +32,11 @@ the build rather than publishing an empty release.
   through frc-fms 20524ce's own `run_vision.py` on 4 CPU cores, the model
   was dropped after 10 s and the totals equalled the colour plugin's.
   `hubcount.run` and the plugin share one model thread
-  (`hubmodel.ModelWorker`).
+  (`hubmodel.ModelWorker`). Fed the same frames of Einstein 1, the plugin
+  and `run.py hubcount --model` agreed frame for frame (red model half
+  94 / 94). Shifting the model by one frame (odd frames instead of even)
+  moved red's model half from 94 to 106 and the blend from 101 to 107, so
+  part of the model half's error is sampling noise.
 - **The web page (`run.py hubgui`) can turn the fuel model on**: step 3,
   *Fuel model*, a .pt picker and the model's share. Each zone shows its
   colour and model halves while counting, and the page says when the model

@@ -100,6 +100,23 @@ model runs on its own thread, so frc-fms's camera loop is never held up:
 - frc-fms's page shows the counter as `tbavid.fms_counter:ComboCounter`
   (its runner names the plugin). The `--preview` window shows both halves.
 
+Checked against our own counter on Einstein 1, 6-36 s, with the model
+allowed to finish every frame (a GPU stand-in on this CPU):
+- **The plugin and `run.py hubcount --model` agree.** Fed the same frames,
+  the red model half matched frame for frame (94 / 94 over the whole
+  30 s), with both hub plugins loaded as frc-fms loads them. Blue was
+  88 / 87.
+- **`rescore.py` keeps the model.** On a re-encoded clip of the same 30 s
+  it counted red 103 (our counter: 101 on the original video; the
+  re-encode alone moved colour 107 -> 112).
+- **The model half depends on which frames it samples.** It runs on every
+  other frame of a 60 fps camera. Started one frame later, so on the odd
+  frames, red's model half read 106 instead of 94 (+13%) and blue's 84
+  instead of 87. The blended counts moved less: red 107 against 101, blue
+  94 against 95. Colour, which sees every frame, did not move. This is
+  sampling noise in the model half over 30 s, not a plugin fault; the
+  tuning (deploy/HUB_FEED.md) measured whole matches on one phase only.
+
 ## B. Sender: this repo's page posts to frc-fms
 
 Give a URL as the target, with frc-fms's `vision_key` (`server.vision_key`
