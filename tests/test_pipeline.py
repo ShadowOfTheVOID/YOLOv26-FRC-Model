@@ -2891,6 +2891,137 @@ def test_frc_fms_sender():
     check("the console names frc-fms, not 'bioarena ?', when posting to it",
           "frc-fms took it" in line and "bioarena" not in line)
 
+    # frc-fms's control page: its Vision panel shows "<fps> fps <counter>"
+    # or `error` in red, and its "vision ok" pill needs every hub without
+    # one. Posting only `counter` showed "undefined fps" and never went red.
+    check("before the counter reports, no fps is claimed",
+          "fps" not in body["status"]["red"] and body["status"]["red"]["counter"])
+    sq = [[100, 100], [200, 100], [200, 140], [100, 140]]
+    setup = HC2.setup_from_dict({"cameras": [
+        {"name": "rc", "source": "0", "ball_area": 300,
+         "model": {"weights": "m.pt"}, "zones": [{"hub": "red", "outline": sq}]},
+        {"name": "bc", "source": "1", "ball_area": 300,
+         "zones": [{"hub": "blue", "outline": sq}]}]})
+    h = {"rc": NS(fps=lambda: 59.6), "bc": NS(fps=lambda: 60.0)}
+    st = HC2.hub_status(setup, h, stale=[])
+    check("each hub reports its camera's fps and which counter runs",
+          st == {"red": {"fps": 59.6, "counter": "tbavid colour + model"},
+                 "blue": {"fps": 60.0, "counter": "tbavid colour"}})
+    st = HC2.hub_status(setup, h, stale=["bc"], model_off=["rc"])
+    check("a dead camera is an error frc-fms shows in red",
+          st["blue"]["error"] == "no frames from bc")
+    check("a model dropped as too slow is named, but is not an error",
+          "model off" in st["red"]["counter"] and "error" not in st["red"])
+    h["bc"] = NS(fps=lambda: 14.0)
+    check("a camera under MIN_FPS is an error: counts run low",
+          "too slow" in HC2.hub_status(setup, h, stale=[])["blue"]["error"])
+    s.hub_status = HC2.hub_status(setup, {"rc": NS(fps=lambda: 59.6),
+                                          "bc": NS(fps=lambda: 60.0)}, stale=[])
+    s.score("red", 1, captured_at=100.0)
+    s.flush()
+    sent = calls[-1][1]["status"]
+    check("and that is what goes to frc-fms, with the running totals",
+          sent["red"]["fps"] == 59.6 and sent["red"]["session_total"] == 4
+          and sent["blue"]["counter"] == "tbavid colour")
+
+
+def test_model_worker_and_fms_combo():
+    """The model half's thread, shared by our counter and the frc-fms plugin.
+
+    It must never make the camera wait, must say when it skips frames, and
+    must give up when it cannot keep up -- a lagging model held the hub page
+    at 52 against colour's 103 on 4 CPU cores.
+    """
+    import threading
+    import time
+    from tbavid import hubmodel as HM
+    from tbavid import fms_counter as FC
+
+    sq = [[100, 100], [200, 100], [200, 140], [100, 140]]
+    box = lambda x, y: (x - 8, y - 8, x + 8, y + 8)
+    gate = threading.Event()
+
+    class Eye:
+        """Stands in for ModelEye: a ball falling into the hub, one step per
+        frame, and only as fast as `gate` lets it."""
+        prev = None
+        def __init__(self):
+            self.y = 20
+        def detect(self, frame):
+            gate.wait(5)
+            self.y += 15
+            return ([(box(150, self.y), 0.6)] if self.y < 130 else []), []
+
+    rises = []
+    mc = HM.ModelCounter(sq, fps=30.0, min_track=3, vanish=2, reacquire=3)
+    w = HM.ModelWorker(Eye(), {"red": mc}, on_rise=lambda n, tag: rises.append((n, tag)))
+    gate.set()
+    for i in range(20):
+        w.offer(None, i / 30, tag=f"cap{i}")
+        while w._job is not None:
+            time.sleep(0.001)
+    time.sleep(0.2)
+    check("the worker counts the model's ball and hands back the frame's tag",
+          mc.reported == 1 and rises and rises[0][0] == "red"
+          and rises[0][1].startswith("cap"))
+    gate.clear()
+    offs = []
+    slow = HM.ModelWorker(Eye(), {"red": HM.ModelCounter(sq)},
+                          on_rise=lambda n, tag: None,
+                          on_off=lambda o, k, tag: offs.append((o, k)))
+    for i in range(HM.MODEL_WARMUP_FRAMES + 5):
+        slow.offer(None, i / 30)            # never blocks, model stuck
+    gate.set()
+    time.sleep(0.3)
+    check("offer never blocks; a stuck model's frames are counted as skipped",
+          slow.skipped >= HM.MODEL_WARMUP_FRAMES)
+    check("and a model that skipped most of them turns itself off",
+          slow.off and len(offs) == 1)
+    slow.offer(None, 0.0)
+    check("after which it takes no more frames", slow.offered == HM.MODEL_WARMUP_FRAMES + 5)
+
+    class Broken:
+        prev = None
+        def detect(self, frame):
+            raise RuntimeError("MPS out of memory")
+    errs = []
+    b = HM.ModelWorker(Broken(), {}, on_rise=lambda n, tag: None, on_error=errs.append)
+    b.offer(None, 0.0)
+    time.sleep(0.2)
+    check("a model error stops the worker and is reported, not swallowed",
+          b.error == "MPS out of memory" and len(errs) == 1)
+    for x in (w, slow, b):
+        x.close()
+
+    # The frc-fms plugin: same config file keys as ColourCounter, plus a model.
+    base = {"hub": "red", "outline": sq, "ball_area": 300}
+    try:
+        FC.ComboCounter(dict(base))
+        check("ComboCounter without a model is refused", False)
+    except ValueError:
+        check("ComboCounter without a model is refused", True)
+    cc = FC.ComboCounter(dict(base, model="fuel_relabel.pt", model_weight=0.4))
+    check("ComboCounter reads the model and its share from vision.yaml",
+          cc.model["weight"] == 0.4 and cc.model["weights"] == "fuel_relabel.pt")
+    check("plain ColourCounter stays colour only", FC.ColourCounter(dict(base)).model is None)
+    # The blend inside the plugin, with the halves set by hand.
+    from types import SimpleNamespace as NS
+    cc.counters = [NS(reported=10)]
+    cc.models = [NS(reported=4)]
+    cc.worker = NS(off=False, error="")
+    check("the plugin reports the blend of its halves (0.4 x 4 + 0.6 x 10)",
+          cc._zone_count(0) == 8)
+    cc.worker.off = True
+    check("and colour alone once its model is off", cc._zone_count(0) == 10)
+    live = FC.ComboCounter(dict(base, model="m.pt"))
+    t0 = 1_700_000_000.0
+    seen = [live._is_offline(t0 + i / 60) for i in range(5)]
+    check("frames at camera speed are live: the model may skip", not any(seen))
+    re = FC.ComboCounter(dict(base, model="m.pt"))
+    seen = [re._is_offline(t0 + i * 0.5) for i in range(10)]   # 5 s of video at once
+    check("a recording read faster than real time (rescore.py) waits for the model",
+          seen[-1] and re.offline)
+
 
 def test_relabel_video_helpers():
     """The bootstrap labeller's pure parts: tiling, merging, clipping, output.
@@ -3430,7 +3561,7 @@ def main() -> int:
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
-               test_hub_model_blend):
+               test_hub_model_blend, test_model_worker_and_fms_combo):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

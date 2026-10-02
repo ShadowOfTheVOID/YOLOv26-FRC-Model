@@ -214,6 +214,114 @@ def too_slow(offered: int, skipped: int) -> bool:
     return offered >= MODEL_WARMUP_FRAMES and skipped > MODEL_MAX_SKIP * offered
 
 
+class ModelWorker:
+    """The model half on its own thread, fed the newest frame.
+
+    `offer` never blocks: a frame the model has not got to is replaced by
+    the next one and counted as skipped. The colour half never waits for
+    the model -- a frame held for it would be a frame late for the AUTO
+    call. Shared by hubcount.run (our counter) and fms_counter.ComboCounter
+    (inside frc-fms's runner), so both skip and give up the same way.
+
+    `counters` maps a name to its ModelCounter; `on_rise(name, tag)` is
+    called from the worker thread when one rises, `tag` being what was
+    offered with the frame (our counter passes its capture time, which
+    timestamps the score). When the model is `too_slow`, it
+    stops, `off` turns true and `on_off(offered, skipped, tag)` is called once.
+    `on_behind(skipped)` is called at most every 10 s while frames are being
+    skipped. An exception from the model stops the worker and is kept in
+    `error` (and passed to `on_error`) -- a CUDA/MPS failure must not pass
+    silently.
+    """
+
+    def __init__(self, eye, counters: Dict[str, ModelCounter], on_rise,
+                 on_off=None, on_behind=None, on_error=None, name: str = "model"):
+        import threading
+        self.eye = eye
+        self.counters = counters
+        self.on_rise, self.on_off = on_rise, on_off
+        self.on_behind, self.on_error = on_behind, on_error
+        self.offered = self.skipped = 0
+        self.off = False
+        self.error = ""
+        self._job = None
+        self._busy = False
+        self._reset = False
+        self._done = False
+        self._ready = threading.Condition()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name=name)
+        self._thread.start()
+
+    def offer(self, frame, t: float, tag=None) -> None:
+        if self.off or self._done:
+            return
+        with self._ready:
+            self.offered += 1
+            if self._job is not None:
+                self.skipped += 1
+            self._job = (frame, t, tag)
+            self._ready.notify()
+
+    def reset(self) -> None:
+        """After a gap in the picture: forget tracks and the last frame, for
+        the reason the colour half forgets its blobs."""
+        with self._ready:
+            self._job, self._reset = None, True
+
+    def wait_idle(self, timeout: float = 30.0) -> None:
+        """Block until the model has finished every frame offered. For a
+        recording read faster than real time, where nothing may be skipped."""
+        import time
+        end = time.monotonic() + timeout
+        while ((self._job is not None or self._busy) and not self._done
+               and time.monotonic() < end):
+            time.sleep(0.002)
+
+    def close(self) -> None:
+        with self._ready:
+            self._done = True
+            self._ready.notify()
+
+    def _loop(self) -> None:
+        import time
+        said = time.monotonic()
+        while True:
+            with self._ready:
+                while self._job is None and not self._done:
+                    self._ready.wait(0.1)
+                if self._done:
+                    return
+                job, self._job = self._job, None
+                reset, self._reset = self._reset, False
+                self._busy = True
+            if reset:
+                self.eye.prev = None
+                for mc in self.counters.values():
+                    mc.tracker = BallTracker()
+            frame, t, tag = job
+            try:
+                dets, assist = self.eye.detect(frame)
+            except Exception as e:
+                self.error = str(e)
+                self._done = True
+                if self.on_error:
+                    self.on_error(e)
+                return
+            for name, mc in self.counters.items():
+                if mc.update(t, dets, assist):
+                    self.on_rise(name, tag)
+            self._busy = False
+            if too_slow(self.offered, self.skipped):
+                self.off = True
+                self._done = True
+                if self.on_off:
+                    self.on_off(self.offered, self.skipped, tag)
+                return
+            if self.skipped and self.on_behind and time.monotonic() - said > 10.0:
+                said = time.monotonic()
+                self.on_behind(self.skipped)
+
+
 def model_stride(fps: float) -> int:
     """Run the model on every n-th frame so it sees ~MODEL_FPS: the counter's
     windows were tuned there, and every frame doubles the cost for nothing

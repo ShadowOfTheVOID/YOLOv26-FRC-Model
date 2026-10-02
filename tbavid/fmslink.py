@@ -72,6 +72,7 @@ class FmsSender:
         self.peer = "frc-fms"      # what status lines call the other end
         self.counts: Dict[str, int] = {h: 0 for h in HUBS}
         self.info = ""
+        self.hub_status: Dict[str, Dict] = {}
         self.send_errors = 0
         self.last_error = ""
         self.last_reply: Optional[Dict] = None
@@ -126,9 +127,12 @@ class FmsSender:
         """POST everything queued once. True if the FMS took it."""
         with self._lock:
             batch = {h: [e[:] for e in v] for h, v in self._buf.items()}
-            status = {h: {"counter": "tbavid colour crossing",
-                          "session_total": self.counts[h], "info": self.info}
-                      for h in HUBS}
+            # hubcount.run fills hub_status (fps, counter, error) for the
+            # hubs it counts; before it does, nothing is claimed about fps.
+            live = dict(self.hub_status)
+            status = {h: dict(live.get(h) or {"counter": "tbavid colour"},
+                              session_total=self.counts[h], info=self.info)
+                      for h in (live or HUBS)}
         body = {"events": batch, "status": status, "source": "live"}
         sent_at = self.clock()
         try:

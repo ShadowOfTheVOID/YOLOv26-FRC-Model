@@ -1051,8 +1051,9 @@ def run(sender, setup: Setup, realtime: bool = False,
     stop = stop or threading.Event()
     tally = HubTally(setup)
     health = {c.name: Health() for c in setup.cameras}
+    model_off: List[str] = []      # cameras whose model was too slow
     if monitor is not None:
-        monitor.update(health=health, tally=tally, errors=[])
+        monitor.update(health=health, tally=tally, errors=[], model_off=model_off)
     log_lock = threading.Lock()
     log_file = open(log_path, "a", newline="") if log_path else None
     log = csv.writer(log_file) if log_file else None
@@ -1075,58 +1076,43 @@ def run(sender, setup: Setup, realtime: bool = False,
                     round((time.monotonic() - captured) * 1000)])
                 log_file.flush()
 
-    def model_loop(cam: Camera, eye, slot: Dict, ready: threading.Condition) -> None:
-        """The model half: takes the newest frame the camera handed over and
-        drops any it could not get to. The colour half never waits for it --
-        a frame held for the model would be a frame late for the AUTO call."""
-        zones = cam.model_zones()
-        said = time.monotonic()
-        while not stop.is_set():
-            with ready:
-                while slot["job"] is None and not stop.is_set():
-                    ready.wait(0.1)
-                job, slot["job"] = slot["job"], None
-                reset, slot["reset"] = slot["reset"], False
-            if job is None:
-                break
-            if reset:
-                # Same reason the colour blobs are forgotten after a gap.
-                from .trackvis import BallTracker
-                eye.prev = None
-                for z in zones:
-                    z.model.tracker = BallTracker()
-            frame, t, captured = job
-            try:
-                dets, assist = eye.detect(frame)
-            except Exception as e:      # a CUDA/MPS error must not pass silently
-                errors.append(f"{cam.name}: model failed: {e}")
-                stop.set()
-                break
-            for z in zones:
-                if z.model.update(t, dets, assist):
-                    report(cam, z, captured)
-            from .hubmodel import too_slow
-            if too_slow(slot["offered"], slot["dropped"]):
-                # Colour only from here. The zone's count jumps from the blend
-                # to the colour count; if that is lower, HubTally.rise holds
-                # the feed until colour passes what was already sent, so the
-                # feed still never goes down.
-                for z in zones:
-                    z.weight = 0.0
-                slot["off"] = True
-                if monitor is not None:
-                    monitor.setdefault("model_off", []).append(cam.name)
-                out(f"{cam.name}: the model skipped {slot['dropped']} of "
-                    f"{slot['offered']} frames -- turned off for this session, "
-                    f"counting by colour only. Use Apple silicon or a GPU.")
-                for z in zones:
-                    report(cam, z, captured)
-                break
-            if slot["dropped"] and time.monotonic() - said > 10.0:
-                said = time.monotonic()
-                out(f"{cam.name}: the model is behind -- {slot['dropped']} "
-                    f"frames skipped so far; its half of the count will be "
-                    f"low (a faster GPU, or drop \"model\" for colour only)")
+    def start_model(cam: Camera, eye, file_fps: float):
+        """The model half for one camera (hubmodel.ModelWorker)."""
+        from .hubmodel import ModelCounter, ModelWorker, model_stride
+        stride = model_stride(file_fps)
+        zones = {z.name: z for z in cam.model_zones()}
+        for z in zones.values():
+            z.model = ModelCounter(z.counter.poly, file_fps / stride,
+                                   **cam.model["counter"])
+
+        def off(offered, skipped, captured):
+            # Colour only from here. The zone's count jumps from the blend
+            # to the colour count; if that is lower, HubTally.rise holds the
+            # feed until colour passes what was already sent, so the feed
+            # still never goes down.
+            for z in zones.values():
+                z.weight = 0.0
+            model_off.append(cam.name)
+            out(f"{cam.name}: the model skipped {skipped} of {offered} frames "
+                f"-- turned off for this session, counting by colour only. "
+                f"Use Apple silicon or a GPU.")
+            for z in zones.values():
+                report(cam, z, captured)
+
+        def failed(e):
+            errors.append(f"{cam.name}: model failed: {e}")
+            stop.set()
+
+        worker = ModelWorker(
+            eye, {n: z.model for n, z in zones.items()},
+            on_rise=lambda n, captured: report(cam, zones[n], captured),
+            on_off=off, on_error=failed,
+            on_behind=lambda k: out(
+                f"{cam.name}: the model is behind -- {k} frames skipped so "
+                f"far; its half of the count will be low (a faster GPU, or "
+                f"drop \"model\" for colour only)"),
+            name=f"model {cam.name}")
+        return worker, stride
 
     def loop(cam: Camera) -> None:
         import cv2
@@ -1151,18 +1137,9 @@ def run(sender, setup: Setup, realtime: bool = False,
             stop.set()
             return
         file_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        slot: Dict = {"job": None, "dropped": 0, "offered": 0, "reset": False,
-                      "off": False}
-        ready = threading.Condition()
-        stride = 1
+        worker, stride = None, 1
         if eye is not None:
-            from .hubmodel import ModelCounter, model_stride
-            stride = model_stride(file_fps)
-            for z in cam.model_zones():
-                z.model = ModelCounter(z.counter.poly, file_fps / stride,
-                                       **cam.model["counter"])
-            threading.Thread(target=model_loop, args=(cam, eye, slot, ready),
-                             daemon=True, name=f"model {cam.name}").start()
+            worker, stride = start_model(cam, eye, file_fps)
         eyes: Dict[str, ZoneEye] = {}
         started = time.monotonic()
         n = 0
@@ -1198,8 +1175,8 @@ def run(sender, setup: Setup, realtime: bool = False,
                 # after, would be a crossing that never happened.
                 for z in cam.zones:
                     z.counter.prev = []
-                with ready:
-                    slot["job"], slot["reset"] = None, True
+                if worker:
+                    worker.reset()
                 continue
             if not ok:
                 errors.append(f"{cam.name} ({cam.source}): the source "
@@ -1229,19 +1206,16 @@ def run(sender, setup: Setup, realtime: bool = False,
             for z in cam.zones:
                 if z.counter.update(eyes[z.name].blobs(frame)):
                     report(cam, z, captured)
-            if eye is not None and not slot["off"] and (n - 1) % stride == 0:
-                with ready:
-                    slot["offered"] += 1
-                    if slot["job"] is not None:
-                        slot["dropped"] += 1
-                        if monitor is not None:
-                            monitor.setdefault("model_dropped", {})[cam.name] = slot["dropped"]
-                    slot["job"] = (frame, (n - 1) / file_fps, captured)
-                    ready.notify()
+            if worker and (n - 1) % stride == 0:
+                worker.offer(frame, (n - 1) / file_fps, captured)
+                if worker.skipped and monitor is not None:
+                    monitor.setdefault("model_dropped", {})[cam.name] = worker.skipped
             hl.frame(captured, time.monotonic())
             if on_frame:
                 on_frame(cam.name, frame)
         cap.release()
+        if worker:
+            worker.close()
 
     threads = [threading.Thread(target=loop, args=(c,), daemon=True,
                                 name=f"cam {c.name}") for c in setup.cameras]
@@ -1256,6 +1230,9 @@ def run(sender, setup: Setup, realtime: bool = False,
             stale = [s for s, hl in health.items()
                      if now - hl.last_frame > STALE_S]
             sender.info = info_line(health, tally)
+            if now - began > 3.0:
+                # Not before: cameras take a second or two to open.
+                sender.hub_status = hub_status(setup, health, stale, model_off)
             if stale:
                 # A camera takes a second or two to open; only say so after.
                 if not blind_said and now - began > 3.0:
@@ -1283,6 +1260,34 @@ def run(sender, setup: Setup, realtime: bool = False,
     if monitor is not None:
         monitor["errors"] = list(errors)
     return tally
+
+
+def hub_status(setup: Setup, health: Dict[str, "Health"], stale: List[str],
+               model_off: Sequence[str] = ()) -> Dict[str, Dict]:
+    """Each counted hub's health in the shape frc-fms's control page reads
+    (`fps`, `counter`, `error`, `session_total`): its Vision panel shows
+    "<fps> fps <counter>" or the error in red, and its "vision ok" pill
+    needs every hub reporting without one. Posting only `counter` showed
+    "undefined fps" there and never turned the pill red for a dead camera.
+    A hub's fps is its slowest camera's; any of its cameras stale is an
+    error, as it holds bioarena's heartbeat."""
+    out: Dict[str, Dict] = {}
+    for hub in setup.hubs():
+        cams = [c for c in setup.cameras if any(z.hub == hub for z in c.zones)]
+        fps = min(health[c.name].fps() for c in cams) if cams else 0.0
+        dead = [c.name for c in cams if c.name in stale]
+        blended = [c for c in cams if c.model and c.name not in model_off]
+        dropped = [c.name for c in cams if c.model and c.name in model_off]
+        counter = "tbavid colour" + (" + model" if blended else "")
+        if dropped:
+            counter += f" (model off on {', '.join(dropped)}: too slow)"
+        st = {"fps": round(fps, 1), "counter": counter}
+        if dead:
+            st["error"] = f"no frames from {', '.join(dead)}"
+        elif cams and fps < MIN_FPS:
+            st["error"] = f"camera too slow: {fps:.0f} fps"
+        out[hub] = st
+    return out
 
 
 def info_line(health: Dict[str, Health], tally: HubTally) -> str:

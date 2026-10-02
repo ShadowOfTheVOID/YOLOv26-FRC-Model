@@ -24,6 +24,15 @@ the build rather than publishing an empty release.
   9.1%. Needs a GPU or Apple silicon (picked automatically: CUDA, then MPS);
   on 4 CPU cores it ran at 2.6 fps.
   Not yet checked against a hand-counted practice-hub recording.
+- **The colour + model combo inside frc-fms**: `tbavid.fms_counter:ComboCounter`
+  (or `ColourCounter` with `model:`) in frc-fms's `config/vision.yaml`. The
+  model runs on its own thread so frc-fms's camera loop never waits.
+  Live, a model that cannot keep up is dropped and the hub counts by colour.
+  Under `rescore.py` it waits for the model on every frame instead. Run
+  through frc-fms 20524ce's own `run_vision.py` on 4 CPU cores, the model
+  was dropped after 10 s and the totals equalled the colour plugin's.
+  `hubcount.run` and the plugin share one model thread
+  (`hubmodel.ModelWorker`).
 - **The web page (`run.py hubgui`) can turn the fuel model on**: step 3,
   *Fuel model*, a .pt picker and the model's share. Each zone shows its
   colour and model halves while counting, and the page says when the model
@@ -373,6 +382,11 @@ the build rather than publishing an empty release.
 
 ### Fixed
 
+- **frc-fms's control page showed our counter as "undefined fps"** and
+  never flagged a dead camera. The sender now posts each hub's `fps`,
+  `counter` ("tbavid colour + model") and an `error` for a stale camera or
+  one under 28 fps, so its "vision ok" pill tracks it. Checked on frc-fms
+  20524ce's `/control`: "53.1 fps tbavid colour" on both hubs, vision ok.
 - **The page's *Scoreboard* button was dark blue on black.** Buttons now
   take the page's text colour; a link styled as one had kept the browser's.
 - **`run.py hubfeed` printed `bioarena ?` when posting to frc-fms.** It now

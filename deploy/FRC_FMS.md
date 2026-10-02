@@ -18,6 +18,12 @@ Einstein matches (deploy/HUB_FEED.md) it measured 10.1% held-out error at
 measured 17% (30 fps) to 25% (60 fps) for model + tracker counting, which is
 what frc-fms's built-in `zone` counter does. It needs no model and no GPU.
 
+Either way it can also blend in the retrained fuel model (the combo:
+6.8% on the same four, 7-9% expected on a new match; needs Apple silicon or
+a GPU): `ComboCounter` in A, `--model` or the page's *Fuel model* in B.
+Either way frc-fms's control page shows it under *Setup -> Vision* as
+"<fps> fps <counter>", with its "vision ok" pill.
+
 ## A. Plugin: frc-fms runs our counter
 
 In frc-fms's `config/vision.yaml`:
@@ -65,6 +71,32 @@ card, and it measured 98 px against a real 272.
 frc-fms's recordings and `rescore.py` work unchanged with the plugin. They
 only call `process(frame, t)`.
 
+### The combo in the plugin
+
+```yaml
+defaults:
+  counter: "tbavid.fms_counter:ComboCounter"
+  model: /path/to/fuel_relabel.pt
+  model_weight: 0.5       # optional; the tuned value
+  device: mps             # optional; cuda, then mps, then cpu otherwise
+  fps: 60
+```
+
+The hub keys are ColourCounter's. Ultralytics must be installed where
+frc-fms's vision runs (its `vision/requirements.txt` already has it). The
+model runs on its own thread, so frc-fms's camera loop is never held up:
+- **Live:** a model that skips more than 20% of its frames after 10 s is
+  turned off and the hub counts by colour. The console says
+  `[tbavid] hub red: the model skipped 311 of 320 frames -- turned off`,
+  which is what happened running frc-fms's `run_vision.py` on this
+  container's 4 CPU cores. The posted totals were then exactly the colour
+  plugin's (red 108, blue 152 on Einstein 1).
+- **`rescore.py`:** it reads a recording faster than real time. The plugin
+  sees video time running ahead of the clock and waits for the model on
+  every frame, so a re-count skips nothing.
+- frc-fms's page shows the counter as `tbavid.fms_counter:ComboCounter`
+  (its runner names the plugin). The `--preview` window shows both halves.
+
 ## B. Sender: this repo's page posts to frc-fms
 
 Give a URL as the target, with frc-fms's `vision_key` (`server.vision_key`
@@ -90,6 +122,13 @@ frc-fms (`tbavid/fmslink.py`):
 - **Status.** The page and `/board` show "sent to frc-fms" or "frc-fms not
   answering". The match score is on frc-fms's own `/display`, which knows
   the periods and active hubs.
+- **frc-fms's control page** (*Setup -> Vision*, and the "vision ok" pill)
+  gets each hub's frame rate and counter, e.g. "59.0 fps tbavid colour +
+  model", in the `status` frc-fms reads. A dead camera or one under 28 fps
+  is sent as an error, which turns the pill red. A model dropped for being
+  too slow is named there ("model off ... too slow") but is not an error,
+  as counting goes on by colour. Before 2026-10-02 only the counter's name
+  was sent, and that panel read "undefined fps".
 
 Practice mode (the built-in bioarena stand-in) does not apply. Run frc-fms
 itself to rehearse, or its mock vision.

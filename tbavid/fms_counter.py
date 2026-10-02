@@ -46,6 +46,28 @@ the counter learns one ball from the crossings anyway.
 
 Optional: `blur` (0.3), `remove_static` (false), `fps` (30).
 
+The colour + model combo (tbavid/hubmodel.py: 6.8% mean error on the four
+Einstein matches against 10.1% for colour alone; 7-9% expected on a match
+nobody tuned on) is the same plugin with a model added:
+
+    hubs:
+      red:
+        counter: "tbavid.fms_counter:ComboCounter"
+        model: models/fuel_relabel.pt
+        model_weight: 0.5          # the model's share; 0.5 is the tuned value
+        device: mps                # optional: cuda / mps / cpu, else the best found
+        outline: [[810, 300], [1110, 300], [1100, 470], [820, 470]]
+        ball_area: 900
+
+`ColourCounter` with `model:` is the same thing; `ComboCounter` refuses to
+start without one. The model runs on its own thread, so frc-fms's camera
+loop never waits for it, and a model that cannot keep up (more than 20% of
+its frames skipped after 10 s) is dropped and the hub counts by colour --
+the console says so. Under rescore.py, which reads a recording faster than
+real time, the plugin notices and waits for the model on every frame
+instead, so a re-count skips nothing. Exit lines stay colour only. Needs Ultralytics in the
+environment frc-fms's vision runs in, and a GPU or Apple silicon.
+
 Like every frc-fms counter it returns NEW fuel for the frame; frc-fms
 timestamps and buckets them.
 """
@@ -78,6 +100,18 @@ class ColourCounter:
                              f"this camera) -- measure it with run.py hubfeed --measure 5")
         self.counters: List = []
         self.eyes: List = []
+        # The model half (optional): weights, share, and the worker once built.
+        from .hubmodel import DEFAULT_WEIGHT, parse_model
+        self.model = parse_model({"weights": cfg["model"],
+                                  "weight": cfg.get("model_weight", DEFAULT_WEIGHT),
+                                  "device": cfg.get("device", "")}) \
+            if cfg.get("model") else None
+        self.models: List = []          # a ModelCounter per zone, None for exits
+        self.worker = None
+        self.frames = 0
+        self.offline = False
+        self._clock0 = None          # (first t, wall clock then)
+        self._said_off = False
 
     def _zone_specs(self, cfg: dict) -> list:
         """[(kind, points, out)] from whichever keys the hub gives."""
@@ -117,13 +151,72 @@ class ColourCounter:
             self.counters.append(c)
             self.eyes.append(HC.ZoneEye(HC.region_of(c.poly, self.ball_area, w, h),
                                         self.remove_static, self.fps))
+        if self.model:
+            self._build_model()
+
+    def _build_model(self) -> None:
+        from .hubmodel import ModelCounter, ModelEye, ModelWorker, model_stride
+        self.stride = model_stride(self.fps)
+        outlines = {i: c.poly for i, (c, (kind, _, _)) in
+                    enumerate(zip(self.counters, self.zones)) if kind == "outline"}
+        self.models = [ModelCounter(outlines[i], self.fps / self.stride,
+                                    **self.model["counter"]) if i in outlines else None
+                       for i in range(len(self.counters))]
+        eye = ModelEye(self.model["weights"], outlines, self.model["device"])
+        self.worker = ModelWorker(
+            eye, {i: m for i, m in enumerate(self.models) if m is not None},
+            on_rise=lambda i, tag: None,       # read back in process()
+            on_off=lambda offered, skipped, tag: print(
+                f"[tbavid] hub {self.hub}: the model skipped {skipped} of "
+                f"{offered} frames -- turned off, counting by colour only. "
+                f"Use Apple silicon or a GPU.", flush=True),
+            on_error=lambda e: print(f"[tbavid] hub {self.hub}: model failed, "
+                                     f"counting by colour only: {e}", flush=True),
+            name=f"tbavid model {self.hub}")
+
+    def _is_offline(self, t: float) -> bool:
+        """frc-fms's rescore.py feeds a recording as fast as it decodes, with
+        the recording's own timestamps. Live, frames come at camera speed and
+        the model may skip some; offline it must not, or it would skip nearly
+        every frame and drop itself, so once video time runs well ahead of
+        the clock (1.5x over 2 s) the plugin waits for the model on each frame,
+        as run.py hubcount --model does."""
+        import time
+        if self.offline:
+            return True
+        now = time.monotonic()
+        if self._clock0 is None:
+            self._clock0 = (t, now)
+            return False
+        dt, dw = t - self._clock0[0], now - self._clock0[1]
+        if dt >= 2.0 and dt > 1.5 * dw:
+            self.offline = True
+        return self.offline
+
+    def _zone_count(self, i: int) -> int:
+        from .hubmodel import blend
+        colour = self.counters[i].reported
+        m = self.models[i] if self.models else None
+        if m is None or self.worker is None or self.worker.off or self.worker.error:
+            return colour
+        return blend(colour, m.reported, self.model["weight"])
 
     def process(self, frame, t: float) -> int:
         if not self.counters:
             self._build(frame)
-        new = 0
         for c, eye in zip(self.counters, self.eyes):
-            new += c.update(eye.blobs(frame))
+            c.update(eye.blobs(frame))
+        if self.worker is not None and self.frames % self.stride == 0:
+            self.worker.offer(frame, t)
+            if self._is_offline(t):
+                self.worker.wait_idle()
+        self.frames += 1
+        # The blend can sit below what was already reported (when a model
+        # that fell behind is dropped and colour alone is lower); frc-fms adds
+        # events, so nothing is taken back -- new fuel waits until the count
+        # passes the total again.
+        now = sum(self._zone_count(i) for i in range(len(self.counters)))
+        new = max(0, now - self.total)
         self.total += new
         return new
 
@@ -133,6 +226,22 @@ class ColourCounter:
         for c in self.counters:
             pts = np.array(c.poly, np.int32).reshape(-1, 1, 2)
             cv2.polylines(frame, [pts], True, (0, 255, 255), 2)
-        cv2.putText(frame, f"{self.hub}: {self.total}", (20, 50),
+        label = f"{self.hub}: {self.total}"
+        if self.worker is not None:
+            colour = sum(c.reported for c in self.counters)
+            model = sum(m.reported for m in self.models if m is not None)
+            label += (f"  (colour {colour}, model off)" if self.worker.off or self.worker.error
+                      else f"  (colour {colour}, model {model})")
+        cv2.putText(frame, label, (20, 50),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 255, 255), 3)
         return frame
+
+
+class ComboCounter(ColourCounter):
+    """ColourCounter with the fuel model blended in; `model:` is required."""
+
+    def __init__(self, cfg: dict):
+        if not cfg.get("model"):
+            raise ValueError(f"hub {cfg.get('hub', '?')}: ComboCounter needs "
+                             f"model: path/to/fuel_relabel.pt in config/vision.yaml")
+        super().__init__(cfg)
