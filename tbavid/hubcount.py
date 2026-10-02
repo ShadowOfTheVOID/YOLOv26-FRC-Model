@@ -76,6 +76,8 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from .hubmodel import parse_model
+
 Point = Tuple[float, float]
 # cx, cy, area (px), then optionally the pixel covariance cxx, cyy, cxy --
 # the blob's spread, which the blur correction reads its length from.
@@ -714,6 +716,19 @@ class Zone:
         self.out = tuple(map(float, out)) if out else None
         self.outline = [tuple(map(float, p)) for p in outline] if outline else None
         self.counter = self.new_counter(ball_area, blur)
+        # The model twin (hubmodel.ModelCounter), attached when the camera
+        # opens and its frame rate is known; `weight` is its share.
+        self.model = None
+        self.weight = 0.0
+
+    @property
+    def reported(self) -> int:
+        """The zone's count: the colour counter's, or its blend with the
+        model's when the camera has one."""
+        if self.model is None:
+            return self.counter.reported
+        from .hubmodel import blend
+        return blend(self.counter.reported, self.model.reported, self.weight)
 
     @property
     def kind(self) -> str:
@@ -730,7 +745,8 @@ class Zone:
 class Camera:
     def __init__(self, name: str, source: str, ball_area: float,
                  zones: List[Zone], fps: float = 0.0, size: str = "",
-                 blur: float = DEFAULT_BLUR, remove_static: bool = False):
+                 blur: float = DEFAULT_BLUR, remove_static: bool = False,
+                 model: Optional[Dict] = None):
         self.name = name
         self.source = str(source)
         self.ball_area = float(ball_area)
@@ -739,6 +755,15 @@ class Camera:
         self.size = size
         self.blur = float(blur)
         self.remove_static = bool(remove_static)
+        # hubmodel.parse_model's dict, or None for colour only. Exit lines
+        # stay colour only: the model counter scores a ball that vanishes in
+        # the outline's box, and an exit line has no box.
+        self.model = model
+        for z in zones:
+            z.weight = model["weight"] if model and z.outline else 0.0
+
+    def model_zones(self) -> List["Zone"]:
+        return [z for z in self.zones if z.outline] if self.model else []
 
 
 class Setup:
@@ -870,9 +895,13 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
                                       min(max(blur, 0.0), 1.0)))
             except ValueError as e:
                 raise ValueError(f"zone {zname!r}: {e}")
+        try:
+            model = parse_model(c.get("model"))
+        except ValueError as e:
+            raise ValueError(f"camera {name!r}: {e}")
         cams.append(Camera(name, c["source"], area, zones,
                            float(c.get("fps") or 0), str(c.get("size") or ""),
-                           blur, bool(c.get("remove_static", False))))
+                           blur, bool(c.get("remove_static", False)), model))
     setup = Setup(cams, cfg.get("combine"), measuring)
     setup.notes = notes
     return setup
@@ -901,6 +930,10 @@ def setup_to_dict(setup: "Setup") -> Dict:
         d["blur"] = c.blur          # always: 0 is a choice, absent means 0.3
         if c.remove_static:
             d["remove_static"] = True
+        if c.model:
+            d["model"] = dict({k: c.model[k] for k in ("weights", "weight")},
+                              **c.model["counter"],
+                              **({"device": c.model["device"]} if c.model["device"] else {}))
         cams.append(d)
     return {"rules": RULES, "combine": dict(setup.combine), "cameras": cams}
 
@@ -920,6 +953,23 @@ def load_setup(path: str, measuring: bool = False) -> Setup:
                 and os.path.exists(os.path.join(base, src))):
             c["source"] = os.path.join(base, src)
     return setup_from_dict(cfg, measuring)
+
+
+def add_model(setup: Setup, weights: str, weight: Optional[float] = None,
+              device: str = "") -> None:
+    """--model on the command line: blend that model into every camera,
+    replacing any "model" the setup file gave. Raises ValueError on a bad
+    weight or a missing file."""
+    import os
+    if not os.path.exists(weights):
+        raise ValueError(f"no model file {weights!r}")
+    raw = {"weights": weights, "device": device}
+    if weight is not None:
+        raw["weight"] = weight
+    for cam in setup.cameras:
+        cam.model = parse_model(raw)
+        for z in cam.zones:
+            z.weight = cam.model["weight"] if z.outline else 0.0
 
 
 def setup_from_flags(source: str, outlines: Dict[str, Sequence[Point]],
@@ -955,7 +1005,7 @@ class HubTally:
         self._lock = threading.Lock()
 
     def value(self, hub: str) -> int:
-        counts = sorted(z.counter.reported for z in self.zones[hub])
+        counts = sorted(z.reported for z in self.zones[hub])
         if not counts:
             return 0
         how = self.setup.combine[hub]
@@ -1012,8 +1062,71 @@ def run(sender, setup: Setup, realtime: bool = False,
                       "capture_lag_ms"])
     errors: List[str] = []
 
+    def report(cam: Camera, z: Zone, captured: float) -> None:
+        sent = tally.rise(z.hub)
+        if sent:
+            sender.score(z.hub, sent, captured)
+        if log:
+            with log_lock:
+                log.writerow([
+                    time.strftime("%Y-%m-%dT%H:%M:%S"), sender.session,
+                    cam.name, z.name, z.hub, z.reported,
+                    z.counter.net, tally.value(z.hub), sent,
+                    round((time.monotonic() - captured) * 1000)])
+                log_file.flush()
+
+    def model_loop(cam: Camera, eye, slot: Dict, ready: threading.Condition) -> None:
+        """The model half: takes the newest frame the camera handed over and
+        drops any it could not get to. The colour half never waits for it --
+        a frame held for the model would be a frame late for the AUTO call."""
+        zones = cam.model_zones()
+        said = time.monotonic()
+        while not stop.is_set():
+            with ready:
+                while slot["job"] is None and not stop.is_set():
+                    ready.wait(0.1)
+                job, slot["job"] = slot["job"], None
+                reset, slot["reset"] = slot["reset"], False
+            if job is None:
+                break
+            if reset:
+                # Same reason the colour blobs are forgotten after a gap.
+                from .trackvis import BallTracker
+                eye.prev = None
+                for z in zones:
+                    z.model.tracker = BallTracker()
+            frame, t, captured = job
+            try:
+                dets, assist = eye.detect(frame)
+            except Exception as e:      # a CUDA/MPS error must not pass silently
+                errors.append(f"{cam.name}: model failed: {e}")
+                stop.set()
+                break
+            for z in zones:
+                if z.model.update(t, dets, assist):
+                    report(cam, z, captured)
+            if slot["dropped"] and time.monotonic() - said > 10.0:
+                said = time.monotonic()
+                out(f"{cam.name}: the model is behind -- {slot['dropped']} "
+                    f"frames skipped so far; its half of the count will be "
+                    f"low (a faster GPU, or drop \"model\" for colour only)")
+
     def loop(cam: Camera) -> None:
         import cv2
+        eye = None
+        if cam.model:
+            # Before the camera opens, so seconds of loading do not become
+            # seconds of buffered frames.
+            from .hubmodel import ModelEye
+            try:
+                eye = ModelEye(cam.model["weights"],
+                               {z.name: z.counter.poly for z in cam.model_zones()},
+                               cam.model["device"])
+            except Exception as e:
+                errors.append(f"{cam.name}: could not load the model "
+                              f"{cam.model['weights']!r}: {e}")
+                stop.set()
+                return
         try:
             cap = open_source(cam.source, cam.fps, cam.size)
         except SystemExit as e:
@@ -1021,6 +1134,17 @@ def run(sender, setup: Setup, realtime: bool = False,
             stop.set()
             return
         file_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        slot: Dict = {"job": None, "dropped": 0, "reset": False}
+        ready = threading.Condition()
+        stride = 1
+        if eye is not None:
+            from .hubmodel import ModelCounter, model_stride
+            stride = model_stride(file_fps)
+            for z in cam.model_zones():
+                z.model = ModelCounter(z.counter.poly, file_fps / stride,
+                                       **cam.model["counter"])
+            threading.Thread(target=model_loop, args=(cam, eye, slot, ready),
+                             daemon=True, name=f"model {cam.name}").start()
         eyes: Dict[str, ZoneEye] = {}
         started = time.monotonic()
         n = 0
@@ -1056,6 +1180,8 @@ def run(sender, setup: Setup, realtime: bool = False,
                 # after, would be a crossing that never happened.
                 for z in cam.zones:
                     z.counter.prev = []
+                with ready:
+                    slot["job"], slot["reset"] = None, True
                 continue
             if not ok:
                 errors.append(f"{cam.name} ({cam.source}): the source "
@@ -1082,22 +1208,15 @@ def run(sender, setup: Setup, realtime: bool = False,
                                                   cam.ball_area, w, h),
                                         cam.remove_static, file_fps)
                         for z in cam.zones}
-            touched = []
             for z in cam.zones:
                 if z.counter.update(eyes[z.name].blobs(frame)):
-                    touched.append(z)
-            for z in touched:
-                sent = tally.rise(z.hub)
-                if sent:
-                    sender.score(z.hub, sent, captured)
-                if log:
-                    with log_lock:
-                        log.writerow([
-                            time.strftime("%Y-%m-%dT%H:%M:%S"), sender.session,
-                            cam.name, z.name, z.hub, z.counter.reported,
-                            z.counter.net, tally.value(z.hub), sent,
-                            round((time.monotonic() - captured) * 1000)])
-                        log_file.flush()
+                    report(cam, z, captured)
+            if eye is not None and (n - 1) % stride == 0:
+                with ready:
+                    if slot["job"] is not None:
+                        slot["dropped"] += 1
+                    slot["job"] = (frame, (n - 1) / file_fps, captured)
+                    ready.notify()
             hl.frame(captured, time.monotonic())
             if on_frame:
                 on_frame(cam.name, frame)
@@ -1172,7 +1291,7 @@ def status_line(sender, health: Dict[str, Health], tally: HubTally) -> str:
         zs = tally.zones[hub]
         if not zs:
             continue
-        detail = ", ".join(f"{z.name} {z.counter.reported}" for z in zs)
+        detail = ", ".join(f"{z.name} {z.reported}" for z in zs)
         how = f" {tally.setup.combine[hub]}" if len(zs) > 1 else ""
         parts.append(f"{hub} {tally.value(hub)}{how} [{detail}]")
     errs = f"  send errors {sender.send_errors}: {sender.last_error}" \
@@ -1263,6 +1382,18 @@ def count_recording(setup: Setup, video: str, camera: str = "",
     if first:
         cap.set(cv2.CAP_PROP_POS_FRAMES, first)
     eyes = None
+    model_eye, stride = None, 1
+    if cam.model:
+        # In step with the frames here, not on a thread: offline there is no
+        # deadline, and a skipped frame would make the count depend on speed.
+        from .hubmodel import ModelCounter, ModelEye, model_stride
+        model_eye = ModelEye(cam.model["weights"],
+                             {z.name: z.counter.poly for z in cam.model_zones()},
+                             cam.model["device"])
+        stride = model_stride(fps)
+        for z in cam.model_zones():
+            z.model = ModelCounter(z.counter.poly, fps / stride,
+                                   **cam.model["counter"])
     timeline: List[Tuple[float, int, int]] = []
     fi, next_mark, began = first, start, time.monotonic()
     while (not last or fi < last) and not (stop and stop.is_set()):
@@ -1276,6 +1407,10 @@ def count_recording(setup: Setup, video: str, camera: str = "",
         for z, eye in eyes:
             z.counter.update(eye.blobs(frame))
         t = fi / fps
+        if model_eye is not None and (fi - first) % stride == 0:
+            dets, assist = model_eye.detect(frame)
+            for z in cam.model_zones():
+                z.model.update(t, dets, assist)
         if t >= next_mark:
             timeline.append((round(t, 3), tally.value("red"), tally.value("blue")))
             next_mark += every
@@ -1293,7 +1428,9 @@ def count_recording(setup: Setup, video: str, camera: str = "",
             "took_s": round(took, 2),
             "speed": round((fi - first) / took, 1) if took > 0 else 0.0,
             "red": final[1], "blue": final[2], "timeline": timeline,
-            "zones": {z.name: z.counter.reported for z in cam.zones}}
+            "zones": {z.name: z.reported for z in cam.zones},
+            "colour": {z.name: z.counter.reported for z in cam.zones},
+            "model": {z.name: z.model.reported for z in cam.model_zones()}}
 
 
 def write_timeline(result: Dict, path: str) -> None:

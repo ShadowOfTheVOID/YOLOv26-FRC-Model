@@ -765,6 +765,7 @@ def cmd_hubfeed(args, cfg):
                 args.ball_area, args.cam_fps, args.cam_size)
         except ValueError as e:
             raise SystemExit(str(e))
+    _model_flags(setup, args)
 
     if args.calibrate:
         cams = [c for c in setup.cameras
@@ -817,6 +818,9 @@ def cmd_hubfeed(args, cfg):
     for cam in setup.cameras:
         print(f"  {cam.name}: {cam.source}, ball {cam.ball_area:.0f} px, "
               f"zones {', '.join(f'{z.name}->{z.hub}' for z in cam.zones)}")
+        if cam.model:
+            print(f"    blended with {cam.model['weights']} at weight "
+                  f"{cam.model['weight']} (needs a GPU or Apple silicon to keep up)")
     for hub in setup.hubs():
         n = len(setup.zones(hub))
         if n > 1:
@@ -831,6 +835,26 @@ def cmd_hubfeed(args, cfg):
     return 0
 
 
+def _model_flags(setup, args):
+    """--model / --model-weight / --device: blend the fuel model into every
+    camera's count (tbavid/hubmodel.py)."""
+    from tbavid import hubcount
+
+    if args.model:
+        try:
+            hubcount.add_model(setup, args.model, args.model_weight, args.device)
+        except ValueError as e:
+            raise SystemExit(f"--model: {e}")
+    elif args.model_weight is not None:
+        for cam in setup.cameras:
+            if not cam.model:
+                raise SystemExit(f"--model-weight: camera {cam.name!r} has no "
+                                 f"model; give --model too")
+            cam.model["weight"] = args.model_weight
+            for z in cam.zones:
+                z.weight = args.model_weight if z.outline else 0.0
+
+
 def cmd_hubcount(args, cfg):
     """Count fuel into each hub from recordings, for scouting: fast, on video time."""
     from tbavid import hubcount
@@ -839,6 +863,7 @@ def cmd_hubcount(args, cfg):
         setup = hubcount.load_setup(args.setup)
     except (OSError, ValueError) as e:
         raise SystemExit(f"--setup {args.setup}: {e}")
+    _model_flags(setup, args)
     for note in setup.notes:
         print(f"! {note}")
     if args.csv and len(args.videos) > 1:
@@ -850,11 +875,18 @@ def cmd_hubcount(args, cfg):
                                          args.start, args.end, args.every)
         except ValueError as e:
             raise SystemExit(str(e))
+        except ImportError as e:
+            raise SystemExit(f"the model needs requirements-detect.txt: {e}")
         out = args.csv or str(Path(video).with_suffix("")) + "_hubcount.csv"
         hubcount.write_timeline(r, out)
         print(f"{video}: red {r['red']}, blue {r['blue']} over {r['seconds']} s "
               f"({r['frames']} frames at {r['speed']} fps, "
               f"{r['speed'] / r['fps']:.1f}x real time) -> {out}")
+        if r["model"]:
+            for z, n in r["zones"].items():
+                if z in r["model"]:
+                    print(f"  {z}: {n} = colour {r['colour'][z]} blended with "
+                          f"model {r['model'][z]}")
     return 0
 
 
@@ -1272,6 +1304,14 @@ def main(argv=None):
     p.add_argument("--count", help="the hand count for --calibrate, e.g. "
                                    "red=23,blue=0")
     p.add_argument("--log", help="append every count to this CSV")
+    p.add_argument("--model", metavar="WEIGHTS.PT",
+                   help="blend this fuel model's count into every camera's "
+                        "(e.g. fuel_relabel.pt); see tbavid/hubmodel.py")
+    p.add_argument("--model-weight", dest="model_weight", type=float,
+                   help="the model's share of the blended count, 0-1 "
+                        "(default: the tuned value)")
+    p.add_argument("--device", default="",
+                   help="for --model: cuda, mps or cpu (default: best found)")
     p.set_defaults(func=cmd_hubfeed)
 
     p = sub.add_parser("hubcount",
@@ -1290,6 +1330,14 @@ def main(argv=None):
                    help="seconds between timeline rows (default 0.5)")
     p.add_argument("--csv", help="where to write the timeline (default "
                                  "<video>_hubcount.csv)")
+    p.add_argument("--model", metavar="WEIGHTS.PT",
+                   help="blend this fuel model's count into every camera's "
+                        "(e.g. fuel_relabel.pt); see tbavid/hubmodel.py")
+    p.add_argument("--model-weight", dest="model_weight", type=float,
+                   help="the model's share of the blended count, 0-1 "
+                        "(default: the tuned value)")
+    p.add_argument("--device", default="",
+                   help="for --model: cuda, mps or cpu (default: best found)")
     p.set_defaults(func=cmd_hubcount)
 
     p = sub.add_parser("track",

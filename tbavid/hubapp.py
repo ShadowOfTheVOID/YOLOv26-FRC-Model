@@ -584,7 +584,7 @@ class HubController:
         live["slow"] = slow_cameras(health) if running else {}
         tally = self.monitor.get("tally")
         if tally is not None:
-            live["zones"] = {z.name: z.counter.reported
+            live["zones"] = {z.name: z.reported
                              for zs in tally.zones.values() for z in zs}
         out["live"] = live
         return out

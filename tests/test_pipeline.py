@@ -3251,7 +3251,8 @@ def test_hub_feed_needs_no_opencv_to_load():
         elif isinstance(node, ast.ImportFrom) and node.module:
             found |= {node.module.split(".")[0]} & third
     check("hubfeed.py imports no third-party package", not found)
-    for rel in ("tbavid/hubcount.py", "tbavid/hubapp.py", "tbavid/hubweb.py"):
+    for rel in ("tbavid/hubcount.py", "tbavid/hubapp.py", "tbavid/hubweb.py",
+                "tbavid/hubmodel.py"):
         top = ast.parse((root / rel).read_text()).body
         check(f"{rel} imports cv2, numpy and tkinter only inside functions",
               not any(isinstance(n, (ast.Import, ast.ImportFrom)) and
@@ -3267,6 +3268,103 @@ def test_hub_feed_needs_no_opencv_to_load():
                    if isinstance(n, ast.Import) else
                    (n.module or "").split(".")[0] in {"cv2", "numpy"})
                   for n in top))
+
+
+def test_hub_model_blend():
+    """The fuel model as a second hub counter, blended with the colour one.
+
+    Colour over-counts (balls clipping the rim and dropping behind the hub
+    look like scores) and the model under-counts (the tracker drops balls
+    fired in streams); on Einstein 1, held out from training, colour was
+    9.1% off the official checkpoints, the model 12.1%, their mean 7.8%.
+    The blend must keep the feed's rule: never down.
+    """
+    from tbavid import hubcount as HC
+    from tbavid import hubmodel as HM
+
+    sq = [[100, 100], [200, 100], [200, 140], [100, 140]]
+    mc = HM.ModelCounter(sq, fps=30.0, min_track=3, vanish=2, reacquire=3)
+    box = lambda x, y: (x - 8, y - 8, x + 8, y + 8)
+    rises = 0
+    for i, y in enumerate(range(20, 130, 15)):          # falls into the hub
+        rises += mc.update(i / 30, [(box(150, y), 0.6)])
+    for j in range(8):                                   # and is gone
+        rises += mc.update((i + 1 + j) / 30, [])
+    check("a ball that falls into the hub and vanishes is one score",
+          mc.reported == 1 and rises == 1)
+    mc2 = HM.ModelCounter(sq, fps=30.0, min_track=3, vanish=2, reacquire=3)
+    for i, x in enumerate(range(-40, 360, 20)):          # passes over it
+        mc2.update(i / 30, [(box(x, 60), 0.6)])
+    for j in range(8):
+        mc2.update(1 + j / 30, [])
+    check("a ball that flies over the hub and leaves is not", mc2.reported == 0)
+    far = HM.ModelCounter(sq)
+    check("detections far from the hub are not the hub's",
+          far.near(box(150, 120)) and not far.near(box(900, 120)))
+    check("weak detections are ignored, as in the tuning",
+          HM.KEEP_CONF > HM.DET_CONF)
+
+    check("the crop covers the outline and stays in the frame",
+          HM.crop_box(sq, 1920, 1080) == (0, 0, 640, 640)
+          and HM.crop_box([[1800, 1000], [1900, 1000], [1900, 1060]], 1920, 1080)
+          == (1280, 440, 1920, 1080))
+    big = HM.crop_box([[0, 500], [600, 500], [600, 560]], 1920, 1080)
+    check("a close camera's big outline gets a bigger crop",
+          big[2] - big[0] == 1080)
+    check("the model runs at ~30 fps: every other frame of a 60 fps camera",
+          HM.model_stride(60) == 2 and HM.model_stride(30) == 1
+          and HM.model_stride(0) == 1)
+
+    import random as _r
+    rng = _r.Random(3)
+    c = m = last = 0
+    ok = True
+    for _ in range(500):
+        c += rng.randint(0, 2)
+        m += rng.randint(0, 2)
+        v = HM.blend(c, m, 0.4)
+        ok &= v >= last
+        last = v
+    check("a blend of rising counts never falls", ok)
+    check("weight 0 is colour alone, 1 the model alone",
+          HM.blend(10, 4, 0.0) == 10 and HM.blend(10, 4, 1.0) == 4
+          and HM.blend(10, 4, 0.5) == 7)
+
+    cfg = {"cameras": [{"name": "a", "source": "0", "ball_area": 300,
+                        "model": {"weights": "fuel_relabel.pt", "weight": 0.4,
+                                  "reacquire": 3},
+                        "zones": [{"hub": "red", "outline": sq},
+                                  {"hub": "blue", "line": [[0, 0], [10, 0]],
+                                   "out": [5, 5]}]}]}
+    setup = HC.setup_from_dict(cfg)
+    cam = setup.cameras[0]
+    check("a camera's model entry is read, defaults filled in",
+          cam.model["weight"] == 0.4 and cam.model["counter"]["reacquire"] == 3
+          and cam.model["counter"]["vanish"] == HM.DEFAULT_MODEL["vanish"])
+    check("exit lines stay colour only: the model needs an outline's box",
+          [z.name for z in cam.model_zones()] == ["a/red0"]
+          and cam.zones[1].weight == 0.0)
+    back = HC.setup_from_dict(HC.setup_to_dict(setup)).cameras[0].model
+    check("and saved back unchanged", back == cam.model)
+    zr = cam.zones[0]
+    zr.counter.reported = 10
+    check("before the model is attached the zone reads its colour count",
+          zr.reported == 10)
+    zr.model = HM.ModelCounter(sq)
+    zr.model.reported = 5
+    check("with it, the zone and the hub read the blend",
+          zr.reported == 8 and HC.HubTally(setup).value("red") == 8)
+    for bad, why in (({"weight": 0.4}, "a model with no weights file"),
+                     ({"weights": "x.pt", "weight": 1.5}, "a weight above 1")):
+        try:
+            HC.setup_from_dict({"cameras": [dict(cfg["cameras"][0], model=bad)]})
+            check(f"{why} is refused", False)
+        except ValueError:
+            check(f"{why} is refused", True)
+    plain = HC.setup_from_dict({"cameras": [dict(cfg["cameras"][0], model=None)]})
+    check("no model entry: colour only, as before",
+          plain.cameras[0].model is None and plain.cameras[0].model_zones() == []
+          and "model" not in HC.setup_to_dict(plain)["cameras"][0])
 
 
 def main() -> int:
@@ -3288,7 +3386,8 @@ def main() -> int:
                test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
-               test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex):
+               test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
+               test_hub_model_blend):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
