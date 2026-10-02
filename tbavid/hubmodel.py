@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .count import BallCounter
+from .count import REACQUIRE_PX, BallCounter
 from .trackvis import ASSIST_CONF, BallTracker
 
 Point = Tuple[float, float]
@@ -47,11 +47,21 @@ MODEL_FPS = 30.0        # tuned at 30 fps: every other frame of a 60 fps source
 DET_CONF = 0.05         # what the model reports; the tracker uses >= KEEP_CONF
 KEEP_CONF = 0.1
 
-# Tuned on Einstein 1/4/5/8 (see CHANGELOG): the BallCounter windows, in
-# 30 fps frames, and whether colour_assist adds moving yellow blobs.
-DEFAULT_MODEL = {"min_track": 5, "vanish": 2, "reacquire": 6,
-                 "require_entry": False, "pad": 0, "assist": False}
-DEFAULT_WEIGHT = 0.5    # the model's share of the blended count
+# Tuned on Einstein 4/5/8/1 with fuel_relabel.pt (deploy/HUB_FEED.md, "The
+# combo, tuned"): the BallCounter windows in 30 fps frames, the hub box's pad
+# in outline widths (15 px on a 194 px broadcast outline), and whether
+# colour_assist adds moving yellow blobs. The settings the three-match fits
+# agreed on; they also hold a score for the shortest time tried -- gone 2
+# frames, not back within 2 -- about 170 ms at 30 fps where reacquire 6 took
+# 300 ms, which the AUTO call's ~200 ms budget needs.
+DEFAULT_MODEL = {"min_track": 2, "vanish": 2, "reacquire": 2,
+                 "require_entry": True, "pad": 0.08, "assist": False}
+# The model's share. 0.7 fit Einstein 4/5/8 best, but the model trained on
+# those three; on Einstein 1, which it never saw, 0.5-0.6 was better (4.3% /
+# 4.2% against 4.9% at 0.7) and the fits were flat from 0.5 to 0.7 (6.9 /
+# 6.6 / 6.7%), so the plain mean -- the least trust in the model.
+DEFAULT_WEIGHT = 0.5
+REF_OUTLINE_PX = 194.0  # the broadcast outline width REACQUIRE_PX was set on
 
 
 def crop_box(poly: Sequence[Point], width: int, height: int) -> Tuple[int, int, int, int]:
@@ -77,19 +87,21 @@ class ModelCounter:
                  vanish: int = DEFAULT_MODEL["vanish"],
                  reacquire: int = DEFAULT_MODEL["reacquire"],
                  require_entry: bool = DEFAULT_MODEL["require_entry"],
-                 pad: float = DEFAULT_MODEL["pad"],
+                 pad: float = DEFAULT_MODEL["pad"],   # outline widths
                  assist: bool = DEFAULT_MODEL["assist"]):
         xs = [p[0] for p in poly]
         ys = [p[1] for p in poly]
         self.box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
-        self.margin = NEAR_WIDTHS * max(self.box[2], 1.0)
+        width = max(self.box[2], 1.0)
+        self.margin = NEAR_WIDTHS * width
         self.assist = assist
         self.tracker = BallTracker()
         self.counter = BallCounter({"hub": self.box}, min_track_frames=min_track,
                                    vanish_frames=vanish,
                                    reacquire_frames=reacquire,
-                                   require_entry=require_entry, pad=pad,
-                                   fps=fps)
+                                   reacquire_px=REACQUIRE_PX * width / REF_OUTLINE_PX,
+                                   require_entry=require_entry,
+                                   pad=pad * width, fps=fps)
         self.frame = 0
         self.reported = 0
 

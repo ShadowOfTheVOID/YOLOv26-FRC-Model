@@ -11,6 +11,19 @@ the build rather than publishing an empty release.
 
 ### Added
 
+- **`--model` for `run.py hubcount` / `hubfeed` — blend the fuel model into
+  the colour count** (`tbavid/hubmodel.py`, `deploy/HUB_FEED.md` "The combo,
+  tuned"). Each outline counts `round(0.5 * model + 0.5 * colour)`. The model
+  half runs `fuel_relabel.pt` on a full-resolution crop around the hub ->
+  BallTracker -> BallCounter, at ~30 fps on its own thread, so the colour
+  half is never delayed. Also a `"model"` entry per camera in cams.json.
+  Tuned on all four Einstein matches: mean error 6.8% against 10.1% for
+  colour alone, with the AUTO winner right on all four (the model alone got
+  it wrong on two). Three of the four were in the model's training set; on
+  Einstein 1, the one it never saw, the honest estimate is 7-9% against
+  9.1%. Needs a GPU or Apple silicon: on 4 CPU cores it ran at 2.6 fps.
+  Not yet checked against a hand-counted practice-hub recording.
+
 - **`run.py hubfeed` — feed hub fuel counts to bioarena** (`tbavid/hubfeed.py`,
   `tbavid/hubcount.py`, `deploy/HUB_FEED.md`), for the 2026-10-10 scrimmage.
   Implements the counter's side of Team 841's "Hub FUEL Counter Feed" spec:

@@ -615,6 +615,69 @@ high against the crowd unlabelled, and the model has never seen an Einstein
 frame. Retraining with balls in flight labelled (`train/README.md`, the
 bootstrap) is the next step for the model.
 
+## The combo, tuned: colour + the retrained model (2026-10-02)
+
+`fuel_relabel.pt`, retrained on the MI300X with balls in flight labelled, is
+blended into the colour count: each outline's count is
+`round(w * model + (1 - w) * colour)`, both halves never going down, so
+neither does the blend. The colour counter over-counts (balls that clip the
+rim and drop behind the hub look like scores) and the model under-counts
+(the tracker drops balls fired in streams), so the two errors partly cancel.
+
+```bash
+# recordings (scouting / validation); needs the detect environment
+.venv-train/bin/python run.py hubcount match.mp4 --setup cams.json --model fuel_relabel.pt
+#   match.mp4: red 461, blue 573 ...
+#     cam/blue0: 573 = colour 614 blended with model 532
+# live, same flag
+.venv-train/bin/python run.py hubfeed --setup cams.json --model fuel_relabel.pt --device mps
+```
+
+or per camera in cams.json: `"model": {"weights": "fuel_relabel.pt",
+"weight": 0.5}` (also `device`, and the counter settings below by name).
+Exit lines stay colour only.
+
+The model sees a 640 px square cut around each outline at full resolution
+(3.2 outline widths, shifted 0.7 widths up), at ~30 fps -- every other
+frame of a 60 fps camera. Live, it runs on its own thread and always takes
+the newest frame: the colour half is never delayed, and a model that falls
+behind skips frames and says so every 10 s. On this container's 4 CPU cores
+it ran at 2.6 fps, far too slow; it needs a GPU or Apple silicon.
+
+Shipped settings, scored on all four Einstein matches at 30 fps against the
+official checkpoints:
+
+| | E4 | E5 | E8 | E1 | mean | AUTO winner |
+|---|---|---|---|---|---|---|
+| **combo, w = 0.5** | 8.7% | 5.6% | 8.4% | 4.5% | **6.8%** | right on all four |
+| model alone | 7.2% | 5.1% | 11.1% | 5.8% | 7.3% | wrong on E8 and E1 |
+| colour counter alone | 16.2% | 6.2% | 8.8% | 9.1% | 10.1% | right on all four |
+
+Read it carefully:
+- **E4, E5 and E8 were in fuel_relabel's training set**, so the model is
+  flattered there (alone on E4: 7.2%, against 17% for the old model).
+  **E1 is the only fair match.**
+- **The honest E1 number is 7-9%, not 4.5%.** E1 helped pick the
+  settings above. Picked on E4/E5/E8 alone, the best setting gave E1 9.0%
+  (colour: 9.1%). The top 50 settings there were tied within ~1 point,
+  but on E1 they ranged from 4.1% to 10.1%, median 7.0%. Leave-one-out over
+  all four: combo 8.2%, model 9.7%, colour 10.1%.
+- **The model alone got the AUTO winner wrong twice; the combo never did.**
+  The colour half keeps that call right.
+- **The weight is the plain mean on purpose.** 0.7 fit E4/E5/E8 best, which
+  is the training set talking; E1 preferred 0.5-0.6, and the fits were flat
+  from 0.5 to 0.7 (6.9 / 6.6 / 6.7%).
+- **Latency:** the model half confirms a score once the ball has been gone
+  2 frames and has not reappeared within 2 more -- about 170 ms at 30 fps,
+  plus inference. Half of each ball arrives that late; the colour half is
+  unchanged. A longer hold (reacquire 6, 300 ms) scored no better.
+- `run.py hubcount --model` on 30 s of E1 gave 84 - 102 at 30 s (official
+  95 - 96), in line with the replay that produced the table.
+
+What would settle it is the same thing as for colour alone: a hand-counted
+recording from the real camera position. Run it with and without `--model`
+and keep whichever is closer.
+
 ## What you need
 
 - A laptop wired into the field switch on the management VLAN, static

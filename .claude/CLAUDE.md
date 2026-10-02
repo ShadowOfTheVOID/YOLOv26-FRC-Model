@@ -249,7 +249,12 @@ frame): moving-ball recall 84% -> 93%; counting held out, no assist 36% ->
 yet. Retrained fuel_relabel on E1 crops (2026-10-02; E1 is the only
 Einstein match it never trained on): alone 18.0% -> 12.1%, mean(colour,
 model) 7.8% vs colour 9.1% -- same as old model's 7.7%; retraining helped
-the model, not the combo. User chose: if crops don't clearly work, retrain (option 2).
+the model, not the combo. Then built and tuned (2026-10-02):
+`--model fuel_relabel.pt` on hubcount/hubfeed (tbavid/hubmodel.py; cams.json
+"model"), w 0.5, BallCounter 2/2/2 + require_entry + pad 0.08 widths:
+E4/E5/E8/E1 8.7/5.6/8.4/4.5% (mean 6.8% vs colour 10.1%), AUTO right on all
+four. E4/5/8 are in the model's training set; fair E1 estimate 7-9%. Do
+not raise w on the E4/5/8 fit (0.7) -- that is the training set talking. User chose: if crops don't clearly work, retrain (option 2).
 frc-fms (github.com/arnan-bajaj/frc-fms, the team's own scrimmage FMS;
 2026-10-01) is supported alongside bioarena (deploy/FRC_FMS.md): plugin
 tbavid.fms_counter:ColourCounter for its run_vision.py, and fmslink.FmsSender
