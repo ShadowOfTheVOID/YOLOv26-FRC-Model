@@ -91,9 +91,12 @@ model runs on its own thread, so frc-fms's camera loop is never held up:
   which is what happened running frc-fms's `run_vision.py` on this
   container's 4 CPU cores. The posted totals were then exactly the colour
   plugin's (red 108, blue 152 on Einstein 1).
-- **`rescore.py`:** it reads a recording faster than real time. The plugin
-  sees video time running ahead of the clock and waits for the model on
-  every frame, so a re-count skips nothing.
+- **`rescore.py`:** it passes the timestamps saved with the recording. The
+  plugin sees frames stamped more than 30 s in the past (or video time
+  running ahead of the clock) and waits for the model on every frame, so a
+  re-count skips nothing. Speed alone was tried first and failed: on a busy
+  CPU rescore.py read slower than real time, looked live, and the model was
+  dropped after skipping 321 of 326 frames.
 - frc-fms's page shows the counter as `tbavid.fms_counter:ComboCounter`
   (its runner names the plugin). The `--preview` window shows both halves.
 

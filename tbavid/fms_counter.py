@@ -77,6 +77,8 @@ from typing import List, Optional
 
 from . import hubcount as HC
 
+OFFLINE_AGE_S = 30.0    # a frame stamped this far in the past is a re-count
+
 
 class ColourCounter:
     """frc-fms counter interface: __init__(cfg), process(frame, t), total, draw."""
@@ -174,15 +176,25 @@ class ColourCounter:
                                      f"counting by colour only: {e}", flush=True),
             name=f"tbavid model {self.hub}")
 
-    def _is_offline(self, t: float) -> bool:
-        """frc-fms's rescore.py feeds a recording as fast as it decodes, with
-        the recording's own timestamps. Live, frames come at camera speed and
-        the model may skip some; offline it must not, or it would skip nearly
-        every frame and drop itself, so once video time runs well ahead of
-        the clock (1.5x over 2 s) the plugin waits for the model on each frame,
-        as run.py hubcount --model does."""
+    def _is_offline(self, t: float, wall: Optional[float] = None) -> bool:
+        """frc-fms's rescore.py feeds a recording with the timestamps saved
+        when it was recorded. Live, frames come at camera speed and the model
+        may skip some; offline it must not, or it would skip nearly every
+        frame and drop itself, so offline the plugin waits for the model on
+        each frame, as run.py hubcount --model does.
+
+        Offline is either sign: a frame stamped more than OFFLINE_AGE_S in the
+        past (run_vision stamps a camera frame with time.time() and paces a
+        file to real time, so live frames are never that old), or video time
+        running well ahead of the clock (1.5x over 2 s). Speed alone failed:
+        rescore.py on a CPU busy with two other counts read the Einstein 1
+        clip slower than real time, looked live, and dropped the model after
+        skipping 321 of 326 frames."""
         import time
         if self.offline:
+            return True
+        if (wall if wall is not None else time.time()) - t > OFFLINE_AGE_S:
+            self.offline = True
             return True
         now = time.monotonic()
         if self._clock0 is None:

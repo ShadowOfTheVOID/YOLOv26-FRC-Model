@@ -3015,12 +3015,17 @@ def test_model_worker_and_fms_combo():
     check("and colour alone once its model is off", cc._zone_count(0) == 10)
     live = FC.ComboCounter(dict(base, model="m.pt"))
     t0 = 1_700_000_000.0
-    seen = [live._is_offline(t0 + i / 60) for i in range(5)]
-    check("frames at camera speed are live: the model may skip", not any(seen))
+    seen = [live._is_offline(t0 + i / 60, wall=t0 + i / 60 + 0.01) for i in range(5)]
+    check("frames at camera speed, stamped now, are live: the model may skip",
+          not any(seen))
     re = FC.ComboCounter(dict(base, model="m.pt"))
-    seen = [re._is_offline(t0 + i * 0.5) for i in range(10)]   # 5 s of video at once
+    seen = [re._is_offline(t0 + i * 0.5, wall=t0 + 1) for i in range(10)]
     check("a recording read faster than real time (rescore.py) waits for the model",
           seen[-1] and re.offline)
+    old = FC.ComboCounter(dict(base, model="m.pt"))
+    check("so does one read slower, stamped when it was recorded: a busy CPU "
+          "made rescore.py look live and the model was dropped",
+          old._is_offline(t0, wall=t0 + 3600) and old.offline)
 
 
 def test_relabel_video_helpers():
