@@ -337,6 +337,18 @@ the build rather than publishing an empty release.
   official checkpoints, down from 51.5% with v0.3.0's `fuel_best.pt`, and
   AUTO right where the old model got it wrong. The colour plugin in the same
   frc-fms measured 13.9%. Details in deploy/FRC_FMS.md.
+- **Colour counter + retrained model on hub crops, averaged, on Einstein 1**
+  (the one Einstein match `fuel_relabel.pt` never trained on; counter
+  settings picked on Einstein 4/5/8 with the old model's runs, then not
+  touched): 7.8% mean error vs 9.1% for the colour counter alone. The model
+  alone improved from 18.0% (`fuel_best.pt`) to 12.1%, but the average did
+  not move (old model 7.7%), so the gain comes from averaging, not from
+  retraining. The 30 s counts were 86 - 101 for the average and 101 - 104 for
+  colour alone (official 95 - 96), and AUTO was right in both. The buzzer
+  was 90% / 110% for the average and 99% / 117% for colour alone. One match,
+  1.3 points: not enough to change the shipped counter. Not built into
+  `run.py`; it needs the model at 30 fps on two 640 px crops, which takes
+  0.3 s per frame on a 4-core CPU, so live use needs a GPU or Apple MPS.
 
 ### Fixed
 

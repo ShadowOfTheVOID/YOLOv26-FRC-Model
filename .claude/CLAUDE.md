@@ -246,7 +246,10 @@ Model on full-res 640 px hub crops (imgsz 640, same cost as 960 full
 frame): moving-ball recall 84% -> 93%; counting held out, no assist 36% ->
 21%, with assist 17% -> 17%; mean(colour, crop model) 9.0% vs colour 10.1%
 (first combo to beat colour, 1 point on 4 matches). Not built into run.py
-yet. User chose: if crops don't clearly work, retrain (option 2).
+yet. Retrained fuel_relabel on E1 crops (2026-10-02; E1 is the only
+Einstein match it never trained on): alone 18.0% -> 12.1%, mean(colour,
+model) 7.8% vs colour 9.1% -- same as old model's 7.7%; retraining helped
+the model, not the combo. User chose: if crops don't clearly work, retrain (option 2).
 frc-fms (github.com/arnan-bajaj/frc-fms, the team's own scrimmage FMS;
 2026-10-01) is supported alongside bioarena (deploy/FRC_FMS.md): plugin
 tbavid.fms_counter:ColourCounter for its run_vision.py, and fmslink.FmsSender
