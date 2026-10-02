@@ -175,6 +175,11 @@ What the qm7 video runs established (see CHANGELOG v0.3.0 for the detail):
   reliable output -- do not present them as scouting data.
 - Hub active/inactive is not modelled; the rule is unconfirmed.
 
+**bioarena `main` (f4987b0, checked 2026-10-02) has NO counter feed
+receiver**: no listener on 8411 and no Counted mode. `assignAutoWinner` picks
+random or forced red/blue at AUTO start, so the UDP feed decides nothing
+there until bioarena ships the spec. frc-fms (20524ce) has its own feed to
+the same spec, and our receiver stand-in accepts it.
 **Scrimmage scoring runs through bioarena** (Team 841's cheesy-arena fork).
 Its "Hub FUEL Counter Feed" spec is the contract: UDP JSON to
 10.0.100.5:8411, cumulative red/blue per session, never decreasing, sent on

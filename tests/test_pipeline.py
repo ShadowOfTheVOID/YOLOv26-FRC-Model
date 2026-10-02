@@ -2883,6 +2883,13 @@ def test_frc_fms_sender():
           and body["source"] == "live" and s.pending() == 0 and s.linked())
     check("cumulative counts stay for the page and the board",
           s.counts == {"red": 3, "blue": 1})
+    import tbavid.hubcount as HC2
+    from types import SimpleNamespace as NS
+    health = {"c": NS(fps=lambda: 60.0, lag_ms=lambda: 4.0)}
+    tally = NS(zones={"red": [], "blue": []}, setup=NS(combine={}))
+    line = HC2.status_line(s, health, tally)
+    check("the console names frc-fms, not 'bioarena ?', when posting to it",
+          "frc-fms took it" in line and "bioarena" not in line)
 
 
 def test_relabel_video_helpers():

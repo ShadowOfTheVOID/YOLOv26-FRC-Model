@@ -332,6 +332,13 @@ the build rather than publishing an empty release.
 
 ### Fixed
 
+- **`run.py hubfeed` printed `bioarena ?` when posting to frc-fms.** It now
+  prints `frc-fms took it, rtt N ms`, or `no reply from frc-fms`. Seen on
+  the 2026-10-02 run against frc-fms 20524ce, where both connection methods
+  stored exactly the counter's totals on Einstein 1 (red 108, blue 152).
+- **deploy/HUB_FEED.md now says bioarena cannot receive the feed yet.**
+  bioarena `main` (f4987b0) has no receiver on 8411 and picks the AUTO winner
+  at random or forced when AUTO starts.
 - **A fuel-only set made with a relative `--src` could not be trained.**
   `subset_classes.py --src dataset_relabel` wrote `path:
   dataset_relabel-fuel`. `train.py` read that against the yaml's own

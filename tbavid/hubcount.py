@@ -1157,8 +1157,13 @@ def info_line(health: Dict[str, Health], tally: HubTally) -> str:
 
 
 def status_line(sender, health: Dict[str, Health], tally: HubTally) -> str:
-    link = "no reply from bioarena"
-    if sender.linked():
+    peer = getattr(sender, "peer", "bioarena")
+    link = f"no reply from {peer}"
+    if sender.linked() and peer != "bioarena":
+        # frc-fms answers a POST with {"record": ...}, no match state; it read
+        # "bioarena ?" here on the 2026-10-02 run against frc-fms 20524ce.
+        link = f"{peer} took it, rtt {sender.rtt_ms} ms"
+    elif sender.linked():
         r = sender.last_reply or {}
         link = (f"bioarena {r.get('match_state', '?')} {r.get('shift', '')} "
                 f"rtt {sender.rtt_ms} ms")

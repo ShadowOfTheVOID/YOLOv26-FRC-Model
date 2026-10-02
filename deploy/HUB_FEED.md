@@ -15,6 +15,18 @@ a synthetic video has been run end to end over loopback. The counting method
 Until the 20-ball acceptance test below passes, leave bioarena's AUTO winner
 mode on `random`/`red`/`blue`, not `counted`, and keep a human scorekeeper.
 
+**bioarena cannot receive this feed yet (checked 2026-10-02).** bioarena
+`main` (f4987b0, 2026-09-26) and its other branches have no receiver on 8411
+and no Counted mode. It assigns the AUTO winner when AUTO starts, either at
+random or forced red/blue (`assignAutoWinner`, `field/arena.go`), and cannot
+change it later. The feed implements the draft spec and is tested against
+`run.py hubfeed-listen`; it starts mattering once bioarena ships the
+receiver. Until then, use the counts through frc-fms (deploy/FRC_FMS.md) or
+for scouting, and set bioarena's AUTO winner by hand. frc-fms reached the
+same conclusion (its commit 20524ce) and has its own feed to the same spec.
+Run one feed per field, not both: each is its own session, and the spec
+receiver accepts one source address.
+
 ## Measured on the Einstein broadcasts (2026-09-27)
 
 `tbavid/hubcount.py` was run over the same Einstein 4 and 5 broadcasts as the

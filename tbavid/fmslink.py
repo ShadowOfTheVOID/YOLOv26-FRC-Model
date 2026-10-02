@@ -69,6 +69,7 @@ class FmsSender:
             raise ValueError("frc-fms needs its vision_key: put it in the URL, "
                              "http://KEY@host:8000 (server.vision_key in event.yaml)")
         self.session = "frc-fms"
+        self.peer = "frc-fms"      # what status lines call the other end
         self.counts: Dict[str, int] = {h: 0 for h in HUBS}
         self.info = ""
         self.send_errors = 0
