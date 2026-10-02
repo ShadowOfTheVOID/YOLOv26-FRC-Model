@@ -21,7 +21,8 @@ the build rather than publishing an empty release.
   colour alone, with the AUTO winner right on all four (the model alone got
   it wrong on two). Three of the four were in the model's training set; on
   Einstein 1, the one it never saw, the honest estimate is 7-9% against
-  9.1%. Needs a GPU or Apple silicon: on 4 CPU cores it ran at 2.6 fps.
+  9.1%. Needs a GPU or Apple silicon (picked automatically: CUDA, then MPS);
+  on 4 CPU cores it ran at 2.6 fps.
   Not yet checked against a hand-counted practice-hub recording.
 
 - **`run.py hubfeed` — feed hub fuel counts to bioarena** (`tbavid/hubfeed.py`,

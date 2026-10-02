@@ -144,16 +144,17 @@ class ModelEye:
     """Runs the model on every model zone of one camera, one batch a frame.
 
     Loads Ultralytics lazily: the API host and the colour-only counter never
-    import torch. `device` is passed to Ultralytics ("" lets it choose: CUDA,
-    then Apple MPS, then CPU). On a 4-core CPU two 640 px crops took 0.3 s,
-    too slow to keep up live; a laptop GPU or Apple silicon is needed.
+    import torch. `device` is passed to Ultralytics; "" picks CUDA, then
+    Apple MPS, then CPU (`pick_device`). On a 4-core CPU two 640 px crops
+    took 0.3 s, too slow to keep up live; a laptop GPU or Apple silicon is
+    needed.
     """
 
     def __init__(self, weights: str, polys: Dict[str, Sequence[Point]],
                  device: str = ""):
         from ultralytics import YOLO
         self.model = YOLO(weights)
-        self.device = device or None
+        self.device = device or pick_device()
         self.polys = dict(polys)
         self.crops: Dict[str, Tuple[int, int, int, int]] = {}
         self.prev = None
@@ -168,9 +169,9 @@ class ModelEye:
             self.crops = {n: crop_box(p, w, h) for n, p in self.polys.items()}
         names = list(self.crops)
         imgs = [frame[y0:y1, x0:x1] for x0, y0, x1, y1 in (self.crops[n] for n in names)]
-        kw = {"device": self.device} if self.device else {}
         rs = self.model.predict(imgs, imgsz=MODEL_IMGSZ, conf=DET_CONF,
-                                max_det=1500, classes=[0], verbose=False, **kw)
+                                max_det=1500, classes=[0], verbose=False,
+                                device=self.device)
         dets: List[Tuple[XYXY, float]] = []
         for n, r in zip(names, rs):
             x0, y0 = self.crops[n][:2]
@@ -186,6 +187,19 @@ class ModelEye:
                                                   self.ball_px)]
         self.prev = frame
         return dets, assist
+
+
+def pick_device() -> str:
+    """CUDA, then Apple MPS, then CPU. Ultralytics left to itself never picks
+    MPS: on a Mac it would run the model on the CPU, which on 4 cores
+    managed 2.6 fps against the 30 the counter was tuned at."""
+    import torch
+    if torch.cuda.is_available():
+        return "cuda"
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def model_stride(fps: float) -> int:

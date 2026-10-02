@@ -1311,7 +1311,7 @@ def main(argv=None):
                    help="the model's share of the blended count, 0-1 "
                         "(default: the tuned value)")
     p.add_argument("--device", default="",
-                   help="for --model: cuda, mps or cpu (default: best found)")
+                   help="for --model: cuda, mps or cpu (default: cuda, then mps, then cpu)")
     p.set_defaults(func=cmd_hubfeed)
 
     p = sub.add_parser("hubcount",
@@ -1337,7 +1337,7 @@ def main(argv=None):
                    help="the model's share of the blended count, 0-1 "
                         "(default: the tuned value)")
     p.add_argument("--device", default="",
-                   help="for --model: cuda, mps or cpu (default: best found)")
+                   help="for --model: cuda, mps or cpu (default: cuda, then mps, then cpu)")
     p.set_defaults(func=cmd_hubcount)
 
     p = sub.add_parser("track",
