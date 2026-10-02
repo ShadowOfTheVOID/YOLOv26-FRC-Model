@@ -330,6 +330,14 @@ the build rather than publishing an empty release.
   - **Exit lines keep the signed rule and the measured ball**
     (`signed=True, learn=False`). The broadcasts cannot test them.
 
+### Measured
+
+- **frc-fms's `zone` counter on Einstein 1 with the retrained fuel model**
+  (`fuel_relabel.pt`, MI300X, 2026-10-02): 37.8% mean error against the
+  official checkpoints, down from 51.5% with v0.3.0's `fuel_best.pt`, and
+  AUTO right where the old model got it wrong. The colour plugin in the same
+  frc-fms measured 13.9%. Details in deploy/FRC_FMS.md.
+
 ### Fixed
 
 - **`run.py hubfeed` printed `bioarena ?` when posting to frc-fms.** It now

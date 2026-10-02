@@ -124,3 +124,36 @@ the Einstein 4 recording, played at camera speed.
   no duplicated events. Offline, at the point each hub had reached, the
   counts are 219-222 and 157-160. Run offline on the same frames, the
   plugin and `count_recording` give the same counts.
+
+## Rechecked 2026-10-02, frc-fms at 20524ce
+
+frc-fms gained 20 commits: first-run setup (`python -m fms.init` writes
+`config/event.yaml` and `config/vision.yaml`), `vision_key` read from
+`event.yaml`, and its own UDP count feed to bioarena (`feeds:`, `--feed`).
+The counter interface and `/api/vision/events` did not change.
+
+- **A, plugin:** Einstein 1 at 59.9 fps in its `run_vision.py`. frc-fms
+  stored red 108 / blue 152, equal to the counter's totals and to an offline
+  run over the same frames, with no duplicates.
+- **B, `run.py hubfeed --target http://KEY@...`:** stored the same 108 / 152.
+- **frc-fms's count feed** was accepted by `run.py hubfeed-listen`, so the
+  two follow the same protocol. bioarena itself has no receiver yet
+  (deploy/HUB_FEED.md).
+
+frc-fms's counters, Einstein 1 (held out of the retraining dataset's
+training split), 6-172 s, 30 fps, mean error over the official checkpoints:
+
+| counter | error | at 30 s (truth 95 / 96) | final (truth 621 / 415) | AUTO |
+|---|---|---|---|---|
+| `tbavid.fms_counter:ColourCounter` | 13.9% | 85 / 102 | 509 / 465 | right |
+| `zone`, `fuel_relabel.pt` (retrained) | 37.8% | 52 / 58 | 295 / 270 | right |
+| `zone`, `fuel_best.pt` (v0.3.0) | 51.5% | 48 / 39 | 228 / 169 | wrong |
+
+Counts are blue / red. The retrained model cuts `zone`'s error by 14 points
+and gets AUTO right where the old one did not. `zone` still undercounts by
+about half: it counts a ball only if a box confirms it inside the hub
+rectangle in two frames, and fast 15 px balls often fail that. The colour
+plugin remains the counter to use in frc-fms. Use `fuel_relabel.pt` there
+only when a model is wanted. Never use a 3-class model with `zone`, because
+it counts robots as fuel.
+
