@@ -2923,6 +2923,16 @@ def test_relabel_video_helpers():
           [str(p) for p in TR.label_dirs(tmp / "mix.yaml")] ==
           ["/workspace/frc/dataset-scout/labels/train", "/workspace/frc/dataset_einstein/labels/train",
            "/workspace/frc/dataset-scout/labels/val", "/workspace/frc/dataset_einstein/labels/val"])
+    rel = tmp / "dataset_relabel-fuel"
+    (rel / "images" / "train").mkdir(parents=True)
+    (rel / "labels" / "train").mkdir(parents=True)
+    (rel / "labels" / "train" / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+    (rel / "dataset.yaml").write_text("path: dataset_relabel-fuel\ntrain: images/train\n"
+                                      "val: images/train\n")
+    TR.repoint_dataset(rel / "dataset.yaml")
+    check("a relative path: (subset_classes.py from --src dataset_relabel) is made absolute",
+          f"path: {rel.resolve()}" in (rel / "dataset.yaml").read_text()
+          and any(d.rglob("*.txt") for d in TR.label_dirs(rel / "dataset.yaml")))
     row = [(0, (x, 50, x + 14, 64), "model") for x in range(0, 140, 20)]
     shirt = (0, (300, 40, 350, 75), "model")
     near = [(0, (x, 600, x + 30, 630), "model") for x in range(0, 300, 40)]

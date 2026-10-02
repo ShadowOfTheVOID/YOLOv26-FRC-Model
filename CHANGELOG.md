@@ -332,6 +332,14 @@ the build rather than publishing an empty release.
 
 ### Fixed
 
+- **A fuel-only set made with a relative `--src` could not be trained.**
+  `subset_classes.py --src dataset_relabel` wrote `path:
+  dataset_relabel-fuel`. `train.py` read that against the yaml's own
+  directory, found no labels, and stopped. On the MI300X this happened after
+  the 2.6 h scout run, so the fuel run never started. `subset_classes.py`
+  now writes an absolute path. `train.py` rewrites any relative `path:` to
+  the yaml's directory, and its "no labels" message names the directories
+  it actually searched.
 - **QUICKSTART's "see what the model sees" was killed part-way through a
   match video.** It called `predict(..., save=True)` without `stream=True`,
   so Ultralytics held every frame's result, decoded image included, until
