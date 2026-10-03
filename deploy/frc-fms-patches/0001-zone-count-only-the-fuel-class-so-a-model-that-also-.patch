@@ -1,0 +1,130 @@
+From bd41bc3b4e1ef2ba82dd9cc98d10b6acfacb401e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 3 Oct 2026 02:53:52 +0000
+Subject: [PATCH 1/2] zone: count only the fuel class, so a model that also
+ detects robots does not count robots
+
+zone passed every box the model returned to its tracker. With a three-class model (fuel,
+robot_blue, robot_red) a robot box inside the ROI became a track and was counted as fuel.
+On one frame of a 2026 Einstein broadcast, a three-class model gave 6 robot boxes in a
+wide ROI.
+
+zone now asks the model for the class named "fuel" when it has one (a classes: key
+overrides it). A single-class model whose class has another name keeps counting every box,
+as before. Tests: 26 pass (4 new, pure: no model).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CLAUDE.md                  |  2 +-
+ README.md                  |  1 +
+ tests/test_zone_classes.py | 25 +++++++++++++++++++++++++
+ vision/counters/zone.py    | 18 +++++++++++++++++-
+ 4 files changed, 44 insertions(+), 2 deletions(-)
+ create mode 100644 tests/test_zone_classes.py
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 69b619f..e83367e 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -58,7 +58,7 @@ pattern-kill `fms.server`/`run_vision.py` (it can hit the user's live processes)
+ 
+ ## Vision
+ - Counter plugins: `zone` (default; short nearest-neighbor tracks inside the hub ROI, built because ByteTrack
+-  fragmented badly on wide shots), `linecross`, `mock`, or custom `"module:Class"` with
++  fragmented badly on wide shots; counts only the model class named `fuel`, or `classes:`), `linecross`, `mock`, or custom `"module:Class"` with
+   `process(frame, t) -> int` (see `vision/counters/base.py`).
+ - Model weights go in `vision/models/` (gitignored). Restart only the vision process to swap models.
+ - Vision records raw hub video + per-frame timestamps per match; `vision/rescore.py` recounts a match offline
+diff --git a/README.md b/README.md
+index 96d3b08..539cdb1 100644
+--- a/README.md
++++ b/README.md
+@@ -456,6 +456,7 @@ Drag a box over the hub opening and press Enter. It prints `roi: [x, y, w, h]` i
+ | `min_hits` | 2 | Frames a track must be seen before it counts (kills one-frame noise) |
+ | `max_missed` | 3 | Frames a ball may vanish and keep its identity |
+ | `min_dy` | 0 | Required downward travel before counting (0 = off) |
++| `classes` | the class named `fuel` | Model class ids to count. With a model that also detects robots (`fuel, robot_blue, robot_red`), only fuel is counted; a model with one class not named `fuel` counts everything |
+ 
+ ### Recording and rescoring
+ 
+diff --git a/tests/test_zone_classes.py b/tests/test_zone_classes.py
+new file mode 100644
+index 0000000..9c3e2f4
+--- /dev/null
++++ b/tests/test_zone_classes.py
+@@ -0,0 +1,25 @@
++"""zone counts only fuel boxes, so a model that also detects robots does not count robots."""
++import pathlib
++import sys
++
++import pytest
++
++pytest.importorskip("cv2")
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "vision"))
++from counters.zone import fuel_classes  # noqa: E402
++
++
++def test_three_class_model_keeps_only_fuel():
++    assert fuel_classes({0: "fuel", 1: "robot_blue", 2: "robot_red"}, {}) == [0]
++
++
++def test_fuel_found_by_name_not_position():
++    assert fuel_classes({0: "robot", 1: "Fuel"}, {}) == [1]
++
++
++def test_single_class_model_not_named_fuel_keeps_everything():
++    assert fuel_classes({0: "ball"}, {}) is None
++
++
++def test_config_classes_override():
++    assert fuel_classes({0: "fuel", 1: "robot"}, {"classes": [1]}) == [1]
+diff --git a/vision/counters/zone.py b/vision/counters/zone.py
+index d401273..1ec2fea 100644
+--- a/vision/counters/zone.py
++++ b/vision/counters/zone.py
+@@ -13,6 +13,9 @@ Tuning knobs (config/vision.yaml):
+   min_hits    frames a track must be seen before it counts (2 kills single-frame noise)
+   max_missed  frames a track may vanish and still be the same ball
+   min_dy      require this much downward travel before counting (0 = off)
++  classes     model class ids to count (default: the class named "fuel" if the model has
++              one, else every class). A model that also detects robots would otherwise
++              count every robot box in the ROI as fuel.
+ """
+ from __future__ import annotations
+ 
+@@ -23,10 +26,23 @@ import cv2
+ from .base import Counter, crop_box, load_yolo
+ 
+ 
++def fuel_classes(names, cfg):
++    """Class ids to keep: cfg `classes` if set, else the ids named "fuel", else None (all).
++
++    `names` is the model's {id: name} map. Returning None keeps the old behaviour for a
++    single-class model whose class is not called "fuel".
++    """
++    if cfg.get("classes") is not None:
++        return [int(c) for c in cfg["classes"]]
++    fuel = [int(i) for i, n in dict(names or {}).items() if str(n).lower() == "fuel"]
++    return fuel or None
++
++
+ class ZoneCounter(Counter):
+     def __init__(self, cfg):
+         super().__init__(cfg)
+         self.model, self.device = load_yolo(cfg["weights"])
++        self.classes = fuel_classes(getattr(self.model, "names", {}), cfg)
+         self.conf = cfg.get("conf", 0.25)
+         self.imgsz = cfg.get("imgsz", 640)
+         self.pad = cfg.get("crop_pad", 60)
+@@ -41,7 +57,7 @@ class ZoneCounter(Counter):
+     def _detect(self, frame):
+         crop, (ox, oy) = crop_box(frame, self.roi, self.pad)
+         r = self.model.predict(crop, conf=self.conf, imgsz=self.imgsz, device=self.device,
+-                               verbose=False)[0]
++                               classes=self.classes, verbose=False)[0]
+         x, y, w, h = self.roi
+         out = []
+         for cx, cy, bw, bh in r.boxes.xywh.tolist():
+-- 
+2.43.0
+

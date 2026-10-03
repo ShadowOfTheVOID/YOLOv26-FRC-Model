@@ -11,6 +11,14 @@ the build rather than publishing an empty release.
 
 ### Added
 
+- **Patches for frc-fms** (`deploy/frc-fms-patches/`, not yet in frc-fms):
+  - its `zone` counter counts only the class named `fuel`. With a
+    three-class model it had counted robot boxes as fuel: 6 in one frame of
+    Einstein 1.
+  - its README documents this repo's `ColourCounter` / `ComboCounter`
+    plugin.
+  They apply cleanly to frc-fms 20524ce, and its tests pass afterwards
+  (26).
 - **Step-by-step setup with frc-fms** (`deploy/FRC_FMS.md`, "Set up on the
   day", and `deploy/frc-fms.vision.yaml`). Covers installing both
   repositories, drawing the hubs and measuring a ball in `run.py hubgui`,
