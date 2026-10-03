@@ -1,0 +1,35 @@
+# frc-fms config/vision.yaml for counting with this repository's counter.
+# Copy over frc-fms's config/vision.yaml (keep its fms_url / vision_key lines
+# if you changed them) and fill in the four marked values per hub.
+# Steps: deploy/FRC_FMS.md, "Set up on the day".
+fms_url: http://127.0.0.1:8000
+record_dir: recordings           # raw hub video per match, for rescore.py and retraining
+
+defaults:
+  # Colour + fuel model blended (Apple silicon or a GPU). For colour only,
+  # which needs no model: counter: "tbavid.fms_counter:ColourCounter" and
+  # delete the model lines.
+  counter: "tbavid.fms_counter:ComboCounter"
+  model: /Users/YOU/dev/TBACroppedOutVid/models/fuel_relabel.pt   # <-- 1. path to the model
+  model_weight: 0.5              # the model's share; 0.5 is the tuned value
+  # The camera's REAL frame rate. The colour counter measured 10.5% error at
+  # 60 fps, 12.6% at 30 and 25% at 20; the model runs on every other frame
+  # at 60, so a wrong number here also mis-times the model half.
+  fps: 60
+  width: 1920                    # outlines and ball_area are in this resolution
+  height: 1080
+
+hubs:
+  red:
+    source: 0                    # <-- 2. camera index, video file, or rtsp:// URL
+    # <-- 3. where to count: the setup file run.py hubgui saved, and the
+    # camera's name in it (outlines, ball size and blur come from there)
+    setup: /Users/YOU/dev/TBACroppedOutVid/cams.json
+    camera: red-cam
+  blue:
+    source: 1
+    setup: /Users/YOU/dev/TBACroppedOutVid/cams.json
+    camera: blue-cam
+    # <-- 4. or, without hubgui: an outline from pick_roi.py and a measured ball
+    # roi: [800, 300, 320, 180]
+    # ball_area: 850
