@@ -280,8 +280,10 @@ itself to rehearse, or its mock vision.
 
 Either give `zone` a fuel-only model
 (`train/subset_classes.py --src dataset_relabel --classes fuel`, then
-train), or add `classes=[0]` to the `self.model.predict(...)` call in
-frc-fms's `vision/counters/zone.py`.
+train), or apply `deploy/frc-fms-patches/0001-*.patch` to frc-fms. With it,
+`zone` keeps only the class named `fuel`, or the ids in a `classes:` key.
+The patches are not in frc-fms yet; `deploy/frc-fms-patches/README.md` has
+the steps.
 
 frc-fms's match recordings (`vision/recordings/<match>_<start>_<hub>.mp4`) come
 from the real camera mount. They are the best training data there is: feed

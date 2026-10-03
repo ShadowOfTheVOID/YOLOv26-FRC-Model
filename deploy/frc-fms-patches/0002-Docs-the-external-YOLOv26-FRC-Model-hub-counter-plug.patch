@@ -1,0 +1,109 @@
+From 5fbcea0a57e14932b10ef109554ca70d83c7d040 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 3 Oct 2026 02:54:25 +0000
+Subject: [PATCH 2/2] Docs: the external YOLOv26-FRC-Model hub counter plugin
+
+YOLOv26-FRC-Model ships tbavid.fms_counter:ColourCounter and ComboCounter for
+vision/run_vision.py. They were tested against this repo at 20524ce: plugin, rescore.py,
+and the /control Vision panel. Nothing here said they existed or how to load them. The
+README adds them to the counters table and gets a short section: what each does, what
+it measured (10.1% / 6.8% on four scored 2026 Einstein broadcasts, with the caveats), a
+vision.yaml example and the PYTHONPATH it needs. vision.example.yaml gets a commented
+pointer. CLAUDE.md notes that the plugin is maintained there, not copied here.
+
+The README's expected test count was 16 and the suite was already at 22; it now says 26.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CLAUDE.md                  |  4 +++-
+ README.md                  | 30 +++++++++++++++++++++++++++++-
+ config/vision.example.yaml |  3 +++
+ 3 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index e83367e..76763de 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -59,7 +59,9 @@ pattern-kill `fms.server`/`run_vision.py` (it can hit the user's live processes)
+ ## Vision
+ - Counter plugins: `zone` (default; short nearest-neighbor tracks inside the hub ROI, built because ByteTrack
+   fragmented badly on wide shots; counts only the model class named `fuel`, or `classes:`), `linecross`, `mock`, or custom `"module:Class"` with
+-  `process(frame, t) -> int` (see `vision/counters/base.py`).
++  `process(frame, t) -> int` (see `vision/counters/base.py`). An external one, `tbavid.fms_counter:ColourCounter`
++  / `ComboCounter` from YOLOv26-FRC-Model, loads through that path (needs it on `PYTHONPATH`); README
++  "External hub counter". Do not copy it into this repo; it is maintained there.
+ - Model weights go in `vision/models/` (gitignored). Restart only the vision process to swap models.
+ - Vision records raw hub video + per-frame timestamps per match; `vision/rescore.py` recounts a match offline
+   and replaces that hub's events in the FMS on the same clock.
+diff --git a/README.md b/README.md
+index 539cdb1..11cd936 100644
+--- a/README.md
++++ b/README.md
+@@ -142,7 +142,7 @@ source .venv/bin/activate
+ pip install -r requirements.txt -r vision/requirements.txt
+ chmod +x run.sh
+ python -m fms.init                    # creates config/event.yaml + config/vision.yaml, prints PINs
+-python -m pytest -q                   # expect: 16 passed
++python -m pytest -q                   # expect: 26 passed
+ python -c "import torch, cv2, ultralytics; print(torch.__version__, torch.backends.mps.is_available())"
+ ```
+ 
+@@ -443,6 +443,7 @@ Drag a box over the hub opening and press Enter. It prints `roi: [x, y, w, h]` i
+ | `zone` (default) | Runs the model on a crop around the ROI; links detections frame-to-frame with a small nearest-neighbor tracker; counts each short track once | Wide or noisy views. Built because ByteTrack fragmented badly on broadcast footage |
+ | `linecross` | Ultralytics ByteTrack; counts IDs crossing a line inside the ROI moving down | Close cameras with clean, continuous ball tracks |
+ | `mock` | Random fuel at `rate_per_s`, no model or camera (`source: none`) | Rehearsals, UI testing |
++| `"tbavid.fms_counter:ColourCounter"` / `"tbavid.fms_counter:ComboCounter"` | External, from [YOLOv26-FRC-Model](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model): yellow blobs crossing down into a hub outline; `ComboCounter` blends in a fuel model | A camera on the hub mouth; see [External hub counter](#external-hub-counter-yolov26-frc-model) |
+ | `"pkg.module:Class"` | Your own | Anything else |
+ 
+ `zone` tuning keys:
+@@ -475,6 +476,33 @@ python rescore.py --match qm7 --hub red --video recordings/qm7_<id>_red.mp4 --we
+ 
+ These recordings are also your best training data, because they come from the real camera mount.
+ 
++### External hub counter (YOLOv26-FRC-Model)
++
++[YOLOv26-FRC-Model](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model) ships a counter plugin for this vision process. It is not part of this repo; clone it next to this one and put it on the Python path.
++
++- `tbavid.fms_counter:ColourCounter` counts yellow blobs crossing down into a hub outline. It needs no model or GPU. On four scored 2026 Einstein broadcasts it measured 10.1% mean error against the official counts at 60 fps, with the auto winner right on all four.
++- `tbavid.fms_counter:ComboCounter` blends that with a fuel model (`model:`). On the same four it measured 6.8%, but three were in the model's training set; expect 7–9% on a new match. It needs Apple Silicon or a GPU. The model runs on its own thread; if it falls behind it turns itself off and the hub counts by colour.
++- Neither has been checked against a hand-counted practice hub yet. Do the 20-ball test before trusting it.
++
++```yaml
++# config/vision.yaml
++defaults:
++  counter: "tbavid.fms_counter:ComboCounter"   # or ColourCounter (no model)
++  model: /path/to/fuel_relabel.pt
++  fps: 60                     # the camera's real rate: it times the model, and 60 counts better than 30
++hubs:
++  red:
++    source: 0
++    setup: /path/to/cams.json # outlines + ball size drawn in its `run.py hubgui`
++    camera: red-cam
++```
++
++```bash
++PYTHONPATH=/path/to/YOLOv26-FRC-Model ./run.sh            # or before python run_vision.py / rescore.py
++```
++
++Its `deploy/FRC_FMS.md` has the full steps: drawing the hubs, measuring a ball, the pre-match checks. `rescore.py` works with it unchanged. On a recording the plugin waits for the model on every frame, so a recount skips nothing.
++
+ ### Camera tips
+ 
+ - Put each camera on its own USB port or controller. Two 1080p streams can saturate one hub.
+diff --git a/config/vision.example.yaml b/config/vision.example.yaml
+index 1d31299..232a4a1 100644
+--- a/config/vision.example.yaml
++++ b/config/vision.example.yaml
+@@ -19,6 +19,9 @@ record_dir: recordings           # raw hub video per match (for rescoring + trai
+ 
+ defaults:                        # applied to both hubs unless overridden
+   counter: zone                  # zone | linecross | mock | "your_module:YourClass"
++  # External colour counter, see README "External hub counter":
++  #   counter: "tbavid.fms_counter:ColourCounter"   (or ComboCounter + model: path/to/fuel_relabel.pt)
++  #   and per hub: setup: path/to/cams.json, camera: <name>; run with PYTHONPATH=path/to/YOLOv26-FRC-Model
+   weights: models/fuel_best.pt   # drop new weights here, restart vision; FMS never needs to restart
+   conf: 0.25
+   imgsz: 640
+-- 
+2.43.0
+
