@@ -9,6 +9,42 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.4.0 — 2026-10-03
+
+Hub fuel counting for the scrimmage: a live counter that feeds bioarena's
+UDP spec or frc-fms, a web page to set it up, and a blend of the colour
+counter with a retrained fuel model. Also retrained models with balls in
+flight labelled, and the steps to run all of it with frc-fms.
+
+### Models (attached to this release, not in the source archives)
+
+| file | classes | trained on | validation (Einstein 1, held out) |
+| --- | --- | --- | --- |
+| `fuel_relabel.pt` | fuel | `relabel_video.py` set, 12332 labelled frames (2026nhdur + Einstein 4/5/8), 40 epochs | mAP50 0.757, mAP50-95 0.506, R 0.72 |
+| `scout_relabel.pt` | fuel, robot_blue, robot_red | the same set, fine-tuned from `fuel_withBotbest.pt`, 60 epochs | all mAP50 0.877, mAP50-95 0.671; fuel 0.764 / 0.508; robots 0.93 |
+
+Both are YOLO26s at `--imgsz 960`, trained on an AMD MI300X. Check the
+downloads with `sha256sum`:
+
+```
+bf9eb2c3cb25b119b54bd9a09d35227ad30a99a371a5dc532828cd9c0d7f4977  fuel_relabel.pt
+0112eba7783c980f88a18626ad8500a82593e2f216a61f56173c57e8cf1dd2e6  scout_relabel.pt
+```
+
+What the numbers do and do not mean:
+
+- The validation labels are the relabeller's, so these scores measure
+  agreement with it, not with reality.
+- What was measured against reality is hub counts against official scores:
+  - `fuel_relabel.pt` counting alone on Einstein 1: 12.1% mean error,
+    against 18.0% for `fuel_best.pt`.
+  - Blended with the colour counter (`--model`): 6.8% over the four
+    Einstein matches, against 10.1% for colour alone.
+  - Einstein 4, 5 and 8 were in the training set. On a match nobody tuned
+    on, expect 7-9%.
+- Nothing has been checked against a hand-counted practice hub. Do the
+  20-ball test, and keep a human scorekeeper.
+
 ### Added
 
 - **Patches for frc-fms** (`deploy/frc-fms-patches/`, not yet in frc-fms):

@@ -17,6 +17,8 @@ Windows: use `.venv-train\Scripts\pip` and `.venv-train\Scripts\python`.
 
 ## 2. Get the models (once)
 
+For hub counting with `--model` (deploy/HUB_FEED.md), use
+`fuel_relabel.pt` from the [v0.4.0 release](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model/releases/tag/v0.4.0).
 Download both from the [v0.3.0 release](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model/releases/tag/v0.3.0)
 into a `models/` folder (`*.pt` is gitignored, so they never get committed):
 

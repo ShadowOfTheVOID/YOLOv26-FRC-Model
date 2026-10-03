@@ -149,8 +149,9 @@ Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
 **Goal**: per-robot scouting (who shot, made, missed) and replacing FMS
 scoring at the 10-st-throwdown scrimmage, **Saturday 2026-10-10**.
 
-**v0.3.0 is prepared but not yet tagged** (this session cannot push tags; the
-user tags `main` after merging PR #8). Two models become release assets (not in git; checksums in
+**v0.3.0 is tagged; v0.4.0's notes are in CHANGELOG** (sessions cannot push
+tags; the user tags `main` and attaches `fuel_relabel.pt` / `scout_relabel.pt`
+by hand, checksums in its section). v0.3.0 history: Two models become release assets (not in git; checksums in
 CHANGELOG.md): `fuel_best.pt` (fuel) and `fuel_withBotbest.pt` (fuel,
 robot_blue, robot_red), both yolo26s at imgsz 960, trained only on the
 2026nhdur broadcast. QUICKSTART.md is how to run them. Validation numbers are
