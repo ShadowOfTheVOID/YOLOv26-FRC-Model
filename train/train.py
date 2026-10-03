@@ -41,6 +41,33 @@ def dataset_root(data_yaml: Path) -> Path:
     return Path(data_yaml).resolve().parent
 
 
+def label_dirs(data_yaml: Path) -> list:
+    """Every labels/ directory the yaml trains or validates on.
+
+    A mixed yaml -- the existing scouting set plus train/relabel_video.py's
+    Einstein set, `train: [dataset-scout/images/train, ...]` -- has no
+    labels/ of its own beside it, so counting only `dataset_root()/labels`
+    would stop a correct run with "no labels". Entries are read the way
+    Ultralytics reads them: relative to `path:`, images/ swapped for labels/.
+    """
+    root = dataset_root(data_yaml)
+    base, entries = root, []
+    for line in Path(data_yaml).read_text().splitlines():
+        key, _, value = line.partition(":")
+        value = value.split("#", 1)[0].strip()
+        if key.strip() == "path" and value:
+            base = Path(value) if Path(value).is_absolute() else root / value
+        elif key.strip() in ("train", "val") and value:
+            items = value.strip("[]").split(",") if value.startswith("[") else [value]
+            entries += [i.strip().strip("'\"") for i in items if i.strip()]
+    dirs = []
+    for e in entries:
+        p = Path(e) if Path(e).is_absolute() else base / e
+        parts = ["labels" if part == "images" else part for part in p.parts]
+        dirs.append(Path(*parts))
+    return dirs or [root / "labels"]
+
+
 def repoint_dataset(data_yaml: Path) -> None:
     """Point the yaml's `path:` at wherever the dataset actually is now.
 
@@ -63,7 +90,12 @@ def repoint_dataset(data_yaml: Path) -> None:
             continue
         current = Path(line.split(":", 1)[1].strip())
         here = data_yaml.resolve().parent
-        if current.exists() or not (here / "images").is_dir():
+        # A relative path is wrong even when it exists from the cwd:
+        # Ultralytics reads it against its datasets dir, and label_dirs()
+        # against the yaml's. subset_classes.py wrote `path:
+        # dataset_relabel-fuel` from `--src dataset_relabel`; the fuel run on
+        # the droplet then stopped at "no labels" after a 2.6 h scout run.
+        if (current.is_absolute() and current.exists()) or not (here / "images").is_dir():
             return
         lines[i] = f"path: {here}"
         data_yaml.write_text("\n".join(lines) + "\n")
@@ -253,10 +285,11 @@ def main() -> int:
     # Off the yaml's own directory, not ROOT/dataset: pointed at a derived set
     # this used to count the five-class one's labels and report a healthy
     # number while training against nothing.
-    labels = list((dataset_root(args.data) / "labels").rglob("*.txt"))
+    labels = [p for d in label_dirs(args.data) for p in d.rglob("*.txt")]
     non_empty = [p for p in labels if p.stat().st_size > 0]
     if not non_empty:
-        print("No non-empty label files under dataset/labels/.\n"
+        print(f"No non-empty label files under "
+              f"{', '.join(str(d) for d in label_dirs(args.data))}.\n"
               "Ultralytics treats a missing or empty label file as 'this image\n"
               "contains nothing', so training now teaches the model to predict\n"
               "nothing. Generate fuel proposals with train/autolabel_fuel.py and\n"

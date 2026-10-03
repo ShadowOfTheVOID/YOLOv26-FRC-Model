@@ -41,11 +41,23 @@ M=models/fuel_withBotbest.pt
 ## 3. See what the model sees
 
 ```bash
-$PY -c "from ultralytics import YOLO; YOLO('$M').predict('match.mp4', imgsz=960, conf=0.25, save=True)"
+$PY run.py track --weights $M --source match.mp4          # add --device mps on a Mac
 ```
 
-The annotated copy lands under `runs/detect/` (the path is printed). Swap
-`match.mp4` for a folder of `.jpg` frames or a single image.
+It writes `match_tracked.mp4`: a thin box and a small track number on every
+ball and robot, a short trail behind each ball that is really moving, and a
+hollow circle where a ball briefly lost by the detector should be. Magenta
+boxes are balls the model missed and colour found -- mostly the top of
+shots against the crowd, which the released models never learned
+(`--no-assist` turns it off). `--labels
+none` drops the numbers, `--labels full` adds the class, `--imgsz 1280`
+finds more small balls (slower).
+
+Why not `YOLO(...).predict(save=True)`: it labels every one of ~300 balls
+"fuel 0.85", which buries the picture; it does not track; and without
+`stream=True` it keeps every frame in memory until macOS kills it. `run.py
+track` streams, and follows balls by distance rather than box overlap, which
+is what keeps a ball through the top of its arc (see CHANGELOG).
 
 ## 4. Hub boxes (once per camera position)
 
@@ -70,6 +82,10 @@ $PY run.py count --weights models/fuel_best.pt --source match.mp4 \
 `--source 0` uses a live camera. `--scoreboard` turns it into the match's
 scorekeeper (clock, JSON score feed, referee corrections); see
 `run.py count --help`.
+
+Feeding a bioarena field (the scrimmage) uses a different, model-free
+counter that is fast enough for its AUTO-winner deadline: `run.py hubfeed`,
+walked through in [deploy/HUB_FEED.md](deploy/HUB_FEED.md).
 
 ## 6. Per-robot shots
 

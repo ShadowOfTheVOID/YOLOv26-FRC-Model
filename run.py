@@ -547,6 +547,9 @@ def cmd_shots(args, cfg):
                 str(args.annotate), cv2.VideoWriter_fourcc(*"mp4v"),
                 fps or 30.0, (w, h))
         out = img.copy()
+        # Small, anti-aliased text scaled from a 1080p baseline: 0.6/0.8-size
+        # bold labels covered the balls they were naming.
+        scale = out.shape[0] / 1080.0
         colour = {"blue": (255, 120, 0), "red": (0, 0, 255)}
         for alliance, (x, y, w, h) in ((counter.hubs if counter else hubs) or {}).items():
             cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)),
@@ -557,19 +560,23 @@ def cmd_shots(args, cfg):
             # The id is what --teams needs. Watching this video once, with the
             # match roster to hand, is how track ids become team numbers.
             cv2.putText(out, f"#{tid}" + (f" = {teams[tid]}" if tid in teams else ""),
-                        (int(x), max(int(y) - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, colour.get(alliance, (255, 255, 255)), 2)
+                        (int(x), max(int(y) - 4, 10)), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.45 * scale, colour.get(alliance, (255, 255, 255)), 1,
+                        cv2.LINE_AA)
         for (x, y, w, h) in balls.values():
             cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)),
                           (0, 220, 255), 1)
         if counter is not None:
             for row, (tid, st) in enumerate(sorted(counter.per_robot.items())):
                 cv2.putText(out, f"#{tid}: {st['made']}/{st['shots']} made",
-                            (10, 24 + 22 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                            colour.get(st["alliance"], (255, 255, 255)), 2)
+                            (10, int((18 + 16 * row) * scale)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45 * scale,
+                            colour.get(st["alliance"], (255, 255, 255)), 1,
+                            cv2.LINE_AA)
         if state["flash"] and t - state["flash"][0] < 1.5:
-            cv2.putText(out, state["flash"][1], (10, out.shape[0] - 16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            cv2.putText(out, state["flash"][1], (10, out.shape[0] - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55 * scale, (255, 255, 255), 1,
+                        cv2.LINE_AA)
         state["writer"].write(out)
 
     result = shooting.run_shots(model, source, hubs=hubs or None,
@@ -712,6 +719,203 @@ def cmd_live(args, cfg):
           f"{'' if wrote['scoreboard_ok'] else ' -- scoreboard_ok=0, the counters never read'}")
     print(f"  totals: {out.get('totals')}")
     print("\nNo video was kept. Nothing entered the dataset.")
+    return 0
+
+
+def cmd_hubfeed(args, cfg):
+    """Count fuel into each hub from one or more cameras; feed bioarena over UDP."""
+    from tbavid import hubcount, hubfeed
+
+    if args.setup:
+        if args.red or args.blue:
+            raise SystemExit("--setup describes every camera and outline; drop "
+                             "--red/--blue, or drop --setup")
+        try:
+            setup = hubcount.load_setup(args.setup, measuring=bool(args.measure))
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"--setup {args.setup}: {e}")
+        for note in setup.notes:
+            print(f"! {note}")
+    else:
+        polys = {}
+        for hub in ("red", "blue"):
+            text = getattr(args, hub)
+            if not text:
+                continue
+            try:
+                polys[hub] = hubcount.parse_poly(text)
+            except ValueError as e:
+                raise SystemExit(f"--{hub}: {e}")
+        if args.measure:
+            hubcount.measure(args.source, polys, args.measure, args.still,
+                             args.cam_fps, args.cam_size)
+            return 0
+        if not polys:
+            raise SystemExit("give at least one hub outline: --red X,Y,... and/or "
+                             "--blue X,Y,... (a half field has one hub), or "
+                             "--setup cams.json for several cameras. Find "
+                             "outlines with --measure 5 --still still.png")
+        if args.ball_area <= 0:
+            raise SystemExit("--ball-area is required: every crossing is divided "
+                             "by it. Measure it on this camera with --measure 5.")
+        try:
+            setup = hubcount.setup_from_flags(
+                args.source, polys,
+                {"red": args.red_source, "blue": args.blue_source},
+                args.ball_area, args.cam_fps, args.cam_size)
+        except ValueError as e:
+            raise SystemExit(str(e))
+    _model_flags(setup, args)
+
+    if args.calibrate:
+        cams = [c for c in setup.cameras
+                if not args.camera or c.name == args.camera]
+        if len(cams) != 1:
+            raise SystemExit("--calibrate needs one camera: name it with "
+                             f"--camera ({', '.join(c.name for c in setup.cameras)})")
+        try:
+            hand = {k: int(v) for k, v in (kv.split("=") for kv in
+                                           args.count.split(","))}
+        except (ValueError, AttributeError):
+            raise SystemExit("--count wants the hand count per hub, e.g. "
+                             "--count red=23,blue=0")
+        r = hubcount.calibrate(cams[0], args.calibrate, hand)
+        if r:
+            b = r["best"]
+            print(f'set in {args.setup or "the setup file"}, camera '
+                  f'"{cams[0].name}": "blur": {b["blur"]}, "remove_static": '
+                  f'{str(b["remove_static"]).lower()}')
+        return 0
+
+    if args.measure:
+        # Every camera measured on its own: they sit at different distances,
+        # so one ball is a different number of pixels on each.
+        for cam in setup.cameras:
+            print(f"\n== {cam.name} ({cam.source})")
+            still = ""
+            if args.still:
+                stem, dot, ext = args.still.rpartition(".")
+                still = f"{stem}_{cam.name}.{ext}" if dot else f"{args.still}_{cam.name}"
+            area = hubcount.measure(cam.source,
+                                    {z.name: z.counter.poly for z in cam.zones},
+                                    args.measure, still, cam.fps, cam.size)
+            if area:
+                print(f'   -> in {args.setup}, camera "{cam.name}": '
+                      f'"ball_area": {area:.0f}')
+        return 0
+
+    from tbavid import fmslink
+    try:
+        sender = fmslink.make_sender(args.target)
+    except ValueError as e:
+        raise SystemExit(f"--target wants HOST[:PORT] for bioarena or "
+                         f"http://KEY@HOST:PORT for frc-fms: {e}")
+    if isinstance(sender, fmslink.FmsSender):
+        print(f"sending fuel events to frc-fms at {sender.url}. Ctrl-C to stop.")
+    else:
+        print(f"session {sender.session}: sending to udp {sender.target[0]}:"
+              f"{sender.target[1]}. Ctrl-C to stop.")
+    for cam in setup.cameras:
+        print(f"  {cam.name}: {cam.source}, ball {cam.ball_area:.0f} px, "
+              f"zones {', '.join(f'{z.name}->{z.hub}' for z in cam.zones)}")
+        if cam.model:
+            print(f"    blended with {cam.model['weights']} at weight "
+                  f"{cam.model['weight']} (needs a GPU or Apple silicon to keep up)")
+    for hub in setup.hubs():
+        n = len(setup.zones(hub))
+        if n > 1:
+            print(f"  {hub}: {n} zones combined by {setup.combine[hub]}")
+    hubcount.run(sender, setup, realtime=args.realtime, log_path=args.log)
+    if hasattr(sender, "close"):
+        sender.close()
+        if sender.pending():
+            print(f"! {sender.pending()} fuel events never reached frc-fms: {sender.last_error}")
+    print(f"stopped: red {sender.counts['red']}, blue {sender.counts['blue']} "
+          f"in session {sender.session}")
+    return 0
+
+
+def _model_flags(setup, args):
+    """--model / --model-weight / --device: blend the fuel model into every
+    camera's count (tbavid/hubmodel.py)."""
+    from tbavid import hubcount
+
+    if args.model:
+        try:
+            hubcount.add_model(setup, args.model, args.model_weight, args.device)
+        except ValueError as e:
+            raise SystemExit(f"--model: {e}")
+    elif args.model_weight is not None:
+        for cam in setup.cameras:
+            if not cam.model:
+                raise SystemExit(f"--model-weight: camera {cam.name!r} has no "
+                                 f"model; give --model too")
+            cam.model["weight"] = args.model_weight
+            for z in cam.zones:
+                z.weight = args.model_weight if z.outline else 0.0
+
+
+def cmd_hubcount(args, cfg):
+    """Count fuel into each hub from recordings, for scouting: fast, on video time."""
+    from tbavid import hubcount
+
+    try:
+        setup = hubcount.load_setup(args.setup)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"--setup {args.setup}: {e}")
+    _model_flags(setup, args)
+    for note in setup.notes:
+        print(f"! {note}")
+    if args.csv and len(args.videos) > 1:
+        raise SystemExit("--csv names one file; with several videos each gets "
+                         "<video>_hubcount.csv")
+    for video in args.videos:
+        try:
+            r = hubcount.count_recording(setup, video, args.camera or "",
+                                         args.start, args.end, args.every)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        except ImportError as e:
+            raise SystemExit(f"the model needs requirements-detect.txt: {e}")
+        out = args.csv or str(Path(video).with_suffix("")) + "_hubcount.csv"
+        hubcount.write_timeline(r, out)
+        print(f"{video}: red {r['red']}, blue {r['blue']} over {r['seconds']} s "
+              f"({r['frames']} frames at {r['speed']} fps, "
+              f"{r['speed'] / r['fps']:.1f}x real time) -> {out}")
+        if r["model"]:
+            for z, n in r["zones"].items():
+                if z in r["model"]:
+                    print(f"  {z}: {n} = colour {r['colour'][z]} blended with "
+                          f"model {r['model'][z]}")
+    return 0
+
+
+def cmd_track(args, cfg):
+    """Draw the model's tracks on a video: small labels, trails, gaps bridged."""
+    from tbavid import trackvis
+
+    out = args.out or str(Path(args.source).with_suffix("")) + "_tracked.mp4"
+    r = trackvis.render(str(args.weights), args.source, out, imgsz=args.imgsz,
+                        conf=args.conf, labels=args.labels,
+                        trails=not args.no_trails, coast=args.coast,
+                        device=args.device, max_frames=args.frames,
+                        tracker=args.tracker, assist=not args.no_assist)
+    print(f"{r['frames']} frames -> {r['out']}")
+    return 0
+
+
+def cmd_hubgui(args, cfg):
+    """The hub counter as a web page: cameras, outlines, calibration, the feed."""
+    from tbavid import hubweb
+
+    return hubweb.main(args.setup, args.port, args.bind, not args.no_browser)
+
+
+def cmd_hubfeed_listen(args, cfg):
+    """Stand in for bioarena: accept the feed and print what it would see."""
+    from tbavid import hubfeed
+
+    hubfeed.listen(args.port, args.bind, args.counter)
     return 0
 
 
@@ -1054,6 +1258,137 @@ def main(argv=None):
     p.add_argument("--for", dest="for_s", type=float, default=0.0,
                    help="stop after this many seconds (0 = until the stream ends)")
     p.set_defaults(func=cmd_live)
+
+    p = sub.add_parser("hubfeed",
+                       help="count fuel into each hub from a camera and feed "
+                            "the counts to bioarena (UDP, the Hub FUEL Counter "
+                            "Feed spec)")
+    p.add_argument("--source", default="0",
+                   help="camera index (0), a video file, or a stream URL")
+    p.add_argument("--red", metavar="X,Y,...",
+                   help="red hub's funnel-mouth outline, full-frame pixels")
+    p.add_argument("--blue", metavar="X,Y,...",
+                   help="blue hub's outline. A hub not given always reads 0.")
+    p.add_argument("--red-source", dest="red_source",
+                   help="a separate camera for the red hub (default --source)")
+    p.add_argument("--blue-source", dest="blue_source",
+                   help="a separate camera for the blue hub")
+    p.add_argument("--ball-area", dest="ball_area", type=float, default=0.0,
+                   help="pixel area of one ball under the colour gate; "
+                        "measure it with --measure")
+    p.add_argument("--target", default="10.0.100.5:8411",
+                   help="bioarena's HOST:PORT (default 10.0.100.5:8411), or "
+                        "frc-fms as http://VISIONKEY@HOST:8000")
+    p.add_argument("--cam-fps", dest="cam_fps", type=float, default=0.0,
+                   help="ask the camera for this frame rate (60 halves the "
+                        "wait for the next frame)")
+    p.add_argument("--cam-size", dest="cam_size", default="",
+                   help="ask the camera for WxH, e.g. 1280x720")
+    p.add_argument("--measure", type=float, default=0.0, metavar="SECONDS",
+                   help="commissioning: measure one ball's area near the "
+                        "outlines for this long, print it, and exit")
+    p.add_argument("--still", default="",
+                   help="with --measure, save the first frame here (outlines "
+                        "drawn) to read the hub outlines off")
+    p.add_argument("--realtime", action="store_true",
+                   help="play a video file at its own frame rate, as a "
+                        "camera would deliver it")
+    p.add_argument("--setup", metavar="CAMS.JSON",
+                   help="several cameras: each with its own source, ball "
+                        "area and outlines, and how each hub combines them "
+                        "(sum / max / median). See deploy/HUB_FEED.md.")
+    p.add_argument("--calibrate", metavar="VIDEO",
+                   help="pick a camera's blur / remove_static from a recording "
+                        "counted by hand (with --setup, --camera, --count)")
+    p.add_argument("--camera", help="which camera --calibrate is for")
+    p.add_argument("--count", help="the hand count for --calibrate, e.g. "
+                                   "red=23,blue=0")
+    p.add_argument("--log", help="append every count to this CSV")
+    p.add_argument("--model", metavar="WEIGHTS.PT",
+                   help="blend this fuel model's count into every camera's "
+                        "(e.g. fuel_relabel.pt); see tbavid/hubmodel.py")
+    p.add_argument("--model-weight", dest="model_weight", type=float,
+                   help="the model's share of the blended count, 0-1 "
+                        "(default: the tuned value)")
+    p.add_argument("--device", default="",
+                   help="for --model: cuda, mps or cpu (default: cuda, then mps, then cpu)")
+    p.set_defaults(func=cmd_hubfeed)
+
+    p = sub.add_parser("hubcount",
+                       help="count fuel into each hub from recordings for "
+                            "scouting: every frame, as fast as it decodes, "
+                            "counts against video time in a CSV; sends nothing")
+    p.add_argument("videos", nargs="+", help="recordings of a match")
+    p.add_argument("--setup", required=True, metavar="CAMS.JSON",
+                   help="the outlines and ball size, from run.py hubgui "
+                        "(draw them on the recording itself)")
+    p.add_argument("--camera", help="which of the setup's cameras made the "
+                                    "recording (not needed with one)")
+    p.add_argument("--start", type=float, default=0.0, help="seconds in to start")
+    p.add_argument("--end", type=float, default=0.0, help="seconds in to stop")
+    p.add_argument("--every", type=float, default=0.5,
+                   help="seconds between timeline rows (default 0.5)")
+    p.add_argument("--csv", help="where to write the timeline (default "
+                                 "<video>_hubcount.csv)")
+    p.add_argument("--model", metavar="WEIGHTS.PT",
+                   help="blend this fuel model's count into every camera's "
+                        "(e.g. fuel_relabel.pt); see tbavid/hubmodel.py")
+    p.add_argument("--model-weight", dest="model_weight", type=float,
+                   help="the model's share of the blended count, 0-1 "
+                        "(default: the tuned value)")
+    p.add_argument("--device", default="",
+                   help="for --model: cuda, mps or cpu (default: cuda, then mps, then cpu)")
+    p.set_defaults(func=cmd_hubcount)
+
+    p = sub.add_parser("track",
+                       help="draw a model's tracks on a video: small labels, "
+                            "trails, balls followed through brief misses")
+    p.add_argument("--weights", type=Path, required=True, help="the .pt")
+    p.add_argument("--source", required=True, help="a video file")
+    p.add_argument("--out", help="output video (default <source>_tracked.mp4)")
+    p.add_argument("--imgsz", type=int, default=960,
+                   help="inference size; 1280 finds more small balls, slower")
+    p.add_argument("--conf", type=float, default=0.1,
+                   help="0.1 so weak detections can continue a track "
+                        "(fuel_track.yaml decides which may start one)")
+    p.add_argument("--labels", choices=("none", "id", "full"), default="id",
+                   help="label per box: nothing, the track id, or class + id")
+    p.add_argument("--no-trails", dest="no_trails", action="store_true")
+    p.add_argument("--coast", type=int, default=8,
+                   help="frames a lost ball is still drawn where it should be")
+    p.add_argument("--device", help="mps on a Mac, 0 for a GPU, cpu")
+    p.add_argument("--frames", type=int, default=0, help="stop after N frames")
+    p.add_argument("--tracker", choices=("distance", "bytetrack"),
+                   default="distance",
+                   help="distance: follows balls through the top of their arc "
+                        "(default). bytetrack: Ultralytics' tracker, tuned.")
+    p.add_argument("--no-assist", dest="no_assist", action="store_true",
+                   help="do not add moving yellow balls the model missed "
+                        "(balls high against the crowd; drawn magenta)")
+    p.set_defaults(func=cmd_track)
+
+    p = sub.add_parser("hubgui",
+                       help="the hub counter with a user interface: pick "
+                            "cameras, click hub outlines, measure, calibrate, "
+                            "start the feed")
+    p.add_argument("--setup", metavar="CAMS.JSON",
+                   help="open this setup file (created on first save)")
+    p.add_argument("--port", type=int, default=8790, help="web page port")
+    p.add_argument("--bind", default="127.0.0.1",
+                   help="web page interface; anything but 127.0.0.1 lets "
+                        "others on the network control the counter")
+    p.add_argument("--no-browser", dest="no_browser", action="store_true",
+                   help="do not open the browser")
+    p.set_defaults(func=cmd_hubgui)
+
+    p = sub.add_parser("hubfeed-listen",
+                       help="stand in for bioarena: receive the hub counter "
+                            "feed and print it, to check the link")
+    p.add_argument("--port", type=int, default=8411)
+    p.add_argument("--bind", default="0.0.0.0")
+    p.add_argument("--counter", help="accept only this source address, as "
+                                     "bioarena does")
+    p.set_defaults(func=cmd_hubfeed_listen)
 
     p = sub.add_parser("stream",
                        help="pull one whole event-day stream and cut every "

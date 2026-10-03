@@ -1,0 +1,20 @@
+# ByteTrack tuned for fuel: small (~15-20 px) balls, fired fast, fading at
+# the top of their arc. Measured on 4 s of Einstein 4 shooting (239 frames,
+# fuel_best.pt, imgsz 960), against the tracker's defaults at conf 0.25:
+#
+#                       tracks   median length   tracks >= 30 f   < 5 f
+#   defaults, conf .25   2357        5 f              472          1178
+#   this, conf .10       1145       25 f              536           167
+#
+# Run it with conf 0.1 (run.py track does): predict's own conf filter
+# otherwise throws the weak detections away before ByteTrack's second,
+# low-score association ever sees them -- and a ball at the top of its arc,
+# slowing and small against the crowd, is exactly a weak detection.
+tracker_type: bytetrack
+track_high_thresh: 0.25   # first association, and ...
+new_track_thresh: 0.25    # ... only this confident starts a track
+track_low_thresh: 0.1     # weaker detections may continue one, never start one
+track_buffer: 60          # frames a lost ball is remembered (1 s at 60 fps)
+match_thresh: 0.95        # a ball moving its own width a frame barely overlaps
+                          # itself; the default 0.8 (IoU >= 0.2) broke it
+fuse_score: True

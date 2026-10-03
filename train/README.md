@@ -117,6 +117,118 @@ Everything else needs annotation — but far less than it looks:
 - Load `dataset/` into Label Studio, CVAT or Roboflow; the YOLO layout imports
   directly, fuel boxes and all.
 
+## Relabelling with the detector: balls in flight, Einstein broadcasts
+
+The released models were measured to miss balls in flight, high against the
+crowd, because `autolabel_fuel.py`'s field line left them unlabelled. They
+also have only ever seen the 2026nhdur broadcast. On the four scored
+Einstein matches the fuel model counts 17% off held out, against 10% for the
+colour counter (`deploy/HUB_FEED.md`). `train/relabel_video.py` is the
+bootstrap step for both gaps; its docstring has the rules and the numbers
+behind each. In short:
+- fuel from the detector on full-resolution tiles;
+- balls in flight it still misses added by motion;
+- any other ball-like yellow painted grey, so it is never left unlabelled;
+- robots from the scouting model;
+- whole frames plus 960 px full-resolution crops around balls in flight.
+
+### 1. The videos `run.py pull` already downloaded
+
+Run this where the scraper's `data/` is: the Mac, or the droplet with
+`TBAVID_DATA` pointing at a copy. It reads `data/review/manifest.json` and
+labels every kept video:
+- **Source:** the clean render (`data/videos/<vid>.mp4`: main camera only,
+  banner cropped off by the district's layout profile), or the raw download
+  with the same shot ranges and crop if the render was deleted.
+- **Samples:** every 0.5 s, never in the first 0.1 s after a cut, where the
+  motion test would compare two different shots.
+- **Split:** each match keeps the side it has in `dataset/`, so nothing
+  moves between train and val. New matches go by hash.
+
+```bash
+python3 train/relabel_video.py --out dataset_relabel --from-scraper \
+    --data /path/to/scraper/data \
+    --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt --device mps   # Mac
+#   --device 0 on the droplet; --matches 2026nhdur to take one event only
+```
+
+`--data` is the folder holding `review/manifest.json`, `videos/` and
+`raw/` (default `$TBAVID_DATA`, else `data/` here). The manifest stores
+absolute paths from when each file was written, so after a move the files
+are found by name under `--data` instead.
+
+Videos the scraper quarantined for low main-camera coverage are left out
+unless `--include-quarantined`. Frames with more than 30 balls' worth of
+unlabelled yellow are skipped (`--max-grey`). That is mostly the wide
+corral shots the old labeller could not handle either; the rest of those
+matches still goes in.
+
+### 1b. An exported harvest (frames only)
+
+A harvest folder with `frames/`, `labels/` and `manifest.json` but no videos
+is labelled frame by frame:
+
+```bash
+python3 train/relabel_video.py --out dataset_relabel --frames "$HOME/Downloads/harvest_good 2" \
+    --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt --device mps
+```
+
+Exported frames are 3 a second, so there is no frame two earlier to
+measure motion from. A ball in flight the detector misses is greyed rather
+than added, and the full-resolution crops centre on the highest balls in
+the frame. The detector on full-resolution tiles is still what finds most
+of the balls in flight.
+
+### 2. The Einstein broadcasts
+
+With the four Einstein videos in `videos/` (download them from Drive):
+
+```bash
+python3 train/relabel_video.py --out dataset_relabel \
+    --video videos/e4.mp4:train:6 --video videos/e5.mp4:train:6 \
+    --video videos/e8.mp4:train:7 --video videos/e1.mp4:val:6 --rows 0:700 \
+    --mask 440,0,1480,165 --mask 15,58,440,122 --mask 1480,58,1905,122 \
+    --fuel models/fuel_best.pt --robots models/fuel_withBotbest.pt --device 0
+```
+
+The same `--out` adds them to step 1's set (the report merges). The
+arguments are specific to this broadcast:
+- **`--rows 0:700`:** Einstein broadcasts are split-screen, and the second
+  camera sits behind a tan stone border that the old colour gate called
+  fuel.
+- **`--mask`:** greys out the scoreboard's yellow fuel icon and arrows.
+- **Splits:** Einstein 4, 5 and 8 train; Einstein 1 validates. Validation
+  only picks the best epoch, so Einstein 1 is the counting test for the
+  retrained model.
+- **More matches:** add each new broadcast with its own run.
+  `VIDEO:SPLIT:START` takes START as the match-clock start in video seconds.
+
+### 3. Look, then train
+
+**Look at `dataset_relabel/preview/` before training.** Box colours:
+- green: the detector;
+- cyan: the detector, confirmed by colour;
+- magenta: added by motion;
+- orange / red: robots.
+
+**Train on `dataset_relabel/` instead of the old `dataset-scout/`, not
+alongside it.** Step 1 relabels the same matches. The old labels are the
+ones that taught a ball in flight to be background, and mixing the two
+would put the same frames in twice with the two answers disagreeing. Both
+use `fuel, robot_blue, robot_red` in that order. Fine-tune from the current
+scouting weights, so the robot detection that was checked good is kept:
+
+```bash
+nohup python3 train/train.py --data dataset_relabel/dataset.yaml --model models/fuel_withBotbest.pt \
+    --imgsz 960 --epochs 60 --name scout_relabel > train.log 2>&1 &
+```
+
+The result is `runs/scout_relabel/weights/best.pt`. Bring it back and test
+it on the scored Einsteins, the same way the released models were. Its
+validation numbers only measure agreement with these pseudo-labels. A
+fuel-only model comes from
+`subset_classes.py --src dataset_relabel --classes fuel`.
+
 ## Detection is not the answer to your actual question
 
 "How many balls went in from a specific bot" is three problems, and YOLO is

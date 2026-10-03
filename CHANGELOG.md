@@ -9,6 +9,413 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Added
+
+- **`--model` for `run.py hubcount` / `hubfeed` — blend the fuel model into
+  the colour count** (`tbavid/hubmodel.py`, `deploy/HUB_FEED.md` "The combo,
+  tuned"). Each outline counts `round(0.5 * model + 0.5 * colour)`. The model
+  half runs `fuel_relabel.pt` on a full-resolution crop around the hub ->
+  BallTracker -> BallCounter, at ~30 fps on its own thread, so the colour
+  half is never delayed. Also a `"model"` entry per camera in cams.json.
+  Tuned on all four Einstein matches: mean error 6.8% against 10.1% for
+  colour alone, with the AUTO winner right on all four (the model alone got
+  it wrong on two). Three of the four were in the model's training set; on
+  Einstein 1, the one it never saw, the honest estimate is 7-9% against
+  9.1%. Needs a GPU or Apple silicon (picked automatically: CUDA, then MPS);
+  on 4 CPU cores it ran at 2.6 fps.
+  Not yet checked against a hand-counted practice-hub recording.
+- **The colour + model combo inside frc-fms**: `tbavid.fms_counter:ComboCounter`
+  (or `ColourCounter` with `model:`) in frc-fms's `config/vision.yaml`. The
+  model runs on its own thread so frc-fms's camera loop never waits.
+  Live, a model that cannot keep up is dropped and the hub counts by colour.
+  Under `rescore.py` it waits for the model on every frame instead. Run
+  through frc-fms 20524ce's own `run_vision.py` on 4 CPU cores, the model
+  was dropped after 10 s and the totals equalled the colour plugin's.
+  `hubcount.run` and the plugin share one model thread
+  (`hubmodel.ModelWorker`). Fed the same frames of Einstein 1, the plugin
+  and `run.py hubcount --model` agreed frame for frame (red model half
+  94 / 94). Shifting the model by one frame (odd frames instead of even)
+  moved red's model half from 94 to 106 and the blend from 101 to 107, so
+  part of the model half's error is sampling noise.
+- **The web page (`run.py hubgui`) can turn the fuel model on**: step 3,
+  *Fuel model*, a .pt picker and the model's share. Each zone shows its
+  colour and model halves while counting, and the page says when the model
+  is falling behind. A model that skips more than 20% of its frames after a
+  10 s warm-up is dropped for the session and counting goes on by colour:
+  on 4 CPU cores a lagging model had held the page at 52 against colour's
+  103.
+
+- **`run.py hubfeed` — feed hub fuel counts to bioarena** (`tbavid/hubfeed.py`,
+  `tbavid/hubcount.py`, `deploy/HUB_FEED.md`), for the 2026-10-10 scrimmage.
+  Implements the counter's side of Team 841's "Hub FUEL Counter Feed" spec:
+  UDP to 10.0.100.5:8411, both hubs' cumulative counts in one JSON datagram,
+  a fresh session per start, sent the moment a count rises and every 100 ms
+  otherwise, `age_ms` from the frame's capture time (the V4L2 driver stamp on
+  Linux). The heartbeat stops when a camera stops delivering frames, so
+  bioarena shows OFFLINE rather than frozen counts. `run.py hubfeed-listen`
+  stands in for bioarena with its acceptance rules, to check the link before
+  the field computer exists; the tests hold the sender to the same rules.
+  The counting is `experiments/area_hub_count.py` made live, because
+  `run.py count` holds each score 400 ms (twice the spec's p99 budget) and
+  needs detector tracks that lost the balls on broadcasts. Its signed
+  in/out crossings are reported as a high-water mark, since the feed may
+  never go down: a ball in and back out is reported until the next ball in
+  absorbs it. Its thresholds are scaled by the measured one-ball area and
+  **none is validated on a practice-field camera** -- on broadcasts it was
+  93-95% on the match it was fitted to and 120-137% blind. Only a synthetic
+  video has been run end to end. The spec's 20-ball field acceptance test is
+  the first real measurement; leave bioarena's AUTO winner off `counted`
+  until it passes. Checked against the Einstein 4 and 5 broadcasts: the
+  port's counts equal the experiment's on Einstein 4 and are within 1% on
+  Einstein 5, both AUTO winners come out right, and the totals are 93% / 93%
+  and 123% / 137% of the broadcast fuel counters (`deploy/HUB_FEED.md`).
+  On Einstein 1, a one-ball AUTO (95 - 96 at the decision), it counted
+  155 - 179: the right winner by coincidence, red ahead while blue led at
+  AUTO's end, and red ahead at the buzzer of a match blue won 621 - 415.
+  Two fixes were tried on all three and not kept: a blur-aware ball count
+  (halved every total, Einstein 4 to 47-58%) and removing static yellow
+  (a few percent either way). The error is balls that clip the rim and drop
+  behind the hub, which look like scores from in front -- a camera-angle
+  limit (`deploy/HUB_FEED.md`).
+
+- **`run.py hubfeed --setup cams.json` — several cameras.** Any number of
+  cameras, each with its own source, frame rate, size and one-ball area, each
+  with outlines counting into a hub; per hub the zones are combined by `sum`
+  (different balls, e.g. one camera per exit chute), `max` (same balls, take
+  the one that missed fewest) or `median` (three or more, outvote the odd
+  one). All three keep the feed's never-decreasing rule. Any camera going
+  quiet stops the heartbeat. `--measure` works per camera and prints each
+  camera's ball area for the file; `deploy/hubfeed.example.json` is a
+  template. Motivated by the Einstein tests: from in front, a ball that clips
+  the rim and drops behind the hub looks like a score, so accuracy needs
+  cameras close to each hub. Checked end to end with two recordings as two
+  cameras on one hub under `max`; not yet run on real multi-camera hardware.
+
+- **`run.py hubgui` — the hub counter with a user interface**, as a web page
+  (default; `tbavid/hubweb.py`, standard library, any browser) or a Qt
+  window (`--ui qt`, `tbavid/hubqt.py`, needs PySide6). Both are views over
+  one controller (`tbavid/hubapp.py`), so a button does the same thing in
+  each. Find cameras or add a recording, click each hub's outline on the
+  picture, measure the ball, calibrate, and start the feed; the live picture
+  shows each outline's count, the score sent to bioarena, the bioarena link
+  and every camera's frame rate, and says *NO PICTURE* when a camera stops.
+  A practice switch runs a test receiver inside. It edits the same
+  `cams.json` that `hubfeed --setup` runs headless; `hubfeed.command` opens
+  the web page from Finder. The web page listens on 127.0.0.1 and refuses
+  other host names (DNS rebinding) and non-JSON posts (cross-site forms).
+  Both were driven end to end on Einstein 4 as the camera -- the page in
+  Chromium with real mouse clicks, the window on Qt's offscreen platform --
+  and counted the same (red 3, blue 1 at 0:16) into the test receiver. The
+  first browser run found the click layer sized 0x0 before the picture was
+  laid out, so no outline could be drawn; it is now sized on the picture's
+  load. Neither has been opened on a Mac yet. (A Tk window came first and
+  was replaced: Homebrew's Python needs `brew install python-tk` for it.)
+- **`run.py track` — a readable tracked video, and balls followed through
+  the top of their arc** (`tbavid/trackvis.py`, `tbavid/fuel_track.yaml`).
+  Asked for: smaller labels, better following, and no losing the ball when
+  it "plateaus". Measured on 4 s of Einstein 4 shooting (239 frames,
+  `fuel_best.pt`, imgsz 960):
+  - Labels: `predict(save=True)` put "fuel 0.85" on ~300 balls a frame and
+    buried the picture; this draws thin boxes and a small id, scaled to the
+    frame, and trails only for balls really travelling (piles and hoppers
+    jitter in place and drew zigzags).
+  - Following: ByteTrack at its defaults with conf 0.25 split the balls into
+    2357 tracks, median 5 frames. conf 0.25 threw away the weak detections
+    before ByteTrack's low-score association saw them, and the default
+    match threshold needs 20% box overlap, which a 15-20 px ball moving its
+    own width a frame barely has. `fuel_track.yaml` (conf 0.1, weak
+    detections may only continue a track, match 0.95, 60-frame memory):
+    1145 tracks, median 25 frames, short (<5 f) 1178 -> 167.
+  - The top of the arc: still only 1 of 25 flights survived its apex. In 19
+    of 20 flights lost while rising or at the top, the detector still had
+    the ball at confidence 0.1-0.8 in the next frames -- the linking, not the
+    detection, dropped it: a ball turning over stops overlapping a
+    straight-line prediction. `BallTracker` links by distance to the
+    predicted position, in a gate scaled by size, speed and time missing,
+    and rejects a size far off (a robot). Result: 818 tracks, median 172
+    frames, 762 lasting 30+ frames, 11 under 5, and 106 flights followed
+    through their apex (ByteTrack: 1). Jumps over 2.5 ball widths in a
+    frame: 35 of 129,884 links (0.03%), some real fast balls. It is the
+    default; `--tracker bytetrack` keeps the tuned ByteTrack.
+  - A ball the detector misses for a few frames is drawn where it should
+    be, as a hollow circle, for up to `--coast` frames (display only).
+  - `run.py shots --annotate` labels are smaller too.
+  - **Balls high against the crowd, without retraining** (`colour_assist`,
+    on by default, `--no-assist` to turn off). The released models miss
+    them outright: `autolabel_fuel.py`'s field line drops every ball more
+    than ~4 ball-widths above the far edge of the field (to keep crowd
+    shirts out), so the top of every shot was in the training frames
+    unlabelled and the model learned it as background. Of 1071 moving
+    ball-shaped yellow blobs without a model box on the Einstein 4 clip,
+    516 had no score at all and 555 only 0.01-0.1, so no threshold brings
+    them back. The assist adds round, ball-sized yellow blobs that are
+    moving (a shot moves; a shirt mostly does not) and not in a model box,
+    at a confidence below the tracker's start threshold: colour can carry
+    on a ball the model found at launch, never invent one. 1021 of 1308
+    offered were used to continue a ball; flights followed through the
+    apex 106 -> 114 on this broadcast; drawn magenta. Retraining on labels
+    that keep balls in flight remains the real fix.
+  Not done: `run.py shots` and `run.py count` still track with ByteTrack;
+  moving them to `BallTracker` needs its own measurement against a
+  scoreboard.
+- **Wireless cameras** (*Wireless camera* in the website; an `rtsp://` or
+  `http://` `"source"` in `cams.json`): Wi-Fi IP cameras and phone
+  IP-camera apps. Opened through FFmpeg over TCP with input buffering off
+  (UDP smears the picture over Wi-Fi; buffered frames are latency). A drop
+  holds the heartbeat and reconnects for as long as the counter runs, and
+  forgets the pre-drop blobs, since matching a ball from before the gap to
+  one after it would invent a crossing. Camera passwords are kept out of
+  the log. An iPhone on a Mac needs none of this: Continuity Camera lists
+  it under *Find cameras*. Tested against a stand-in MJPEG phone camera:
+  picture in 1.3-1.8 s, 30 fps, and a 4 s drop showed NO PICTURE, held the
+  heartbeat and resumed at 30 fps. Not tried with a real phone, an IP
+  camera, or RTSP.
+- **Exit-line counting** (`hubcount.ExitLineCounter`; *Red exit* / *Blue
+  exit* in the website; `"line"` + `"out"` zones in `cams.json`). Every
+  scored ball comes back out of the hub, so balls crossing a line across an
+  exit, outward, are the score -- and a ball that clips the rim and drops
+  behind the hub, which a funnel-mouth outline cannot tell from a score
+  (Einstein 1: 832 entries over the red hood, 415 real), never gets there.
+  The ball's path between frames is tested against the segment, so a fast
+  ball is still caught and one passing beyond the line's ends is not; a ball
+  that crosses back is taken off. Unit-tested and driven in the browser.
+  Not measured on real exits: on the Einstein broadcasts the exits are
+  mostly hidden behind the hubs, and a line across the visible red out-flow
+  caught 9-34% of the scoreboard. A practice hub's exits are the test.
+- **The hub counter's interface is the web page.** The Qt window
+  (`tbavid/hubqt.py`, `run.py hubgui --ui qt`) was removed once the website
+  was chosen; `run.py hubgui` opens the page and no longer takes `--ui`.
+- **Twitch and YouTube streams as a counter source** (`hubcount.open_source`,
+  and *Add stream* in both front ends). A page address is looked up to its
+  HLS stream with yt-dlp -- run from the app's own environment, since a
+  double-clicked launcher does not have `.venv/bin` on PATH -- and opened
+  through OpenCV's FFmpeg backend; a dropped stream reconnects up to five
+  times with the heartbeat held meanwhile. A stream is several seconds
+  behind the field, so the app says so when one is added and turns the
+  status amber while one counts: practice and scouting, not bioarena's AUTO
+  call. Tested end to end in the web page on a real Twitch past broadcast
+  (2019 Championship, Newton): picture in 4.3 s, counting into the test
+  receiver. That run found past broadcasts read unpaced at 315 fps; streams
+  are now paced like recordings, and pacing no longer touches live cameras
+  (it had applied to every camera once any source was a file). Not tested
+  on a channel that was live at the time -- none of FIRST's were.
+- **The counter's interfaces were redesigned** after the first version was
+  called "a 1980 application": a dark control-room theme shared by the web
+  page and the Qt window, score tiles that pulse on a new ball, a status
+  card (connected / sending with no reply / no picture) with each camera's
+  frame rate, a LIVE badge and per-hub count labels on the picture, and
+  numbered steps that turn into check marks as the setup completes. The web
+  page replaced every browser alert, confirm and prompt with its own dialogs
+  and toasts, closes an outline by clicking its first corner, undoes a
+  corner with Backspace, and keeps the scoreboard and picture on screen
+  while the steps scroll. It moved into `tbavid/hubweb.html`; no web fonts
+  or CDNs, since a field often has no internet. Driven again in Chromium
+  (1440x900) and on Qt's offscreen platform, into the test receiver, with
+  no page errors.
+- **Per-camera `blur` and `remove_static`, and calibration** (`run.py
+  hubfeed --calibrate VIDEO --camera NAME --count red=N,blue=M`, or the
+  window). Both off by default. The best blur fraction was 0 / 0.2-0.3 /
+  0.5-0.7 on Einstein 4 / 5 / 1, and one picked on two matches did no better
+  than none on the third, so it is set per camera from a hand-counted
+  recording, not fixed. The live code reproduces the offline experiment on
+  Einstein 1: red identical at all 22 settings, blue within 2 (the offline
+  cache stored positions as float32).
+
+- **Hub counter tuned with every fix together** (`deploy/HUB_FEED.md`,
+  "Every fix together"). About 850 configurations were swept on Einstein 4,
+  5 and 1 and scored leave-one-out:
+  - the mouth counter, the model counter and the exit lines;
+  - their mean, min, max and median.
+
+  Held-out mean error per method:
+
+  | method | held-out mean error |
+  |---|---|
+  | mouth, tuned | 30% |
+  | model + BallTracker + colour assist | 16% |
+  | mean of the two | 13% |
+  | exit lines on broadcasts | 76% (exits hidden) |
+
+  The AUTO winner was right in every held-out run.
+
+  In `hubcount`, the speck floor doubled and the matching reach grew 1.5x.
+  Two of three folds chose exactly these. With ball area x0.9, blur 0.3
+  and still-yellow removal, the live counter measures 8% / 7% / 39%
+  (defaults: 7% / 34% / 71%).
+
+  Not fixed: the model counter is offline only (18 fps; `BallCounter`'s
+  400 ms hold), and three matches are too few to trust the best fit.
+
+- **frc-fms support** (`deploy/FRC_FMS.md`). frc-fms is a scrimmage FMS
+  whose vision side posts timestamped fuel events. Two ways in:
+  - **Plugin:** `tbavid.fms_counter:ColourCounter` is a counter for
+    frc-fms's own `run_vision.py`. It is the measured colour counter (10.1%
+    held out on four Einsteins, against 17-25% for the model + tracker
+    approach of frc-fms's `zone` counter), configured from frc-fms's `roi`,
+    a polygon, an exit line, or a `cams.json` camera.
+  - **Sender:** a `http://KEY@host:8000` target makes `run.py hubfeed`
+    and the web page post to frc-fms (`tbavid/fmslink.py`). Events carry
+    the wall-clock time they were seen and stay queued until a POST that
+    carried them succeeds.
+
+  Both were run against a real frc-fms server on the Einstein 4 recording:
+  - the sender's stored totals matched the offline count exactly;
+  - the plugin ran at 59.9 fps and matched the offline count at the point
+    each hub reached.
+
+  `ball_area` is required by the plugin: measuring it from the first
+  frames read the title card (98 px against 272).
+- **Measured on a held-out match, Einstein 8** (`deploy/HUB_FEED.md`).
+  The counter had never been tuned on it. The shipped defaults through
+  `run.py hubcount` measured 9.1% error, buzzer 91% / 94%, AUTO winner
+  right. Re-tuning with four matches, holding each out once, measured 21%
+  against 10.1% for the current settings, so they are unchanged.
+- **`train/relabel_video.py`: a retraining set with the balls in flight
+  labelled**, the bootstrap step of `train/README.md`. It fixes the two gaps
+  the released models were measured to have: balls high against the crowd
+  (left unlabelled by autolabel_fuel's field line) and only ever having seen
+  the 2026nhdur broadcast. How it labels:
+  - fuel from the detector on full-resolution tiles;
+  - balls in flight it misses added by motion;
+  - other ball-like yellow painted grey rather than left unlabelled;
+  - robots from the scouting model;
+  - whole frames plus 960 px full-resolution flight crops.
+
+  `--from-scraper` labels every video `run.py pull` kept:
+  - it reads the manifest and uses each clean render (main camera, banner
+    cropped), or the raw download with the same shot ranges and crop;
+  - it never samples just after a cut;
+  - each match keeps its train/val side from `dataset/`.
+
+  `train/README.md` trains on this set instead of the old one: they label
+  the same matches, and the old labels are the ones that taught balls in
+  flight as background. `subset_classes.py` now reads the class order from
+  the source dataset's yaml instead of assuming the five-class one.
+  `--rows` / `--mask` handle the Einstein split-screen and the scoreboard's
+  yellow fuel icon; both were being labelled as fuel. `train.py` now counts
+  the labels of every set a mixed `train: [...]` yaml names. Its old check
+  looked only beside the yaml and would have refused the Einstein + scouting
+  mix.
+- **The model measured on full-resolution hub crops** (`deploy/HUB_FEED.md`).
+  A 640 px crop around each hub, instead of the frame halved to 960, found
+  93% of balls in flight against 84%. Counting error without colour assist
+  fell from 36% to 21%; with the assist it stayed at 17%. Averaged with
+  the colour counter it measured 9.0% against 10.1% for the colour counter
+  alone. Not yet built into `run.py`.
+- **Both counters measured on every frame at 60 fps**, four matches, each
+  held out once (`deploy/HUB_FEED.md`). The shipped colour counter measured
+  10.1% at 60 fps and 11.1% at 30 fps. The model counter with colour
+  assist measured 25% at 60 fps and 17% at 30 fps. Combining the two
+  measured 13-14%, so the colour counter alone stays the live and scouting
+  counter.
+- **Slow-camera warning** on the page's status and on `/board` when a live
+  camera delivers under 28 fps (`hubcount.MIN_FPS`, `hubapp.slow_cameras`).
+  The Einstein blobs replayed at 60 / 30 / 20 fps measured 10.5% / 12.6% /
+  25.1% error, and webcams drop to 15-24 fps on their own in dim light.
+  The other setup errors tested were outlines 10 px off or 15% mis-sized,
+  and one ball measured anywhere from 0.5x to 2x. Each cost at most 5
+  points (`deploy/HUB_FEED.md`, "How forgiving the setup is").
+- **`run.py hubcount VIDEO... --setup cams.json` counts recordings for
+  scouting** (`hubcount.count_recording`, `write_timeline`). Previously a
+  file went through `hubfeed`, paced like a live camera, sent over UDP and
+  logged against wall time.
+  - It decodes every frame as fast as it can and sends nothing.
+  - It writes each hub's count against video time (`video_s,red,blue`
+    every 0.5 s) and prints the totals.
+
+  Einstein 4: 4.4x real time on 4 cores; 650 / 515 at the buzzer, the same
+  as the evaluation.
+- **Live scoreboard at `/board`** (`tbavid/hubboard.html`,
+  `hubapp.board_view`; the **Scoreboard ↗** button on `run.py hubgui`). A
+  full-screen red and blue board that refreshes ten times a second.
+  - Linked to bioarena, it shows bioarena's credited score, match phase,
+    clock, AUTO counts and inactive hubs from the status reply.
+  - Otherwise it shows the camera counts, labelled as not a match score,
+    with a screen-only Zero.
+  - It warns when the counter is stopped, a camera has gone blind, or the
+    page lost the counter.
+
+  The Einstein 4 recording, paced at 60 fps through the whole path in
+  practice mode, ran at 59.9 fps with 5 ms median and 14 ms worst
+  capture-to-count time. Checked at 1920x1080 and at phone width. At the
+  scrimmage, bioarena's own display remains the official scoreboard.
+
+### Changed
+
+- **The hub counter's outlines count downward entries, with one ball
+  learned from the crossings** (`hubcount.CrossingCounter`,
+  `deploy/HUB_FEED.md` "Downward entries and a learned ball"). Held-out
+  error over Einstein 4 / 5 / 1 went from 30% to 13%. The shipped
+  defaults measure 16% / 6% / 9%, with the AUTO winner right on all three.
+  - **Direction:** an outline counts only blobs moving down into it, and
+    outward crossings no longer subtract. On Einstein 1 blue, 161 entries
+    against 171 exits had wiped out 108 real balls.
+  - **Ball size:** one ball is the 30th percentile of the zone's last 80
+    crossing blobs. Balls at the mouth were 1.5-2.3x the measured still
+    ball, and most of Einstein 1's AUTO crossings were being counted as two.
+  - **Rounding:** a blob rounds up to the next ball at 0.65.
+  - **Blur:** cameras default to blur 0.3 (it was 0; blur 0 measured
+    20% / 30% / 34%). Saved setups now always write their blur, so a chosen
+    0 stays 0.
+  - **Old setup files:** the page used to save every camera's blur
+    slider, 0 unless moved. A setup without `"rules": 2`, which saves now
+    write, has its blur 0 read as 0.3, with a note printed. A blur 0
+    saved from now on is kept.
+  - **Exit lines keep the signed rule and the measured ball**
+    (`signed=True, learn=False`). The broadcasts cannot test them.
+
+### Measured
+
+- **frc-fms's `zone` counter on Einstein 1 with the retrained fuel model**
+  (`fuel_relabel.pt`, MI300X, 2026-10-02): 37.8% mean error against the
+  official checkpoints, down from 51.5% with v0.3.0's `fuel_best.pt`, and
+  AUTO right where the old model got it wrong. The colour plugin in the same
+  frc-fms measured 13.9%. Details in deploy/FRC_FMS.md.
+- **Colour counter + retrained model on hub crops, averaged, on Einstein 1**
+  (the one Einstein match `fuel_relabel.pt` never trained on; counter
+  settings picked on Einstein 4/5/8 with the old model's runs, then not
+  touched): 7.8% mean error vs 9.1% for the colour counter alone. The model
+  alone improved from 18.0% (`fuel_best.pt`) to 12.1%, but the average did
+  not move (old model 7.7%), so the gain comes from averaging, not from
+  retraining. The 30 s counts were 86 - 101 for the average and 101 - 104 for
+  colour alone (official 95 - 96), and AUTO was right in both. The buzzer
+  was 90% / 110% for the average and 99% / 117% for colour alone. One match,
+  1.3 points: not enough to change the shipped counter. Not built into
+  `run.py`; it needs the model at 30 fps on two 640 px crops, which takes
+  0.3 s per frame on a 4-core CPU, so live use needs a GPU or Apple MPS.
+
+### Fixed
+
+- **frc-fms's control page showed our counter as "undefined fps"** and
+  never flagged a dead camera. The sender now posts each hub's `fps`,
+  `counter` ("tbavid colour + model") and an `error` for a stale camera or
+  one under 28 fps, so its "vision ok" pill tracks it. Checked on frc-fms
+  20524ce's `/control`: "53.1 fps tbavid colour" on both hubs, vision ok.
+- **The page's *Scoreboard* button was dark blue on black.** Buttons now
+  take the page's text colour; a link styled as one had kept the browser's.
+- **`run.py hubfeed` printed `bioarena ?` when posting to frc-fms.** It now
+  prints `frc-fms took it, rtt N ms`, or `no reply from frc-fms`. Seen on
+  the 2026-10-02 run against frc-fms 20524ce, where both connection methods
+  stored exactly the counter's totals on Einstein 1 (red 108, blue 152).
+- **deploy/HUB_FEED.md now says bioarena cannot receive the feed yet.**
+  bioarena `main` (f4987b0) has no receiver on 8411 and picks the AUTO winner
+  at random or forced when AUTO starts.
+- **A fuel-only set made with a relative `--src` could not be trained.**
+  `subset_classes.py --src dataset_relabel` wrote `path:
+  dataset_relabel-fuel`. `train.py` read that against the yaml's own
+  directory, found no labels, and stopped. On the MI300X this happened after
+  the 2.6 h scout run, so the fuel run never started. `subset_classes.py`
+  now writes an absolute path. `train.py` rewrites any relative `path:` to
+  the yaml's directory, and its "no labels" message names the directories
+  it actually searched.
+- **QUICKSTART's "see what the model sees" was killed part-way through a
+  match video.** It called `predict(..., save=True)` without `stream=True`,
+  so Ultralytics held every frame's result, decoded image included, until
+  the end: ~6 MB a frame at 1080p against ~12,900 frames. On a 36 GB M4 Max
+  macOS killed it at frame ~8,000 on one run and 10,008 on another. It now
+  streams, and passes `max_det=1000`, since the default 300-box cap was
+  reached on every frame of an Einstein video.
+
 ### Experimental
 
 - `experiments/area_hub_count.py`: counts fuel into each hub from the yellow

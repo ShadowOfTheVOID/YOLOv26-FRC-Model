@@ -2152,6 +2152,1400 @@ def test_serving_export():
         check("exporting a database that is not there is refused", True)
 
 
+class _FakeClock:
+    def __init__(self, t=100.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+class _FakeSock:
+    """Collects what the sender sends; hands back queued replies."""
+    def __init__(self, fail=False):
+        self.sent = []
+        self.replies = []
+        self.fail = fail
+
+    def sendto(self, data, addr):
+        if self.fail:
+            raise OSError("Network is unreachable")
+        self.sent.append((data, addr))
+
+    def recvfrom(self, n):
+        if not self.replies:
+            raise BlockingIOError
+        return self.replies.pop(0), ("10.0.100.5", 8411)
+
+
+def test_hub_feed_protocol():
+    """The counter's half of bioarena's Hub FUEL Counter Feed (spec 4 and 5).
+
+    bioarena makes the AUTO winner call at T+23.000 s from whatever counts it
+    holds then, so a ball that is waiting for the next heartbeat instead of
+    being sent does not decide the winner. And bioarena drops anything that
+    breaks its acceptance rules, silently from the counter's side -- so the
+    sender is held to them here with the same rules the receiver applies.
+    """
+    import json
+    from tbavid import hubfeed as HF
+
+    clock, sock = _FakeClock(), _FakeSock()
+    s = HF.FeedSender(("10.0.100.5", 8411), session="c1f3a9d2", sock=sock,
+                      clock=clock)
+    check("the first heartbeat goes out at once", s.heartbeat())
+    first = json.loads(sock.sent[-1][0])
+    check("the datagram carries both hubs, v 1, session and seq",
+          first == {"v": 1, "session": "c1f3a9d2", "seq": 1, "red": 0,
+                    "blue": 0} and sock.sent[-1][1] == ("10.0.100.5", 8411))
+    clock.t += 0.05
+    check("no heartbeat before 100 ms", not s.heartbeat() and len(sock.sent) == 1)
+
+    # THE latency rule: a score goes out on the frame it was confirmed, not
+    # at the next heartbeat, and age_ms runs from the frame's CAPTURE time --
+    # here 38 ms before the send -- not from when the code got to it.
+    s.score("red", 1, captured_at=clock.t - 0.038)
+    msg = json.loads(sock.sent[-1][0])
+    check("a score is sent immediately, between heartbeats",
+          len(sock.sent) == 2 and msg["red"] == 1 and msg["seq"] == 2)
+    check("age_ms is measured from the capture timestamp", msg["age_ms"] == 38)
+    s.score("blue", 3, captured_at=clock.t)
+    msg = json.loads(sock.sent[-1][0])
+    check("a clump scores several at once, and red is carried along",
+          (msg["red"], msg["blue"], msg["seq"]) == (1, 3, 3))
+    s.score("blue", 0, clock.t)
+    s.score("blue", -2, clock.t)
+    check("a count can never be sent going down",
+          len(sock.sent) == 3 and s.counts["blue"] == 3)
+    try:
+        s.score("green", 1, clock.t)
+        check("an unknown hub is refused", False)
+    except ValueError:
+        check("an unknown hub is refused", True)
+    check("every datagram fits bioarena's 512-byte limit",
+          len(HF.encode("x" * 32, 2 ** 40, 10 ** 6, 10 ** 6, 10 ** 6,
+                        "y" * 200)) <= 512)
+    try:
+        HF.FeedSender(session="bad session!", sock=sock)
+        check("a session outside [A-Za-z0-9_-]{1,32} is refused", False)
+    except ValueError:
+        check("a session outside [A-Za-z0-9_-]{1,32} is refused", True)
+    check("sessions are fresh per start",
+          HF.new_session() != HF.new_session()
+          and HF.SESSION_RE.match(HF.new_session()) is not None)
+
+    # A cable out on the field must not stop the counting: the counts are
+    # cumulative, so the next datagram that gets through carries them all.
+    down = HF.FeedSender(sock=_FakeSock(fail=True), clock=clock)
+    down.score("red", 2, clock.t)
+    check("a send error is recorded, not raised",
+          down.send_errors == 1 and down.counts["red"] == 2)
+
+    # The reply is shown, never depended on (spec 4.4).
+    check("no reply means not linked", not s.linked())
+    clock.t += 0.004
+    sock.replies.append(json.dumps({"v": 1, "seq": 3,
+                                    "match_state": "AUTO_PERIOD"}).encode())
+    sock.replies.append(b"not json")
+    check("replies are read without blocking, junk skipped",
+          s.poll_replies() == 1 and s.linked())
+    check("and the echoed seq gives the round trip", s.rtt_ms == 4.0)
+    clock.t += 1.5
+    check("the link goes down after a second of silence", not s.linked())
+    check("targets parse with or without a port",
+          HF.parse_target("10.0.100.5") == ("10.0.100.5", 8411)
+          and HF.parse_target("127.0.0.1:9000") == ("127.0.0.1", 9000))
+
+
+def test_hub_feed_receiver_rules():
+    """bioarena's acceptance rules (spec 4.5) and restart arithmetic (6.2).
+
+    `Receiver` is the stand-in `run.py hubfeed-listen` runs before the field
+    computer exists. If it accepted what bioarena drops, the link would look
+    fine on the bench and score nothing at the field.
+    """
+    import json
+    from tbavid import hubfeed as HF
+
+    clock = _FakeClock()
+    rx = HF.Receiver("10.0.100.21", clock=clock)
+
+    def d(**kw):
+        m = {"v": 1, "session": "aa", "seq": 1, "red": 0, "blue": 0}
+        m.update(kw)
+        return json.dumps(m).encode()
+
+    ok = "10.0.100.21"
+    check("a datagram from another address is dropped (a robot's VLAN)",
+          rx.accept(d(), "10.1.14.5") == (False, "unknown source"))
+    check("v other than 1 is dropped", rx.accept(d(v=2), ok)[0] is False)
+    check("a missing field is dropped",
+          rx.accept(json.dumps({"v": 1, "session": "aa", "seq": 1,
+                                "red": 0}).encode(), ok)[0] is False)
+    check("junk is dropped", rx.accept(b"{", ok)[0] is False)
+    check("oversize is dropped", rx.accept(b" " * 600, ok)[0] is False)
+    check("the first good one is accepted", rx.accept(d(), ok)[0])
+    check("and the counter is online", rx.online())
+    check("a duplicate seq is dropped",
+          rx.accept(d(), ok) == (False, "duplicate or reordered"))
+    rx.accept(d(seq=5, red=4, blue=1, age_ms=40), ok)
+    check("a reordered (older) seq is dropped",
+          rx.accept(d(seq=4, red=3, blue=1), ok)[0] is False)
+    check("a count going backwards is dropped",
+          rx.accept(d(seq=6, red=2, blue=1), ok) == (False, "count went backwards"))
+    check("age_ms is read from datagrams where a count rose", rx.age_ms == 40)
+    rx.accept(d(seq=7, red=4, blue=1, age_ms=900), ok)
+    check("and not from heartbeats", rx.age_ms == 40)
+
+    # Match boundaries are bioarena's: ResetMatch baselines the running totals.
+    rx.reset_match()
+    rx.accept(d(seq=8, red=6, blue=1), ok)
+    check("match counts are relative to ResetMatch",
+          rx.match_counts() == {"red": 2, "blue": 0})
+    # A counter restarted mid-match loses only what it missed while down.
+    ok_, what = rx.accept(d(session="bb", seq=1, red=1, blue=0), ok)
+    check("a new session is a restart, not a drop",
+          ok_ and what == "hub counter restarted" and rx.restarts == 1)
+    check("and what the old session scored this match is kept",
+          rx.match_counts() == {"red": 3, "blue": 0})
+    check("a new session may start its seq anywhere, even lower",
+          rx.accept(d(session="bb", seq=2, red=1, blue=2), ok)[0]
+          and rx.match_counts() == {"red": 3, "blue": 2})
+    rx.reset_match()
+    check("a restart before ResetMatch carries nothing into the next match",
+          rx.match_counts() == {"red": 0, "blue": 0})
+    status = rx.status()
+    check("the reply echoes seq and has the spec's fields",
+          status["seq"] == 2 and {"match_state", "shift", "hub_active",
+                                  "match_count", "credited",
+                                  "auto_count"} <= set(status))
+    clock.t += 1.01
+    check("a second with nothing accepted is offline", not rx.online())
+
+    # End to end: whatever the sender produces, the receiver accepts.
+    sock = _FakeSock()
+    s = HF.FeedSender(sock=sock, clock=clock)
+    rx2 = HF.Receiver()
+    s.heartbeat()
+    s.score("blue", 2, clock.t)
+    s.score("red", 1, clock.t)
+    clock.t += 0.2
+    s.heartbeat()
+    results = [rx2.accept(data, "10.0.100.21") for data, _ in sock.sent]
+    check("everything the sender sends, bioarena's rules accept",
+          all(r[0] for r in results)
+          and rx2.match_counts() == {"red": 1, "blue": 2})
+
+
+def test_hub_crossing_counter():
+    """The live hub counter: yellow area across the funnel outline.
+
+    Ported from experiments/area_hub_count.py because it is the only counter
+    here that commits on the frame the ball crosses; BallCounter holds every
+    score 400 ms, twice the feed's p99 budget. These fix the rules, not the
+    accuracy -- the accuracy is measured on a real hub or not at all.
+    """
+    from tbavid import hubcount as HC
+
+    square = [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)]
+    check("point in polygon",
+          HC.point_in_poly(square, (150, 150))
+          and not HC.point_in_poly(square, (250, 150))
+          and not HC.point_in_poly(square, (150, 99)))
+    try:
+        HC.parse_poly("1,2,3,4")
+        check("an outline needs three points", False)
+    except ValueError:
+        check("an outline needs three points", True)
+    check("outlines parse", HC.parse_poly("1,2, 3,4,5,6") ==
+          [(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)])
+
+    def fly(counter, path, area=280.0):
+        return [counter.update([(x, y, area)]) for x, y in path]
+
+    # A ball dropping into the mouth: counted on the frame it crosses, which
+    # is the latency the spec asks for -- not when it vanishes below.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    rises = fly(c, [(150, 40), (150, 60), (150, 80), (150, 105), (150, 130)])
+    rises.append(c.update([]))
+    check("a ball into the hub counts on the crossing frame",
+          rises == [0, 0, 0, 1, 0, 0] and c.reported == 1)
+
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110)], area=3 * 280.0)
+    check("a drum shooter's clump of three counts three", c.reported == 3)
+
+    # An outline counts balls moving DOWN into it and ignores outward
+    # crossings: on Einstein 1 blue, 60-100 s, the signed rule saw 161 in and
+    # 171 out against 108 real balls -- bounces about the hood, not scores.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(x, 150) for x in range(60, 241, 20)])
+    check("a ball sideways across the mouth is not a score", c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 240), (150, 215), (150, 190), (150, 165)])
+    check("a ball rising into the outline from below is not a score",
+          c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110), (150, 112), (150, 95), (150, 80)])
+    check("a ball in then back out stays counted, the exit only noted",
+          c.reported == 1 and c.exits == 1 and c.owed == 0)
+
+    # The experiment's signed rule, which exit lines still use: a pass-over
+    # is reported on entry, its exit owed against the next ball in.
+    c = HC.CrossingCounter(square, ball_area=280.0, signed=True)
+    fly(c, [(x, 150) for x in range(60, 241, 20)])
+    check("signed: a pass-over is reported once, its exit owed",
+          c.reported == 1 and c.net == 0 and c.owed == 1)
+    rises = fly(c, [(150, 60), (150, 85), (150, 110)])
+    check("signed: the next real ball settles it without a second report",
+          sum(rises) == 0 and c.reported == 1 and c.owed == 0)
+    fly(c, [(170, 60), (170, 85), (170, 110)])
+    check("signed: after which balls count again", c.reported == 2)
+
+    # One ball is learned from the crossings: balls at the mouth measured
+    # 1.5-2.3x the still ball, and 56 of Einstein 1's 85 AUTO crossings on
+    # blue were counted as two.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    for i in range(HC.LEARN_WARMUP + 5):
+        fly(c, [(110 + 5 * i, 60), (110 + 5 * i, 85), (110 + 5 * i, 110)],
+            area=2 * 280.0)
+    check("before the warm-up a blob of two balls' area counts two, "
+          "after it the blob size is learned as one ball",
+          c.reported == 2 * HC.LEARN_WARMUP + 5)
+    c = HC.CrossingCounter(square, ball_area=280.0, learn=False)
+    for i in range(HC.LEARN_WARMUP + 5):
+        fly(c, [(110 + 5 * i, 60), (110 + 5 * i, 85), (110 + 5 * i, 110)],
+            area=2 * 280.0)
+    check("without learning every one counts two",
+          c.reported == 2 * (HC.LEARN_WARMUP + 5))
+    check("a blob rounds up to the next ball only at 0.65 of one",
+          (HC.balls_for(1.6 * 280, 280), HC.balls_for(1.7 * 280, 280),
+           HC.balls_for(0.2 * 280, 280)) == (1, 2, 1))
+
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 150), (152, 152), (151, 160)])
+    check("a ball first seen already inside did not cross in", c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110)], area=20.0)
+    check("a speck under the size floor is ignored", c.reported == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 20), (150, 40), (150, 60), (150, 80)])
+    check("a ball that never reaches the mouth is not counted", c.reported == 0)
+
+    # Two balls side by side do not steal each other's crossings.
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    for y in (60, 85, 110):
+        c.update([(130, y, 280.0), (170, y, 280.0)])
+    check("two balls in together count two", c.reported == 2)
+
+    # Sizes scale off the ball: a close camera has much bigger balls.
+    small = HC.region_of(square, 272.0, 1920, 1080)
+    big = HC.region_of(square, 272.0 * 16, 1920, 1080)
+    check("the search margin is the experiment's 60 px at its ball size",
+          small == (40, 40, 260, 260))
+    check("and four times wider for a ball four times wider",
+          big == (0, 0, 440, 440))
+    check("a region never leaves the frame",
+          HC.region_of(square, 272.0 * 16, 300, 300)[2:] == (300, 300))
+    try:
+        HC.CrossingCounter(square, 0)
+        check("a zero ball area is refused", False)
+    except ValueError:
+        check("a zero ball area is refused", True)
+
+    # age_ms must run from capture: a V4L2 buffer stamp is on the same clock
+    # as time.monotonic(), a file position is not.
+    check("a plausible driver capture stamp is used",
+          HC.frame_time(1000_000.0 - 30.0, 1000.0) == 1000.0 - 0.030)
+    check("a file position is not mistaken for one",
+          HC.frame_time(5000.0, 1000.0) == 1000.0
+          and HC.frame_time(0.0, 1000.0) == 1000.0)
+
+    h = HC.Health()
+    for i in range(31):
+        h.frame(10.0 + i / 30.0, 10.0 + i / 30.0 + 0.012)
+    check("health measures the camera's rate and the lag",
+          round(h.fps()) == 30 and round(h.lag_ms()) == 12)
+    tally = HC.HubTally(HC.setup_from_flags(
+        "0", {"red": square, "blue": square}, {}, 280.0))
+    check("the info line fits bioarena's 64 characters",
+          len(HC.info_line({str(i): h for i, _ in enumerate(range(9))},
+                           tally)) <= 64)
+
+
+def test_hub_multi_camera_setup():
+    """Several cameras, several outlines per hub, combined into one count.
+
+    From in front a ball that clips the rim and drops behind the hub looks
+    like a score (Einstein 1: 832 net entries over the red hood, 415 real),
+    so the way to accuracy is cameras close to each hub -- more than one per
+    hub, at different distances. The feed still carries one number per hub
+    that must never go down.
+    """
+    from tbavid import hubcount as HC
+
+    sq = [[100, 100], [200, 100], [200, 200], [100, 200]]
+    cfg = {"combine": {"red": "sum", "blue": "median"},
+           "cameras": [
+               {"name": "red-left", "source": "0", "ball_area": 1800,
+                "zones": [{"hub": "red", "outline": sq}]},
+               {"name": "red-right", "source": "1", "ball_area": 900,
+                "zones": [{"hub": "red", "outline": "100,100,200,100,200,200"}]},
+               {"name": "blue-a", "source": "2", "ball_area": 300,
+                "zones": [{"hub": "blue", "outline": sq, "name": "ba"}]},
+               {"name": "blue-b", "source": "3", "ball_area": 300,
+                "zones": [{"hub": "blue", "outline": sq, "name": "bb"}]},
+               {"name": "blue-c", "source": "4", "ball_area": 300,
+                "zones": [{"hub": "blue", "outline": sq, "name": "bc"}]}]}
+    setup = HC.setup_from_dict(cfg)
+    check("a setup file parses: five cameras, both hubs",
+          len(setup.cameras) == 5 and setup.hubs() == ["red", "blue"])
+    check("each camera keeps its own ball size",
+          [z.counter.ball_area for z in setup.zones("red")] == [1800.0, 900.0])
+
+    t = HC.HubTally(setup)
+    zr = setup.zones("red")
+    zb = {z.name: z for z in setup.zones("blue")}
+    zr[0].counter.reported, zr[1].counter.reported = 3, 2
+    check("sum: two cameras on different chutes add up", t.value("red") == 5)
+    check("and the whole rise is reported once", t.rise("red") == 5
+          and t.rise("red") == 0)
+    zr[1].counter.reported = 4
+    check("a later rise on one camera reports only the new balls",
+          t.rise("red") == 2 and t.sent["red"] == 7)
+
+    # Three cameras on the same balls: one misses, one double-counts.
+    zb["ba"].counter.reported, zb["bb"].counter.reported = 10, 12
+    zb["bc"].counter.reported = 30
+    check("median: the odd camera out is outvoted", t.value("blue") == 12)
+    t.rise("blue")
+    zb["bc"].counter.reported = 60
+    check("and its runaway count does not move the hub", t.rise("blue") == 0)
+    setup.combine["blue"] = "max"
+    check("max takes the camera that missed fewest", t.value("blue") == 60)
+    setup.combine["blue"] = "median"
+
+    # Never-decreasing in, never-decreasing out, under every rule.
+    import random as _r
+    rng = _r.Random(7)
+    ok = True
+    for how in HC.COMBINE:
+        setup.combine["blue"] = how
+        for z in zb.values():
+            z.counter.reported = 0
+        tt = HC.HubTally(setup)
+        last = 0
+        for _ in range(300):
+            rng.choice(list(zb.values())).counter.reported += rng.randint(0, 3)
+            v = tt.value("blue")
+            ok &= v >= last
+            last = v
+    check("sum, max and median of rising counts never fall", ok)
+
+    def refused(c, why):
+        try:
+            HC.setup_from_dict(c)
+            check(why, False)
+        except ValueError:
+            check(why, True)
+
+    one = lambda **kw: {"cameras": [dict({"name": "a", "source": "0",
+                                          "ball_area": 300, "zones": [
+                                              {"hub": "red", "outline": sq}]},
+                                         **kw)]}
+    refused({"cameras": []}, "a setup with no cameras is refused")
+    refused(one(ball_area=0), "a camera without a measured ball is refused")
+    check("but accepted while measuring it, which is how it gets one",
+          HC.setup_from_dict(one(ball_area=0), measuring=True).cameras[0]
+          .ball_area == 0)
+    refused(one(zones=[{"hub": "green", "outline": sq}]),
+            "a zone for a hub that is not red or blue is refused")
+    refused(one(zones=[{"hub": "red", "outline": [[1, 2], [3, 4]]}]),
+            "an outline of two points is refused")
+    refused(one(zones=[]), "a camera with no zones is refused")
+    two = one()
+    two["cameras"].append(dict(two["cameras"][0], name="b"))
+    refused(two, "one device used by two cameras is refused")
+    refused(dict(one(), combine={"red": "average"}),
+            "an unknown combine rule is refused")
+
+    # The single-camera flags still mean what they did.
+    flags = HC.setup_from_flags("0", {"red": sq, "blue": sq}, {}, 280.0)
+    check("--red/--blue on one --source are one camera, two zones",
+          len(flags.cameras) == 1 and len(flags.cameras[0].zones) == 2)
+    split = HC.setup_from_flags("0", {"red": sq, "blue": sq},
+                                {"blue": "1"}, 280.0)
+    check("--blue-source gives blue its own camera",
+          sorted(c.source for c in split.cameras) == ["0", "1"])
+
+
+def test_hub_calibration_and_gui_helpers():
+    """Blur correction, the setup file round trip, and the window's helpers.
+
+    The blur fraction that best matched the scoreboard was different on
+    every Einstein match (0 on 4, 0.2-0.3 on 5, 0.5-0.7 on 1), so it is a
+    per-camera setting chosen against a hand count, not a constant.
+    """
+    import math
+    from tbavid import hubcount as HC
+    from tbavid import hubapp as G
+
+    sq = [(100.0, 100.0), (300.0, 100.0), (300.0, 300.0), (100.0, 300.0)]
+    A1 = 300.0
+    d = math.sqrt(4 * A1 / math.pi)
+    # One ball smeared 2 diameters along x: area A1 + d*2d, length 3d.
+    L = 3 * d
+    streak_area = A1 + d * (L - d)
+    cov = (L * L / 16.0, d * d / 16.0, 0.0)          # uniform ellipse spread
+
+    cov = (d * d / 16.0, L * L / 16.0, 0.0)          # smeared along y
+
+    def cross(blur, area, cov_):
+        c = HC.CrossingCounter(sq, A1, blur)
+        c.update([(200.0, 60.0, area) + cov_])
+        c.update([(200.0, 90.0, area) + cov_])            # outside, falling
+        c.update([(200.0, 120.0, area) + cov_])           # crosses in
+        return c.reported
+
+    check("uncorrected, one smeared ball counts as its area in balls",
+          cross(0.0, streak_area, cov) == HC.balls_for(streak_area, A1) > 1)
+    check("fully corrected, the same streak is one ball",
+          cross(1.0, streak_area, cov) == 1)
+    check("a blob with no shape recorded is never corrected",
+          cross(1.0, streak_area, ()) == HC.balls_for(streak_area, A1))
+    try:
+        HC.CrossingCounter(sq, A1, 1.5)
+        check("a blur fraction over 1 is refused", False)
+    except ValueError:
+        check("a blur fraction over 1 is refused", True)
+
+    # A replay of recorded blobs gives each hub's count at a blur setting.
+    cam = HC.setup_from_dict({"cameras": [{
+        "name": "c", "source": "x.mp4", "ball_area": A1, "blur": 0.5,
+        "remove_static": True,
+        "zones": [{"hub": "red", "outline": [list(p) for p in sq]}]}]}).cameras[0]
+    frames = [{cam.zones[0].name: [(200.0, 60.0 + 30 * i, streak_area) + cov]}
+              for i in range(3)]
+    check("replay_counts: no correction", HC.replay_counts(cam, frames, 0.0)
+          == {"red": HC.balls_for(streak_area, A1)})
+    check("replay_counts: full correction", HC.replay_counts(cam, frames, 1.0)
+          == {"red": 1})
+
+    # What the window builds is what hubfeed --setup reads, and back again.
+    setup = HC.setup_from_dict({"combine": {"red": "max", "blue": "sum"},
+                                "cameras": [{"name": "c", "source": "0",
+                                             "ball_area": A1, "blur": 0.3,
+                                             "remove_static": True, "fps": 60,
+                                             "zones": [{"name": "z", "hub": "red",
+                                                        "outline": [list(p) for p in sq]}]}]})
+    again = HC.setup_from_dict(HC.setup_to_dict(setup))
+    c0, c1 = setup.cameras[0], again.cameras[0]
+    check("a setup survives saving and loading",
+          (c1.blur, c1.remove_static, c1.fps, c1.ball_area, again.combine["red"])
+          == (0.3, True, 60.0, A1, "max")
+          and c1.zones[0].counter.poly == c0.zones[0].counter.poly
+          and c1.zones[0].counter.blur == 0.3)
+    plain = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0",
+                                             "ball_area": A1, "zones": [
+                                                 {"hub": "red", "outline": [list(p) for p in sq]}]}]})
+    check("a camera with no blur given gets the measured default",
+          plain.cameras[0].blur == HC.DEFAULT_BLUR)
+    plain.cameras[0].blur = 0.0
+    check("and a chosen blur of 0 survives saving and loading",
+          HC.setup_from_dict(HC.setup_to_dict(plain)).cameras[0].blur == 0.0)
+    # The old page saved every camera's blur slider, 0 unless moved: in a
+    # file from before the current rules a 0 is the old default, not a choice.
+    old = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0",
+                                           "ball_area": A1, "blur": 0,
+                                           "zones": [{"hub": "red", "outline":
+                                                      [list(p) for p in sq]}]}]})
+    check("an old setup's blur 0 is read as unset, and says so",
+          old.cameras[0].blur == HC.DEFAULT_BLUR and len(old.notes) == 1
+          and "'c'" in old.notes[0])
+    old2 = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0",
+                                            "ball_area": A1, "blur": 0.5,
+                                            "zones": [{"hub": "red", "outline":
+                                                       [list(p) for p in sq]}]}]})
+    check("an old setup's chosen non-zero blur is kept",
+          old2.cameras[0].blur == 0.5 and not old2.notes)
+
+    # The window's pure helpers.
+    check("a 1080p frame is shrunk to the view, a small one is not",
+          G.fit_scale(1920, 1080) == 0.5 and G.fit_scale(640, 480) == 1.0)
+    check("a click on the half-size preview is stored in frame pixels",
+          G.to_frame(100, 50, 0.5) == (200.0, 100.0))
+    check("and drawn back where it was clicked",
+          G.to_canvas([(200.0, 100.0)], 0.5) == [100.0, 50.0])
+    check("camera numbers are cameras, paths are recordings",
+          not G.is_file_source("0") and G.is_file_source("hub.mp4")
+          and not G.is_file_source("rtsp://cam/1"))
+    check("names are made unique", G.next_name(["cam0", "cam02"], "cam0") == "cam03"
+          and G.next_name([], "cam0") == "cam0")
+    check("an empty setup says to add a camera",
+          G.problems(G.new_setup()) == ["Add a camera (or a recording) first."])
+    todo = G.problems({"cameras": [{"name": "c", "source": "0", "zones": []}]})
+    check("a camera with no outline and no ball size says both",
+          len(todo) == 2 and "outline" in todo[0] and "ball" in todo[1])
+
+
+def test_hub_ui_controller_and_web():
+    """The logic both front ends share, and the web page's HTTP surface.
+
+    The web page is a view over HubController, so what a button does is
+    tested here, without a browser. The web server controls cameras
+    and lists the disk, so it must refuse other hosts and non-JSON posts.
+    """
+    import json
+    import os
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from tbavid import hubapp as A
+    from tbavid import hubweb as W
+
+    with tempfile.TemporaryDirectory() as tmp:
+        video = os.path.join(tmp, "hub practice.mp4")
+        open(video, "wb").close()
+        ctl = A.HubController()
+        cam = ctl.add_camera(video)
+        check("a recording is added under its file name",
+              cam["name"] == "hub practice" and cam["zones"] == [])
+        try:
+            ctl.add_camera(video)
+            check("the same source twice is refused", False)
+        except ValueError:
+            check("the same source twice is refused", True)
+        try:
+            ctl.add_camera(os.path.join(tmp, "missing.mp4"))
+            check("a recording that does not exist is refused", False)
+        except ValueError:
+            check("a recording that does not exist is refused", True)
+        z = ctl.add_zone(cam["name"], "red",
+                         [[1, 1], [50, 1], [50, 50], [50, 50]])
+        check("a double-click's repeated corner is dropped",
+              len(z["outline"]) == 3 and z["hub"] == "red")
+        try:
+            ctl.add_zone(cam["name"], "red", [[1, 1], [2, 2]])
+            check("an outline of two corners is refused", False)
+        except ValueError:
+            check("an outline of two corners is refused", True)
+        c = ctl.update_camera(cam["name"], {"name": "red-exit", "ball_area": "1800",
+                                            "blur": 0.3, "remove_static": True})
+        check("camera settings are updated, the name included",
+              (c["name"], c["ball_area"], c["blur"], c["remove_static"])
+              == ("red-exit", 1800.0, 0.3, True))
+        try:
+            ctl.update_camera("red-exit", {"blur": 2})
+            check("a blur over 1 is refused", False)
+        except ValueError:
+            check("a blur over 1 is refused", True)
+        st = ctl.state()
+        check("the state a front end draws is plain JSON",
+              json.loads(json.dumps(st))["cfg"]["cameras"][0]["name"] == "red-exit"
+              and st["problems"] == [] and not st["running"])
+        path = ctl.save(os.path.join(tmp, "cams.json"))
+        from tbavid.hubcount import load_setup
+        check("what the controller saves, hubfeed --setup runs",
+              load_setup(path).cameras[0].zones[0].hub == "red")
+        ls = A.list_dir(tmp)
+        check("the recording picker lists videos",
+              ls["videos"] == ["hub practice.mp4"])
+
+        # A Twitch or YouTube page is a stream, found by host, not a file.
+        from tbavid import hubcount as HC
+        check("Twitch and YouTube pages are streams",
+              all(HC.is_stream_page(u) for u in (
+                  "https://www.twitch.tv/firstinspires", "twitch.tv/frc",
+                  "https://www.youtube.com/watch?v=abc", "youtu.be/abc")))
+        check("files, camera numbers and other URLs are not",
+              not any(HC.is_stream_page(u) for u in (
+                  "match.mp4", "0", "rtsp://cam/1", "https://twitch.tv.evil.com/x",
+                  "/Users/x/twitch.tv.mp4")))
+        check("a stream is named after its channel",
+              HC.stream_name("https://www.twitch.tv/firstinspires_newton/")
+              == "firstinspires_newton"
+              and HC.stream_name("https://www.twitch.tv/videos/414792150")
+              == "vod-414792150")
+        check("source kinds", (A.source_kind("0"), A.source_kind(video),
+                               A.source_kind("twitch.tv/frc"))
+              == ("camera", "file", "stream"))
+        check("network cameras are wireless, streams are not",
+              A.source_kind("rtsp://192.168.1.50:554/stream1") == "wireless"
+              and A.source_kind("http://192.168.1.60:8080/video") == "wireless"
+              and A.source_kind("https://www.twitch.tv/frc") == "stream"
+              and not HC.is_network_camera("https://youtu.be/x"))
+        wc = ctl.add_camera("rtsp://admin:hunter2@192.168.1.50:554/stream1")
+        check("a Wi-Fi camera is named after its address",
+              wc["name"] == "wifi-50" and ctl.state()["kinds"]["wifi-50"] == "wireless")
+        check("and its password never reaches the on-screen log",
+              not any("hunter2" in m[2] for m in ctl.messages_since(0))
+              and A.redact("rtsp://admin:hunter2@h:554/s") == "rtsp://***@h:554/s")
+        ctl.remove_camera("wifi-50")
+        sc = ctl.add_camera("https://www.twitch.tv/firstinspires")
+        check("a stream is added without looking it up (it may be offline)",
+              sc["name"] == "firstinspires"
+              and ctl.state()["kinds"]["firstinspires"] == "stream")
+        ctl.remove_camera("firstinspires")
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), W.make_handler(ctl))
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{port}"
+
+        def call(path_, body=None, headers=None):
+            req = urllib.request.Request(base + path_, data=body,
+                                         headers=headers or {})
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return r.status, r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+
+        code, page = call("/")
+        check("the page is served", code == 200 and b"<title>Hub Counter</title>" in page)
+        code, body = call("/api/state")
+        check("the state is served as JSON",
+              code == 200 and json.loads(body)["cfg"]["cameras"][0]["name"]
+              == "red-exit")
+        code, _ = call("/api/combine", json.dumps({"hub": "blue", "how": "max"}).encode(),
+                       {"Content-Type": "application/json"})
+        check("a JSON post changes the setup",
+              code == 200 and ctl.cfg["combine"]["blue"] == "max")
+        code, _ = call("/api/combine", json.dumps({"hub": "blue", "how": "avg"}).encode(),
+                       {"Content-Type": "application/json"})
+        check("a bad value is a 400, not a crash", code == 400)
+        code, _ = call("/api/stop", b"hub=blue", {"Content-Type":
+                                                  "application/x-www-form-urlencoded"})
+        check("a form post (what another website could send) is refused",
+              code == 415)
+        code, _ = call("/api/state", headers={"Host": "evil.example:8790"})
+        check("a request for another host name is refused (DNS rebinding)",
+              code == 403)
+        code, _ = call("/frame.jpg?cam=red-exit")
+        check("no picture yet is a 404", code == 404)
+        code, page = call("/board")
+        check("the scoreboard page is served",
+              code == 200 and b"<title>Hub Scoreboard</title>" in page)
+        code, body = call("/api/board")
+        b = json.loads(body) if code == 200 else {}
+        check("a stopped counter's board says so and shows zeros",
+              b.get("source") == "counter" and b.get("alert") == "counter stopped"
+              and b.get("score") == {"red": 0, "blue": 0})
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_frc_fms_sender():
+    """Fuel events to frc-fms (github.com/arnan-bajaj/frc-fms).
+
+    frc-fms adds timestamped events and buckets them into periods by their
+    wall-clock time, so a ball must carry the time it was SEEN, and an event
+    lost in a failed POST is a ball lost -- unlike bioarena's cumulative feed,
+    where the next datagram carries everything.
+    """
+    from tbavid import fmslink as FL
+
+    check("a URL target is frc-fms, host:port is bioarena",
+          FL.is_fms_target("http://k@10.0.0.2:8000") and not FL.is_fms_target("10.0.100.5:8411"))
+    check("the vision key rides in the URL",
+          FL.split_target("http://s3cret@192.168.1.10:8000/") == ("http://192.168.1.10:8000", "s3cret"))
+    try:
+        FL.FmsSender("http://192.168.1.10:8000", start=False)
+        check("a URL without the vision key is refused", False)
+    except ValueError:
+        check("a URL without the vision key is refused", True)
+
+    calls, fail = [], [True]
+    def post(url, body, key):
+        calls.append((url, body, key))
+        if fail[0]:
+            raise OSError("connection refused")
+        return {"record": None}
+    mono = [100.0]
+    s = FL.FmsSender("http://k@fms:8000", post=post, clock=lambda: mono[0],
+                     wall=lambda: 1_700_000_000.0 + mono[0], start=False)
+    s.score("red", 2, captured_at=99.5)          # seen 0.5 s ago
+    s.score("blue", 1, captured_at=100.0)
+    check("an event carries the wall-clock time it was seen, not sent",
+          s._buf["red"] == [[1_700_000_099.5, 2]])
+    check("a failed POST keeps every event queued",
+          not s.flush() and s.pending() == 2 and s.send_errors == 1 and not s.linked())
+    fail[0] = False
+    s.score("red", 1, captured_at=100.0)
+    ok = s.flush()
+    url, body, key = calls[-1]
+    check("the next POST carries all of it, in frc-fms's shape, with the key header",
+          ok and url == "http://fms:8000/api/vision/events" and key == "k"
+          and body["events"] == {"red": [[1_700_000_099.5, 2], [1_700_000_100.0, 1]],
+                                 "blue": [[1_700_000_100.0, 1]]}
+          and body["source"] == "live" and s.pending() == 0 and s.linked())
+    check("cumulative counts stay for the page and the board",
+          s.counts == {"red": 3, "blue": 1})
+    import tbavid.hubcount as HC2
+    from types import SimpleNamespace as NS
+    health = {"c": NS(fps=lambda: 60.0, lag_ms=lambda: 4.0)}
+    tally = NS(zones={"red": [], "blue": []}, setup=NS(combine={}))
+    line = HC2.status_line(s, health, tally)
+    check("the console names frc-fms, not 'bioarena ?', when posting to it",
+          "frc-fms took it" in line and "bioarena" not in line)
+
+    # frc-fms's control page: its Vision panel shows "<fps> fps <counter>"
+    # or `error` in red, and its "vision ok" pill needs every hub without
+    # one. Posting only `counter` showed "undefined fps" and never went red.
+    check("before the counter reports, no fps is claimed",
+          "fps" not in body["status"]["red"] and body["status"]["red"]["counter"])
+    sq = [[100, 100], [200, 100], [200, 140], [100, 140]]
+    setup = HC2.setup_from_dict({"cameras": [
+        {"name": "rc", "source": "0", "ball_area": 300,
+         "model": {"weights": "m.pt"}, "zones": [{"hub": "red", "outline": sq}]},
+        {"name": "bc", "source": "1", "ball_area": 300,
+         "zones": [{"hub": "blue", "outline": sq}]}]})
+    h = {"rc": NS(fps=lambda: 59.6), "bc": NS(fps=lambda: 60.0)}
+    st = HC2.hub_status(setup, h, stale=[])
+    check("each hub reports its camera's fps and which counter runs",
+          st == {"red": {"fps": 59.6, "counter": "tbavid colour + model"},
+                 "blue": {"fps": 60.0, "counter": "tbavid colour"}})
+    st = HC2.hub_status(setup, h, stale=["bc"], model_off=["rc"])
+    check("a dead camera is an error frc-fms shows in red",
+          st["blue"]["error"] == "no frames from bc")
+    check("a model dropped as too slow is named, but is not an error",
+          "model off" in st["red"]["counter"] and "error" not in st["red"])
+    h["bc"] = NS(fps=lambda: 14.0)
+    check("a camera under MIN_FPS is an error: counts run low",
+          "too slow" in HC2.hub_status(setup, h, stale=[])["blue"]["error"])
+    s.hub_status = HC2.hub_status(setup, {"rc": NS(fps=lambda: 59.6),
+                                          "bc": NS(fps=lambda: 60.0)}, stale=[])
+    s.score("red", 1, captured_at=100.0)
+    s.flush()
+    sent = calls[-1][1]["status"]
+    check("and that is what goes to frc-fms, with the running totals",
+          sent["red"]["fps"] == 59.6 and sent["red"]["session_total"] == 4
+          and sent["blue"]["counter"] == "tbavid colour")
+
+
+def test_model_worker_and_fms_combo():
+    """The model half's thread, shared by our counter and the frc-fms plugin.
+
+    It must never make the camera wait, must say when it skips frames, and
+    must give up when it cannot keep up -- a lagging model held the hub page
+    at 52 against colour's 103 on 4 CPU cores.
+    """
+    import threading
+    import time
+    from tbavid import hubmodel as HM
+    from tbavid import fms_counter as FC
+
+    sq = [[100, 100], [200, 100], [200, 140], [100, 140]]
+    box = lambda x, y: (x - 8, y - 8, x + 8, y + 8)
+    gate = threading.Event()
+
+    class Eye:
+        """Stands in for ModelEye: a ball falling into the hub, one step per
+        frame, and only as fast as `gate` lets it."""
+        prev = None
+        def __init__(self):
+            self.y = 20
+        def detect(self, frame):
+            gate.wait(5)
+            self.y += 15
+            return ([(box(150, self.y), 0.6)] if self.y < 130 else []), []
+
+    rises = []
+    mc = HM.ModelCounter(sq, fps=30.0, min_track=3, vanish=2, reacquire=3)
+    w = HM.ModelWorker(Eye(), {"red": mc}, on_rise=lambda n, tag: rises.append((n, tag)))
+    gate.set()
+    for i in range(20):
+        w.offer(None, i / 30, tag=f"cap{i}")
+        while w._job is not None:
+            time.sleep(0.001)
+    time.sleep(0.2)
+    check("the worker counts the model's ball and hands back the frame's tag",
+          mc.reported == 1 and rises and rises[0][0] == "red"
+          and rises[0][1].startswith("cap"))
+    gate.clear()
+    offs = []
+    slow = HM.ModelWorker(Eye(), {"red": HM.ModelCounter(sq)},
+                          on_rise=lambda n, tag: None,
+                          on_off=lambda o, k, tag: offs.append((o, k)))
+    for i in range(HM.MODEL_WARMUP_FRAMES + 5):
+        slow.offer(None, i / 30)            # never blocks, model stuck
+    gate.set()
+    time.sleep(0.3)
+    check("offer never blocks; a stuck model's frames are counted as skipped",
+          slow.skipped >= HM.MODEL_WARMUP_FRAMES)
+    check("and a model that skipped most of them turns itself off",
+          slow.off and len(offs) == 1)
+    slow.offer(None, 0.0)
+    check("after which it takes no more frames", slow.offered == HM.MODEL_WARMUP_FRAMES + 5)
+
+    class Broken:
+        prev = None
+        def detect(self, frame):
+            raise RuntimeError("MPS out of memory")
+    errs = []
+    b = HM.ModelWorker(Broken(), {}, on_rise=lambda n, tag: None, on_error=errs.append)
+    b.offer(None, 0.0)
+    time.sleep(0.2)
+    check("a model error stops the worker and is reported, not swallowed",
+          b.error == "MPS out of memory" and len(errs) == 1)
+    for x in (w, slow, b):
+        x.close()
+
+    # The frc-fms plugin: same config file keys as ColourCounter, plus a model.
+    base = {"hub": "red", "outline": sq, "ball_area": 300}
+    try:
+        FC.ComboCounter(dict(base))
+        check("ComboCounter without a model is refused", False)
+    except ValueError:
+        check("ComboCounter without a model is refused", True)
+    cc = FC.ComboCounter(dict(base, model="fuel_relabel.pt", model_weight=0.4))
+    check("ComboCounter reads the model and its share from vision.yaml",
+          cc.model["weight"] == 0.4 and cc.model["weights"] == "fuel_relabel.pt")
+    check("plain ColourCounter stays colour only", FC.ColourCounter(dict(base)).model is None)
+    # The blend inside the plugin, with the halves set by hand.
+    from types import SimpleNamespace as NS
+    cc.counters = [NS(reported=10)]
+    cc.models = [NS(reported=4)]
+    cc.worker = NS(off=False, error="")
+    check("the plugin reports the blend of its halves (0.4 x 4 + 0.6 x 10)",
+          cc._zone_count(0) == 8)
+    cc.worker.off = True
+    check("and colour alone once its model is off", cc._zone_count(0) == 10)
+    live = FC.ComboCounter(dict(base, model="m.pt"))
+    t0 = 1_700_000_000.0
+    seen = [live._is_offline(t0 + i / 60, wall=t0 + i / 60 + 0.01) for i in range(5)]
+    check("frames at camera speed, stamped now, are live: the model may skip",
+          not any(seen))
+    re = FC.ComboCounter(dict(base, model="m.pt"))
+    seen = [re._is_offline(t0 + i * 0.5, wall=t0 + 1) for i in range(10)]
+    check("a recording read faster than real time (rescore.py) waits for the model",
+          seen[-1] and re.offline)
+    old = FC.ComboCounter(dict(base, model="m.pt"))
+    check("so does one read slower, stamped when it was recorded: a busy CPU "
+          "made rescore.py look live and the model was dropped",
+          old._is_offline(t0, wall=t0 + 3600) and old.offline)
+
+
+def test_relabel_video_helpers():
+    """The bootstrap labeller's pure parts: tiling, merging, clipping, output.
+
+    Tiles are what fix the halved-frame miss (84% -> 93% of balls in flight
+    found on Einstein 4), so they must cover every pixel; a tile that cuts a
+    ball in half must not leave it in the image unlabelled.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import relabel_video as RV
+
+    t = RV.tiles_for(1920, 700)
+    covered = all(any(x <= px < x + RV.TILE and y <= py < y + RV.TILE for x, y in t)
+                  for px in range(0, 1920, 7) for py in range(0, 700, 7))
+    check("tiles cover a 1920x700 main view, inside the frame",
+          covered and all(x + RV.TILE <= 1920 and y + RV.TILE <= 700 for x, y in t))
+    check("a frame smaller than a tile is one tile", RV.tiles_for(500, 400) == [(0, 0)])
+    merged = RV.nms([((0, 0, 20, 20), 0.9), ((1, 1, 21, 21), 0.5), ((100, 100, 120, 120), 0.3)])
+    check("overlapping tiles' duplicate of a ball is merged to the surer box",
+          merged == [((0, 0, 20, 20), 0.9), ((100, 100, 120, 120), 0.3)])
+    keep, grey = RV.clip_labels([(0, (10, 10, 30, 30), "model"),       # inside
+                                 (0, (630, 10, 650, 30), "model"),     # half out
+                                 (0, (636, 10, 656, 30), "motion"),    # mostly out
+                                 (1, (600, 0, 700, 100), "robot")],    # robot, 40% in
+                                0, 0, 640, 640)
+    check("a ball at least half inside a tile is kept, shifted",
+          [(c, b) for c, b, _ in keep] == [(0, (10, 10, 30, 30)), (0, (630, 10, 640, 30))])
+    check("a ball mostly cut off is greyed, not left unlabelled; a cut robot is dropped",
+          grey == [(636, 10, 640, 30)])
+    import tempfile
+    import train as TR
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "mix.yaml").write_text(
+        "path: /workspace/frc\ntrain: [dataset-scout/images/train, dataset_einstein/images/train]\n"
+        "val: [dataset-scout/images/val, dataset_einstein/images/val]\n")
+    check("train.py finds the labels of every set a mixed yaml trains on",
+          [str(p) for p in TR.label_dirs(tmp / "mix.yaml")] ==
+          ["/workspace/frc/dataset-scout/labels/train", "/workspace/frc/dataset_einstein/labels/train",
+           "/workspace/frc/dataset-scout/labels/val", "/workspace/frc/dataset_einstein/labels/val"])
+    rel = tmp / "dataset_relabel-fuel"
+    (rel / "images" / "train").mkdir(parents=True)
+    (rel / "labels" / "train").mkdir(parents=True)
+    (rel / "labels" / "train" / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+    (rel / "dataset.yaml").write_text("path: dataset_relabel-fuel\ntrain: images/train\n"
+                                      "val: images/train\n")
+    TR.repoint_dataset(rel / "dataset.yaml")
+    check("a relative path: (subset_classes.py from --src dataset_relabel) is made absolute",
+          f"path: {rel.resolve()}" in (rel / "dataset.yaml").read_text()
+          and any(d.rglob("*.txt") for d in TR.label_dirs(rel / "dataset.yaml")))
+    row = [(0, (x, 50, x + 14, 64), "model") for x in range(0, 140, 20)]
+    shirt = (0, (300, 40, 350, 75), "model")
+    near = [(0, (x, 600, x + 30, 630), "model") for x in range(0, 300, 40)]
+    kept = RV.drop_oversized(row + [shirt] + near + [(1, (400, 0, 600, 200), "robot")])
+    check("a shirt-sized 'ball' among 14 px balls is dropped; big near balls and robots stay",
+          shirt not in kept and len(kept) == len(row) + len(near) + 1)
+    # --from-scraper: samples on a clean render's back-to-back clock, never
+    # just after a cut, where "two frames earlier" is another shot.
+    ranges = [(10.0, 12.0), (50.0, 51.0)]
+    clean = RV.clean_sample_times(ranges, 0.5)
+    check("clean-render samples skip the first 0.1 s after each cut",
+          clean == [0.1, 0.6, 1.1, 1.6, 2.1, 2.6])
+    check("raw samples are the same moments on the download's clock",
+          RV.raw_sample_times(ranges, 0.5) == [10.1, 10.6, 11.1, 11.6, 50.1, 50.6])
+    known = {"2026nhdur_qm7_abc": "val"}
+    check("a match keeps the side it already has in the dataset being extended",
+          RV.split_for("2026nhdur_qm7_abc", known, 0.0) == "val")
+    new = [RV.split_for(f"2026x_qm{i}_k{i}", {}, 0.2) for i in range(200)]
+    check("a new match goes by its hash: stable, about --val-frac of them to val",
+          new == [RV.split_for(f"2026x_qm{i}_k{i}", {}, 0.2) for i in range(200)]
+          and 20 <= new.count("val") <= 60)
+    ds = Path(tempfile.mkdtemp())
+    for split, name in (("train", "2026a_qm1_x_000010.jpg"), ("val", "2026a_qm2_y_000020.jpg")):
+        (ds / "images" / split).mkdir(parents=True)
+        (ds / "images" / split / name).write_bytes(b"")
+    check("known splits are read off prepare_dataset's frame names",
+          RV.known_splits(ds) == {"2026a_qm1_x": "train", "2026a_qm2_y": "val"})
+    manifest = {"videos": {
+        "2026a_qm1_x": {"status": "ok", "yt_key": "x", "clean_path": "/v/a.mp4",
+                        "analysis": {"keep_ranges": [[5, 9]]},
+                        "crop": {"x": 0, "y": 40, "w": 1920, "h": 900}},
+        "2026a_qm3_z": {"status": "quarantined", "analysis": {"keep_ranges": [[0, 1]]}},
+        "2026b_qm4_w": {"status": "ok", "analysis": {"keep_ranges": []}}}}
+    jobs = RV.scraper_jobs(manifest, [], RV.known_splits(ds), 0.2, False)
+    check("the scraper's usable videos become jobs: quarantined and empty ones skipped",
+          [(j["stem"], j["split"], j["crop"]) for j in jobs]
+          == [("2026a_qm1_x", "train", (0, 40, 1920, 900))])
+    check("--include-quarantined takes them too",
+          len(RV.scraper_jobs(manifest, [], {}, 0.2, True)) == 2)
+    check("--matches narrows by substring",
+          RV.scraper_jobs(manifest, ["2026b"], {}, 0.2, True) == [])
+    import subset_classes as SC
+    block = "path: /x\ntrain: images/train\nnames:\n  0: fuel\n  1: robot_blue\n  2: robot_red\n"
+    check("subset_classes reads the source's class order (block, map and list forms)",
+          SC.yaml_names(block) == ["fuel", "robot_blue", "robot_red"]
+          and SC.yaml_names("names: {0: fuel, 1: hub_red}") == ["fuel", "hub_red"]
+          and SC.yaml_names("names: [robot_red, fuel]") == ["robot_red", "fuel"]
+          and SC.index_map(["fuel"], SC.yaml_names("names: [robot_red, fuel]")) == {1: 0})
+    moved = Path(tempfile.mkdtemp())
+    (moved / "videos").mkdir()
+    (moved / "videos" / "2026a_qm1_x.mp4").write_bytes(b"")
+    (moved / "raw").mkdir()
+    (moved / "raw" / "rawkey.mkv").write_bytes(b"")
+    j = RV.resolve_source({"stem": "2026a_qm1_x", "clean": "/Users/old/data/videos/2026a_qm1_x.mp4",
+                           "raw": None, "yt_key": "x", "crop": (0, 0, 10, 10)}, moved)
+    r = RV.resolve_source({"stem": "2026a_qm2_y", "clean": None, "raw": "/gone/rawkey.mkv",
+                           "yt_key": "rawkey", "crop": (0, 0, 10, 10)}, moved)
+    check("a moved data folder: clean renders and raw downloads found by name under --data",
+          (j["kind"], Path(j["path"]).name, r["kind"], Path(r["path"]).name)
+          == ("clean", "2026a_qm1_x.mp4", "raw", "rawkey.mkv"))
+    fj = RV.frame_jobs([Path("f/2026a_qm1_x_000030.jpg"), Path("f/2026a_qm1_x_000010.jpg"),
+                        Path("f/2026a_qm2_y_000020.jpg"), Path("f/notaframe.jpg")],
+                       {"2026a_qm2_y": "val"}, 0.0, [])
+    check("exported frames group into one job per match, in frame order, keeping known splits",
+          [(j["stem"], j["split"], [f.name for f in j["files"]]) for j in fj]
+          == [("2026a_qm1_x", "train", ["2026a_qm1_x_000010.jpg", "2026a_qm1_x_000030.jpg"]),
+              ("2026a_qm2_y", "val", ["2026a_qm2_y_000020.jpg"])])
+    import numpy as np
+    rng = np.random.default_rng(1)
+    def balls(h, s_lo, s_hi, n=2000):
+        return np.stack([rng.integers(h[0], h[1] + 1, n), rng.integers(s_lo, s_hi + 1, n),
+                         rng.integers(200, 256, n)], 1)
+    washed = RV.gate_from(balls((27, 31), 26, 90), 40)       # 2026inmis, measured
+    rich = RV.gate_from(balls((27, 30), 159, 255), 40)       # Einstein 4, measured
+    inside = lambda g, px: g[0][0] <= px[0] <= g[1][0] and px[1] >= g[0][1] and px[2] >= g[0][2]
+    check("the colour gate follows a washed-out broadcast's fuel down (S 26-90 passes)",
+          inside(washed, (29, 40, 230)) and not inside(RV.gate_from(balls((27, 30), 159, 255), 40), (29, 40, 230)))
+    check("and still keeps the Einstein stone border out on either (H 13-19)",
+          not inside(washed, (16, 100, 170)) and not inside(rich, (16, 100, 170)))
+    check("grey never passes, and too few confident balls means no measured gate",
+          washed[0][1] >= 20 and RV.gate_from(balls((27, 31), 26, 90), 5) is None)
+    check("labels are YOLO-normalised",
+          RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
+
+
+def test_hub_scoreboard_view():
+    """The live scoreboard: bioarena's score when linked, the camera's otherwise.
+
+    Linked, the big numbers are bioarena's `credited` (spec 4.4) -- the
+    match's score, fuel into an inactive hub left out -- not the counter's
+    session totals, which run across matches and include dark-hub fuel.
+    """
+    from tbavid.hubapp import board_view
+
+    reply = {"v": 1, "seq": 9, "match_state": "TELEOP_PERIOD", "match_time_s": 47.3,
+             "shift": "SHIFT2", "hub_active": {"red": True, "blue": False},
+             "match_count": {"red": 60, "blue": 4}, "credited": {"red": 57, "blue": 0},
+             "auto_count": {"red": 12, "blue": 0}}
+    b = board_view({"red": 310, "blue": 290}, True, True, reply, [], 40.0, [])
+    check("linked: the score is bioarena's credited count, with its clock",
+          b["source"] == "bioarena" and b["score"] == {"red": 57, "blue": 0}
+          and b["match_time_s"] == 47.3 and b["hub_active"]["blue"] is False
+          and b["raw"] == {"red": 310, "blue": 290} and "alert" not in b)
+    b = board_view({"red": 310, "blue": 290}, True, False, reply, [], 40.0, [])
+    check("a reply from a bioarena that has gone quiet is not shown as the score",
+          b["source"] == "counter" and b["score"] == {"red": 310, "blue": 290})
+    b = board_view({"red": 3}, True, False, None, ["red-cam"], None, [])
+    check("a blind camera is on the board",
+          b["alert"] == "no picture from red-cam" and b["score"]["blue"] == 0)
+    b = board_view({}, True, True, {"seq": 1}, [], None, [])
+    check("a reply without scores falls back to the camera counts",
+          b["source"] == "counter")
+    b = board_view({"red": 1}, True, True, reply, [], None, [], slow={"red-cam": 19.6})
+    check("a camera under 30 fps is flagged: 20 fps measured 25% error, 60 fps 10.5%",
+          "red-cam 20 fps" in b.get("alert", ""))
+    from tbavid.hubapp import slow_cameras
+    from tbavid.hubcount import Health
+    fast, slow_h, young = Health(), Health(), Health()
+    for i in range(60):
+        fast.frame(i / 60.0, i / 60.0 + 0.005)
+        slow_h.frame(i / 20.0, i / 20.0 + 0.005)
+    for i in range(5):
+        young.frame(i / 10.0, i / 10.0)
+    check("slow_cameras finds the 20 fps camera only, once it has a second of frames",
+          slow_cameras({"a": fast, "b": slow_h, "c": young}) == {"b": 20.0})
+    b = board_view({"red": 1}, True, True, reply, [], None, [], practice=True)
+    check("practice replies are labelled as the stand-in, not bioarena",
+          b["source"] == "practice" and b["score"]["red"] == 57)
+
+
+def test_hub_exit_line_counter():
+    """Counting balls as they come OUT of the hub.
+
+    Every scored ball leaves through an exit, so the exit count is the score,
+    and a ball that clips the rim and drops behind the hub -- the error that
+    sank the funnel-mouth counts (Einstein 1: 832 net entries over the red
+    hood, 415 real) -- never gets there.
+    """
+    from tbavid import hubcount as HC
+    from tbavid import hubapp as A
+
+    line, out = [(100.0, 100.0), (100.0, 200.0)], (160.0, 150.0)   # out = +x
+    A1 = 300.0
+
+    def run(path, area=A1, counter=None):
+        c = counter or HC.ExitLineCounter(line, out, A1)
+        for x, y in path:
+            c.update([(float(x), float(y), area)])
+        c.update([])
+        return c
+
+    c = run([(60, 150), (80, 150), (100 - 0.001, 150), (115, 150), (135, 150)])
+    check("a ball rolling out through the exit counts once", c.reported == 1)
+    c = run([(140, 150), (120, 150), (100.5, 150), (80, 150)])
+    check("a ball going the other way does not count", c.reported == 0)
+    c = run([(70, 150), (90, 150), (110, 150), (130, 150), (110, 150),
+             (90, 150), (70, 150)])
+    check("out and straight back in nets zero (after one report)",
+          c.net == 0 and c.reported == 1 and c.owed == 1)
+    c = run([(70, 60), (90, 60), (110, 60), (130, 60)])
+    check("a ball passing beyond the end of the line does not count",
+          c.reported == 0)
+    c = run([(70, 150), (90, 150), (110, 150)], area=3 * A1)
+    check("a clump of three through the exit counts three", c.reported == 3)
+    # A ball exactly on the line counts once, on the frame it leaves it.
+    c = run([(80, 150), (100, 150), (100, 150), (120, 150)])
+    check("stopping on the line counts once, not twice", c.reported == 1)
+    # Fast: 70 px a frame, over twice the ball's width, still caught because
+    # the path is tested, not the side each end is on.
+    c = HC.ExitLineCounter(line, out, A1)
+    c.min_reach = 200
+    run([(40, 150), (110, 150)], counter=c)
+    check("a fast ball crossing between frames is caught", c.reported == 1)
+    for bad, why in ((([(1, 1), (1, 1)], (5, 5)), "a line with one point"),
+                     (([(0, 0), (10, 0)], (5, 0)), "an out point on the line")):
+        try:
+            HC.ExitLineCounter(bad[0], bad[1], A1)
+            check(f"{why} is refused", False)
+        except ValueError:
+            check(f"{why} is refused", True)
+    check("segment crossing: through the middle",
+          HC.segments_cross((0, 5), (10, 5), (5, 0), (5, 10)))
+    check("segment crossing: not reaching the line",
+          not HC.segments_cross((0, 5), (4, 5), (5, 0), (5, 10)))
+
+    # Exit lines in a setup file survive a round trip, and replay.
+    cfg = {"cameras": [{"name": "c", "source": "x.mp4", "ball_area": A1,
+                        "zones": [{"name": "red-exit", "hub": "red",
+                                   "line": [list(p) for p in line],
+                                   "out": list(out)}]}]}
+    setup = HC.setup_from_dict(cfg)
+    z = setup.cameras[0].zones[0]
+    check("an exit zone is built as an exit line counter",
+          z.kind == "exit" and isinstance(z.counter, HC.ExitLineCounter))
+    again = HC.setup_to_dict(setup)
+    check("and saved back as a line and an out point",
+          again["cameras"][0]["zones"][0] == {"name": "red-exit", "hub": "red",
+                                              "line": [[100.0, 100.0], [100.0, 200.0]],
+                                              "out": [160.0, 150.0]})
+    frames = [{"red-exit": [(float(x), 150.0, A1)]} for x in (70, 90, 110, 130)]
+    check("replay counts exits too",
+          HC.replay_counts(setup.cameras[0], frames, 0.0) == {"red": 1})
+
+    # The website's controller makes one from three clicks.
+    ctl = A.HubController()
+    ctl.cfg["cameras"].append({"name": "c", "source": "0", "ball_area": A1,
+                               "zones": []})
+    zz = ctl.add_zone("c", "blue", [[100, 100], [100, 200], [160, 150]], "exit")
+    check("three clicks make an exit line",
+          zz["line"] == [[100.0, 100.0], [100.0, 200.0]] and zz["out"] == [160.0, 150.0]
+          and zz["name"] == "c-blue-exit")
+    try:
+        ctl.add_zone("c", "blue", [[100, 100], [100, 200]], "exit")
+        check("an exit line without its out point is refused", False)
+    except ValueError:
+        check("an exit line without its out point is refused", True)
+    check("the exit is drawn and searched around all three points",
+          A.zone_points(zz) == [[100.0, 100.0], [100.0, 200.0], [160.0, 150.0]])
+    check("and the setup the website saves runs headless",
+          HC.setup_from_dict(ctl.cfg).cameras[0].zones[0].kind == "exit")
+
+
+def test_ball_tracker_follows_through_the_apex():
+    """The renderer's tracker links balls by distance, not box overlap.
+
+    ByteTrack lost flying balls at the top of their arc: a 12-20 px ball
+    turning over stops overlapping a straight-line prediction. On 4 s of
+    Einstein 4, 19 of 20 flights lost there still had a 0.1-0.8 detection
+    where the ball was; ByteTrack took 1 of 25 flights through the apex, this
+    took 106. These fix the rules on synthetic arcs.
+    """
+    from tbavid.trackvis import BallTracker, Coaster
+
+    def box(x, y, w=16):
+        return (x - w / 2, y - w / 2, x + w / 2, y + w / 2)
+
+    # A ball thrown up and over: 12 px/frame sideways, rising, turning over at
+    # the top, falling -- the case that broke.
+    arc = [(100 + 12 * i, 400 - (30 * i - 1.5 * i * i)) for i in range(21)]
+    t = BallTracker()
+    ids = set()
+    for i, (x, y) in enumerate(arc):
+        conf = 0.15 if 8 <= i <= 12 else 0.6          # weak at the top
+        got = t.update([(box(x, y), conf)])
+        ids |= set(got)
+    check("one ball over its apex keeps one id", len(ids) == 1)
+
+    # Missed for three frames at the top, found again further along.
+    t = BallTracker()
+    ids = set()
+    for i, (x, y) in enumerate(arc):
+        if 9 <= i <= 11:
+            t.update([])
+            continue
+        ids |= set(t.update([(box(x, y), 0.6)]))
+    check("and through a three-frame gap", len(ids) == 1)
+
+    # A weak detection alone cannot start a track.
+    t = BallTracker()
+    check("a weak detection does not start a track",
+          t.update([(box(50, 50), 0.12)]) == {})
+
+    # Two balls crossing paths keep their own ids (nearest match first).
+    t = BallTracker()
+    a_ids, b_ids = set(), set()
+    for i in range(10):
+        got = t.update([(box(100 + 10 * i, 200), 0.6), (box(100 + 10 * i, 260), 0.6)])
+        for tid, bx in got.items():
+            (a_ids if bx[1] < 230 else b_ids).add(tid)
+    check("two balls side by side stay two tracks",
+          len(a_ids) == 1 and len(b_ids) == 1 and a_ids != b_ids)
+    # A far bigger object nearby is not taken for the ball.
+    t = BallTracker()
+    t.update([(box(100, 100), 0.6)])
+    got = t.update([(box(104, 100, w=80), 0.9)])
+    check("a robot-sized box is not linked to a ball's track",
+          1 not in got)
+
+    c = Coaster(coast=4)
+    c.update(0, {7: box(100, 100)})
+    c.update(1, {7: box(110, 100)})
+    _, coasting = c.update(2, {})
+    check("a lost moving ball is drawn where it should be",
+          7 in coasting and abs((coasting[7][0] + coasting[7][2]) / 2 - 120) < 1e-6)
+    for f in range(3, 7):
+        _, coasting = c.update(f, {})
+    check("but only for a few frames", 7 not in coasting)
+    c = Coaster()
+    for f in range(6):
+        c.update(f, {1: box(100 + (f % 2) * 3, 100)})       # jitter in a pile
+    check("a ball jittering in a pile draws no trail", c.moving_trail(1) == [])
+    c = Coaster()
+    for f in range(6):
+        c.update(f, {1: box(100 + 10 * f, 100)})
+    check("a ball travelling draws one", len(c.moving_trail(1)) == 6)
+
+
+def test_hub_feed_needs_no_opencv_to_load():
+    """The sender is stdlib only: it runs on whatever laptop is wired into the
+    field switch, and CI has no cv2. hubcount keeps cv2 inside functions."""
+    import ast
+    root = Path(__file__).resolve().parent.parent
+    third = {"numpy", "requests", "ultralytics", "torch", "cv2", "PIL"}
+    tree = ast.parse((root / "tbavid" / "hubfeed.py").read_text())
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found |= {a.name.split(".")[0] for a in node.names} & third
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found |= {node.module.split(".")[0]} & third
+    check("hubfeed.py imports no third-party package", not found)
+    for rel in ("tbavid/hubcount.py", "tbavid/hubapp.py", "tbavid/hubweb.py",
+                "tbavid/hubmodel.py"):
+        top = ast.parse((root / rel).read_text()).body
+        check(f"{rel} imports cv2, numpy and tkinter only inside functions",
+              not any(isinstance(n, (ast.Import, ast.ImportFrom)) and
+                      ({a.name.split(".")[0] for a in n.names}
+                       & {"cv2", "numpy", "tkinter"}
+                       if isinstance(n, ast.Import) else
+                       (n.module or "").split(".")[0] in {"cv2", "numpy", "tkinter"})
+                      for n in top))
+    top = ast.parse((root / "tbavid" / "hubcount.py").read_text()).body
+    check("hubcount.py imports cv2 and numpy only inside functions",
+          not any(isinstance(n, (ast.Import, ast.ImportFrom)) and
+                  ({a.name.split(".")[0] for a in n.names} & {"cv2", "numpy"}
+                   if isinstance(n, ast.Import) else
+                   (n.module or "").split(".")[0] in {"cv2", "numpy"})
+                  for n in top))
+
+
+def test_hub_model_blend():
+    """The fuel model as a second hub counter, blended with the colour one.
+
+    Colour over-counts (balls clipping the rim and dropping behind the hub
+    look like scores) and the model under-counts (the tracker drops balls
+    fired in streams); on Einstein 1, held out from training, colour was
+    9.1% off the official checkpoints, the model 12.1%, their mean 7.8%.
+    The blend must keep the feed's rule: never down.
+    """
+    from tbavid import hubcount as HC
+    from tbavid import hubmodel as HM
+
+    sq = [[100, 100], [200, 100], [200, 140], [100, 140]]
+    mc = HM.ModelCounter(sq, fps=30.0, min_track=3, vanish=2, reacquire=3)
+    box = lambda x, y: (x - 8, y - 8, x + 8, y + 8)
+    rises = 0
+    for i, y in enumerate(range(20, 130, 15)):          # falls into the hub
+        rises += mc.update(i / 30, [(box(150, y), 0.6)])
+    for j in range(8):                                   # and is gone
+        rises += mc.update((i + 1 + j) / 30, [])
+    check("a ball that falls into the hub and vanishes is one score",
+          mc.reported == 1 and rises == 1)
+    mc2 = HM.ModelCounter(sq, fps=30.0, min_track=3, vanish=2, reacquire=3)
+    for i, x in enumerate(range(-40, 360, 20)):          # passes over it
+        mc2.update(i / 30, [(box(x, 60), 0.6)])
+    for j in range(8):
+        mc2.update(1 + j / 30, [])
+    check("a ball that flies over the hub and leaves is not", mc2.reported == 0)
+    far = HM.ModelCounter(sq)
+    check("detections far from the hub are not the hub's",
+          far.near(box(150, 120)) and not far.near(box(900, 120)))
+    check("weak detections are ignored, as in the tuning",
+          HM.KEEP_CONF > HM.DET_CONF)
+
+    check("the crop covers the outline and stays in the frame",
+          HM.crop_box(sq, 1920, 1080) == (0, 0, 640, 640)
+          and HM.crop_box([[1800, 1000], [1900, 1000], [1900, 1060]], 1920, 1080)
+          == (1280, 440, 1920, 1080))
+    big = HM.crop_box([[0, 500], [600, 500], [600, 560]], 1920, 1080)
+    check("a close camera's big outline gets a bigger crop",
+          big[2] - big[0] == 1080)
+    check("the model runs at ~30 fps: every other frame of a 60 fps camera",
+          HM.model_stride(60) == 2 and HM.model_stride(30) == 1
+          and HM.model_stride(0) == 1)
+
+    import random as _r
+    rng = _r.Random(3)
+    c = m = last = 0
+    ok = True
+    for _ in range(500):
+        c += rng.randint(0, 2)
+        m += rng.randint(0, 2)
+        v = HM.blend(c, m, 0.4)
+        ok &= v >= last
+        last = v
+    check("a blend of rising counts never falls", ok)
+    check("a model that skips most frames is dropped after its warm-up",
+          HM.too_slow(HM.MODEL_WARMUP_FRAMES, HM.MODEL_WARMUP_FRAMES // 2)
+          and not HM.too_slow(HM.MODEL_WARMUP_FRAMES - 1, HM.MODEL_WARMUP_FRAMES - 1)
+          and not HM.too_slow(1000, 100))
+    check("and colour alone takes over: weight 0 is the colour count",
+          HM.blend(103, 1, 0.0) == 103)
+    check("weight 0 is colour alone, 1 the model alone",
+          HM.blend(10, 4, 0.0) == 10 and HM.blend(10, 4, 1.0) == 4
+          and HM.blend(10, 4, 0.5) == 7)
+
+    cfg = {"cameras": [{"name": "a", "source": "0", "ball_area": 300,
+                        "model": {"weights": "fuel_relabel.pt", "weight": 0.4,
+                                  "reacquire": 3},
+                        "zones": [{"hub": "red", "outline": sq},
+                                  {"hub": "blue", "line": [[0, 0], [10, 0]],
+                                   "out": [5, 5]}]}]}
+    setup = HC.setup_from_dict(cfg)
+    cam = setup.cameras[0]
+    check("a camera's model entry is read, defaults filled in",
+          cam.model["weight"] == 0.4 and cam.model["counter"]["reacquire"] == 3
+          and cam.model["counter"]["vanish"] == HM.DEFAULT_MODEL["vanish"])
+    check("exit lines stay colour only: the model needs an outline's box",
+          [z.name for z in cam.model_zones()] == ["a/red0"]
+          and cam.zones[1].weight == 0.0)
+    back = HC.setup_from_dict(HC.setup_to_dict(setup)).cameras[0].model
+    check("and saved back unchanged", back == cam.model)
+    zr = cam.zones[0]
+    zr.counter.reported = 10
+    check("before the model is attached the zone reads its colour count",
+          zr.reported == 10)
+    zr.model = HM.ModelCounter(sq)
+    zr.model.reported = 5
+    check("with it, the zone and the hub read the blend",
+          zr.reported == 8 and HC.HubTally(setup).value("red") == 8)
+    for bad, why in (({"weight": 0.4}, "a model with no weights file"),
+                     ({"weights": "x.pt", "weight": 1.5}, "a weight above 1")):
+        try:
+            HC.setup_from_dict({"cameras": [dict(cfg["cameras"][0], model=bad)]})
+            check(f"{why} is refused", False)
+        except ValueError:
+            check(f"{why} is refused", True)
+    # The web page's side: a model chosen on the page is saved and run.
+    import os
+    from tbavid import hubapp as A
+    with tempfile.TemporaryDirectory() as tmp:
+        video = os.path.join(tmp, "practice.mp4")
+        weights = os.path.join(tmp, "fuel_relabel.pt")
+        open(video, "wb").close()
+        open(weights, "wb").close()
+        ctl = A.HubController()
+        name = ctl.add_camera(video)["name"]
+        ctl.add_zone(name, "red", sq)
+        ctl.update_camera(name, {"ball_area": 300})
+        c = ctl.update_camera(name, {"model": weights})
+        check("choosing a model on the page turns the blend on at the tuned share",
+              c["model"] == {"weights": weights, "weight": HM.DEFAULT_WEIGHT})
+        c = ctl.update_camera(name, {"model_weight": 0.3})
+        check("and its share can be set", c["model"]["weight"] == 0.3)
+        try:
+            ctl.update_camera(name, {"model_weight": 2})
+            check("a share above 1 is refused", False)
+        except ValueError:
+            check("a share above 1 is refused", True)
+        check("the folder listing offers .pt files for the picker",
+              A.list_dir(tmp)["models"] == ["fuel_relabel.pt"])
+        if A._has_ultralytics():
+            check("a model that is there is ready to start", ctl.state()["problems"] == [])
+        else:
+            check("without Ultralytics the page says why before Start",
+                  any("Ultralytics" in p for p in ctl.state()["problems"]))
+        os.remove(weights)
+        check("a model file that has gone is caught before Start",
+              any("not there" in p for p in ctl.state()["problems"]))
+        saved = HC.load_setup(ctl.save(os.path.join(tmp, "cams.json")), measuring=True)
+        check("what the page saves, hubfeed --setup reads with the model",
+              saved.cameras[0].model["weight"] == 0.3)
+        c = ctl.update_camera(name, {"model": ""})
+        check("turning it off removes it", "model" not in c)
+    plain = HC.setup_from_dict({"cameras": [dict(cfg["cameras"][0], model=None)]})
+    check("no model entry: colour only, as before",
+          plain.cameras[0].model is None and plain.cameras[0].model_zones() == []
+          and "model" not in HC.setup_to_dict(plain)["cameras"][0])
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -2166,7 +3560,13 @@ def main() -> int:
                test_models_that_can_count_and_shoot, test_hub_geometry, test_scrimmage_scoreboard,
                test_nothing_to_verify_against, test_counting_model_dataset,
                test_robot_autolabel_rules,
-               test_model_must_name_its_classes):
+               test_model_must_name_its_classes, test_hub_feed_protocol,
+               test_hub_feed_receiver_rules, test_hub_crossing_counter,
+               test_hub_feed_needs_no_opencv_to_load, test_hub_multi_camera_setup,
+               test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
+               test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
+               test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
+               test_hub_model_blend, test_model_worker_and_fms_combo):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

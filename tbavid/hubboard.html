@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hub Scoreboard</title>
+<style>
+/* A screen beside the field: dark always, numbers readable across a gym.
+   No web fonts or CDNs -- a field often has no internet. */
+:root{
+  --bg:#07090e; --ink:#eef2f8; --ink2:#9aa4b6; --line:#1d2330;
+  --red:#ff4d4f; --red-bg:#2a0d10; --blue:#3b8cff; --blue-bg:#0b1a33;
+  --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased;overflow:hidden}
+.tnum{font-variant-numeric:tabular-nums}
+.wrap{display:grid;grid-template-rows:auto 1fr auto;height:100%}
+
+.bar{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);
+  font-size:clamp(13px,1.6vw,22px);color:var(--ink2);min-height:56px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border-radius:999px;
+  background:#121722;border:1px solid var(--line);white-space:nowrap}
+[hidden]{display:none!important}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--muted,#555)}
+.dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+.clock{margin-left:auto;font-weight:700;color:var(--ink);font-size:clamp(20px,3vw,44px)}
+.bar a,.bar button{color:var(--ink2);background:none;border:1px solid var(--line);border-radius:8px;
+  padding:5px 10px;font:inherit;font-size:.8em;cursor:pointer;text-decoration:none}
+.bar a:hover,.bar button:hover{color:var(--ink)}
+
+.halves{display:grid;grid-template-columns:1fr 1fr;min-height:0}
+.half{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1vh;min-width:0;transition:opacity .3s}
+.half.red{background:radial-gradient(80% 70% at 50% 45%,var(--red-bg),transparent)}
+.half.blue{background:radial-gradient(80% 70% at 50% 45%,var(--blue-bg),transparent);border-left:1px solid var(--line)}
+.name{font-weight:800;letter-spacing:.2em;font-size:clamp(18px,3.2vw,48px)}
+.red .name{color:var(--red)} .blue .name{color:var(--blue)}
+.num{font-weight:800;line-height:.9;font-size:clamp(90px,24vw,420px);letter-spacing:-.03em}
+.red .num{text-shadow:0 0 60px rgba(255,77,79,.35)} .blue .num{text-shadow:0 0 60px rgba(59,140,255,.35)}
+.num.bump{animation:bump .35s ease-out}
+@keyframes bump{0%{transform:scale(1.07)}100%{transform:scale(1)}}
+.sub{color:var(--ink2);font-size:clamp(14px,1.8vw,26px)}
+.half.dark{opacity:.45}
+.half .state{position:absolute;top:2vh;font-size:clamp(12px,1.4vw,20px);letter-spacing:.15em;color:var(--ink2)}
+
+.alert{display:none;padding:12px 20px;text-align:center;font-weight:700;
+  font-size:clamp(14px,1.8vw,26px);background:#3a1414;color:#ffd6d6;border-top:1px solid #5a1f1f}
+.alert.show{display:block}
+.alert.warn{background:#3a2a0c;color:#ffe7b3;border-color:#5a4214}
+@media (max-width:640px){.halves{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+  .half.blue{border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <span class="pill"><span class="dot" id="dot"></span><span id="src">connecting…</span></span>
+    <span class="pill" id="phase" hidden></span>
+    <span class="clock tnum" id="clock"></span>
+    <button id="zero" hidden title="Start the camera counts from 0 on this screen only">Zero</button>
+    <button id="fs" title="Full screen (F)">⛶</button>
+    <a href="/" title="Set-up page">Set-up</a>
+  </div>
+  <div class="halves">
+    <div class="half red" id="h_red"><div class="state" id="st_red"></div>
+      <div class="name">RED</div><div class="num tnum" id="n_red">0</div><div class="sub tnum" id="s_red"></div></div>
+    <div class="half blue" id="h_blue"><div class="state" id="st_blue"></div>
+      <div class="name">BLUE</div><div class="num tnum" id="n_blue">0</div><div class="sub tnum" id="s_blue"></div></div>
+  </div>
+  <div class="alert" id="alert"></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const PHASE={PRE_MATCH:"Pre-match",START_MATCH:"Starting",WARMUP_PERIOD:"Warm-up",AUTO_PERIOD:"AUTO",
+  PAUSE_PERIOD:"Pause",TELEOP_PERIOD:"TELEOP",POST_MATCH:"Final"};
+const SHIFT={AUTO:"Auto",TRANSITION:"Transition",SHIFT1:"Shift 1",SHIFT2:"Shift 2",SHIFT3:"Shift 3",
+  SHIFT4:"Shift 4",ENDGAME:"Endgame",POST_MATCH:"",NONE:""};
+let last={red:null,blue:null}, base={red:0,blue:0}, failSince=null;
+
+function show(id,v){const el=$(id); if(last[id.slice(2)]!==null&&v>last[id.slice(2)]){el.classList.remove("bump");void el.offsetWidth;el.classList.add("bump");}
+  el.textContent=v; last[id.slice(2)]=v;}
+function clock(t){t=Math.max(0,+t||0);const m=Math.floor(t/60),s=Math.floor(t%60);return m+":"+String(s).padStart(2,"0");}
+
+function draw(b){
+  const bio=b.source==="bioarena"||b.source==="practice";
+  $("dot").className="dot "+(!b.running?"bad":b.stale.length?"warn":b.linked?"ok":"warn");
+  if(b.source==="fms")$("zero").hidden=false;
+  $("src").textContent=b.source==="fms"?(b.linked?"Camera counts · sent to frc-fms (its /display has the match score)":"Camera counts · frc-fms not answering"):b.source==="practice"?"Test receiver (practice)":bio?"bioarena score":(b.running?"Camera counts · not linked to bioarena":"Counter stopped");
+  $("zero").hidden=bio;
+  const ph=bio?[PHASE[b.match_state]||b.match_state,SHIFT[b.shift]||""].filter(Boolean).join(" · "):"";
+  $("phase").hidden=!ph; $("phase").textContent=ph;
+  $("clock").textContent=bio&&b.match_time_s?clock(b.match_time_s):"";
+  for(const h of ["red","blue"]){
+    const v=bio?b.score[h]:Math.max(0,b.score[h]-base[h]);
+    show("n_"+h,v);
+    let sub="";
+    if(bio){const parts=[];
+      if(b.auto_count&&b.auto_count[h]!=null)parts.push("AUTO "+b.auto_count[h]);
+      if(b.match_count&&b.match_count[h]!=null&&b.match_count[h]!==b.score[h])parts.push("counted "+b.match_count[h]);
+      sub=parts.join(" · ");}
+    else if(base[h])sub="zeroed on this screen";
+    $("s_"+h).textContent=sub;
+    const active=bio&&b.hub_active?b.hub_active[h]:undefined;
+    $("h_"+h).classList.toggle("dark",active===false);
+    $("st_"+h).textContent=active===false?"HUB INACTIVE":active===true?"HUB ACTIVE":"";
+  }
+  const al=$("alert"); const msg=b.alert||"";
+  al.textContent=msg; al.className="alert"+(msg?" show":"")+(b.running&&!b.stale.length?" warn":"");
+  window._raw=b.score;
+}
+
+async function tick(){
+  try{
+    const r=await fetch("/api/board",{cache:"no-store"}); if(!r.ok)throw 0;
+    draw(await r.json()); failSince=null;
+  }catch(e){
+    failSince=failSince||Date.now();
+    if(Date.now()-failSince>1000){$("dot").className="dot bad";$("src").textContent="Lost the counter";
+      const al=$("alert");al.textContent="This screen cannot reach the counter: the numbers are frozen";al.className="alert show";}
+  }
+  setTimeout(tick,100);   // ten a second: bioarena's own panel budget is 50-100 ms
+}
+$("zero").onclick=()=>{if(window._raw)base={...window._raw};};
+function fs(){document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();}
+$("fs").onclick=fs; document.addEventListener("keydown",e=>{if(e.key==="f"||e.key==="F")fs();});
+tick();
+</script>
+</body>
+</html>

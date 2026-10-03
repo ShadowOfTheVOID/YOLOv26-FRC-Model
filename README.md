@@ -98,6 +98,10 @@ Output lands in these folders:
 | `live` | scout a live feed: read the scoreboard as it happens, keep no video |
 | `detect` | run a trained `.pt` over harvested frames and record what it found |
 | `count` | count scored fuel from the detector; `--scoreboard` makes it the scoreboard at a scrimmage |
+| `hubfeed` | count fuel into each hub from a camera and send the counts to bioarena over UDP ([deploy/HUB_FEED.md](deploy/HUB_FEED.md)); `hubfeed-listen` stands in for bioarena |
+| `hubgui` | the hub counter as a web page: pick cameras or a Twitch stream, click hub outlines, measure, calibrate, start the bioarena feed; live scoreboard at `/board` |
+| `hubfeed --target http://KEY@HOST:8000` | the same counter, posting fuel events to [frc-fms](https://github.com/arnan-bajaj/frc-fms) instead of bioarena; `tbavid.fms_counter:ColourCounter` is also a counter plugin for frc-fms's own vision runner ([deploy/FRC_FMS.md](deploy/FRC_FMS.md)) |
+| `hubcount` | count recordings for scouting with the same counter: every frame, as fast as it decodes, each hub's count against video time in a CSV |
 | `shots` | per-robot shots from a model over match video: who shot, how many went in, how many missed |
 | `scoreboard` | re-read the scoreboard counters via OCR |
 | `verify` | check OCR'd fuel totals against TBA's official score breakdown |

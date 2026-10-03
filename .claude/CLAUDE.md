@@ -175,6 +175,96 @@ What the qm7 video runs established (see CHANGELOG v0.3.0 for the detail):
   reliable output -- do not present them as scouting data.
 - Hub active/inactive is not modelled; the rule is unconfirmed.
 
+**bioarena `main` (f4987b0, checked 2026-10-02) has NO counter feed
+receiver**: no listener on 8411 and no Counted mode. `assignAutoWinner` picks
+random or forced red/blue at AUTO start, so the UDP feed decides nothing
+there until bioarena ships the spec. frc-fms (20524ce) has its own feed to
+the same spec, and our receiver stand-in accepts it.
+**Scrimmage scoring runs through bioarena** (Team 841's cheesy-arena fork).
+Its "Hub FUEL Counter Feed" spec is the contract: UDP JSON to
+10.0.100.5:8411, cumulative red/blue per session, never decreasing, sent on
+change plus a 100 ms heartbeat, `age_ms` from capture; the AUTO winner is
+decided at T+23.000 s so camera-to-count must stay under ~200 ms p99.
+`run.py hubfeed` (`tbavid/hubfeed.py` stdlib sender + `Receiver` stand-in,
+`tbavid/hubcount.py` the area-crossing counter from
+`experiments/area_hub_count.py`) implements it; `deploy/HUB_FEED.md` is the
+runbook. Several cameras: `--setup cams.json`
+(`Setup`/`HubTally` in hubcount.py; zones per hub combined by sum/max/median,
+any camera stale holds the heartbeat). `run.py hubgui` edits the same cams.json: a web page
+(`hubweb.py` + `hubweb.html`, stdlib), a thin view over
+`hubapp.HubController` -- put logic there, not in the page. The user chose
+the website; the Qt window was removed. It also takes a Twitch/YouTube
+stream as a source (`hubcount.is_stream_page`, yt-dlp), which the user
+wants kept; streams are seconds late, so never for the AUTO call.
+`run.py track` (`trackvis.py`): renderer with `BallTracker`, distance-based
+linking -- ByteTrack loses balls at the apex because a turning 15 px ball
+stops overlapping its prediction (1 of 25 flights vs 106 with BallTracker on
+Einstein 4). shots/count still use ByteTrack; switching them is untested.
+The released models MISS balls high against the crowd (autolabel_fuel's
+field line left them unlabelled in training); `trackvis.colour_assist`
+adds moving yellow blobs at a continue-only confidence. Real fix: relabel
+with balls in flight and retrain.
+Wireless cameras: `hubcount.is_network_camera` (rtsp/http, not a stream
+page), FFmpeg over TCP unbuffered, reconnect forever, pre-drop blobs cleared.
+Zones are an outline (funnel mouth) or an exit line (`ExitLineCounter`,
+`"line"`+`"out"`); the user wants exits counted -- exits equal entries and
+rim bounces never reach an exit. Exits are not visible enough on broadcasts
+to validate (9-34%); only a practice hub can. Per-camera `blur`/`remove_static` exist only as calibration
+against a hand-counted recording -- the best value differed on every Einstein
+match. Plumbing is tested; counting is unvalidated on a practice-field
+camera -- the spec's 20-ball acceptance test comes before bioarena's
+`counted` mode. Do not swap in `BallCounter` at its default
+windows: their 400 ms hold breaks the budget (the --model blend uses it
+at vanish 2 / reacquire 2, ~170 ms, and only for half of each ball). Full sweep (HUB_FEED.md "Every fix together"), held-out mean error
+over Einstein 4/5/1: mouth tuned 30%, model+BallTracker+assist 16%,
+mean of both 13%, exits 76% (hidden on broadcasts); AUTO winner right in
+every fold. The model path is offline only. Sweep scripts were scratch,
+not in the repo. Then (2026-09-29) outlines changed to downward entries
+only, exits ignored, one ball learned from crossings (30th pct of last 80),
+round up at 0.65, default blur 0.3: held-out 13%, shipped defaults 16% /
+6% / 9%. More knobs (outline size/offset, clump caps) overfit -- 27-28%
+held out -- so do not add knobs without a held-out check.
+End goal is a live scoreboard: bioarena's display is the official one; the
+counter also serves `/board` (`hubboard.html`, `hubapp.board_view`) --
+bioarena's credited score + clock/shift/hub_active from its status reply
+when linked, camera counts (labelled, not a match score) otherwise.
+Measured 59.9 fps, 5 ms median / 14 ms max capture-to-count on 60 fps video.
+Tuning has plateaued on E4/E5/E1 (another sweep: 14% held out vs 13%);
+don't retune on these three -- more scored matches are needed, and YouTube
+refuses downloads here (bot check), so they must come via Drive. Setup
+tolerance: outlines +-10 px / +-15% and ball 0.5-2x cost <=5 points; frame
+rate is what matters (30 fps 12.6%, 20 fps 25.1%) -> MIN_FPS warning.
+Einstein 8 (from Drive, 2026-09-29) was the first match held out from all
+tuning: 9.1% with the shipped defaults via count_recording, AUTO right.
+Four-way leave-one-out re-tuning is WORSE (21%) than keeping the settings
+(10.1% mean); best four-match fit gains <1 point. Settings unchanged.
+Every-frame (60 fps) run of the model counter on all four (HUB_FEED.md
+"Every frame at 60 fps"): model+assist 25% held out at 60 fps vs 17% at 30;
+combos with the colour counter 13-14% vs colour alone 10.1% (60 fps) /
+11.1% (30 fps). The colour counter at 60 fps is the best; the model adds
+nothing.
+Model on full-res 640 px hub crops (imgsz 640, same cost as 960 full
+frame): moving-ball recall 84% -> 93%; counting held out, no assist 36% ->
+21%, with assist 17% -> 17%; mean(colour, crop model) 9.0% vs colour 10.1%
+(first combo to beat colour, 1 point on 4 matches). Not built into run.py
+yet. Retrained fuel_relabel on E1 crops (2026-10-02; E1 is the only
+Einstein match it never trained on): alone 18.0% -> 12.1%, mean(colour,
+model) 7.8% vs colour 9.1% -- same as old model's 7.7%; retraining helped
+the model, not the combo. Then built and tuned (2026-10-02):
+`--model fuel_relabel.pt` on hubcount/hubfeed (tbavid/hubmodel.py; cams.json
+"model"), w 0.5, BallCounter 2/2/2 + require_entry + pad 0.08 widths:
+E4/E5/E8/E1 8.7/5.6/8.4/4.5% (mean 6.8% vs colour 10.1%), AUTO right on all
+four. E4/5/8 are in the model's training set; fair E1 estimate 7-9%. Do
+not raise w on the E4/5/8 fit (0.7) -- that is the training set talking. User chose: if crops don't clearly work, retrain (option 2).
+frc-fms (github.com/arnan-bajaj/frc-fms, the team's own scrimmage FMS;
+2026-10-01) is supported alongside bioarena (deploy/FRC_FMS.md): plugin
+tbavid.fms_counter:ColourCounter for its run_vision.py, and fmslink.FmsSender
+when --target is http://KEY@host:8000 (wall-clock event times, never-dropped
+queue). Both verified against a running frc-fms. Its `zone` counter takes all
+model classes -- a 3-class model would count robots as fuel.
+Drive videos download with curl from
+drive.usercontent.google.com/download?id=ID&export=download&confirm=t.
+
 **Recommended path for the scrimmage** (put to the user, awaiting answers):
 a close camera per hub (entry or exit chute) with a line-crossing counter,
 built and validated on a recording of a practice hub; a human scorekeeper
