@@ -11,6 +11,18 @@ the build rather than publishing an empty release.
 
 ### Added
 
+- **Step-by-step setup with frc-fms** (`deploy/FRC_FMS.md`, "Set up on the
+  day", and `deploy/frc-fms.vision.yaml`). Covers installing both
+  repositories, drawing the hubs and measuring a ball in `run.py hubgui`,
+  then counting either inside frc-fms (way A, the plugin) or from our page
+  posting to it (way B). Never both: each would post every ball. It ends
+  with the checks before the first match (its control page's Vision panel,
+  a 20-ball drop per hub), re-counting a recording with `rescore.py`, and
+  a table of what goes wrong. The example config, loaded through frc-fms
+  20524ce's own `vconfig` and `load_counter`, built `ComboCounter` for both
+  hubs from a `cams.json`: outlines and ball size from the file, 60 fps,
+  the model on every other frame.
+
 - **`--model` for `run.py hubcount` / `hubfeed` — blend the fuel model into
   the colour count** (`tbavid/hubmodel.py`, `deploy/HUB_FEED.md` "The combo,
   tuned"). Each outline counts `round(0.5 * model + 0.5 * colour)`. The model

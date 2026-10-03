@@ -24,6 +24,125 @@ a GPU): `ComboCounter` in A, `--model` or the page's *Fuel model* in B.
 Either way frc-fms's control page shows it under *Setup -> Vision* as
 "<fps> fps <counter>", with its "vision ok" pill.
 
+## Set up on the day, step by step
+
+One Mac runs frc-fms and the counting. Two hub cameras, one per hub, plugged
+into it. Pick **one** of the two ways to count (A or B below). Never run
+both at once: each would post every ball and frc-fms would add them up.
+
+### 1. Install (once, at home)
+
+```bash
+# frc-fms
+git clone https://github.com/arnan-bajaj/frc-fms ~/dev/frc-fms
+cd ~/dev/frc-fms
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r vision/requirements.txt
+python -m fms.init            # writes config/event.yaml (PINs, vision_key) -- note the PINs
+python -c "import torch; print(torch.backends.mps.is_available())"   # True on Apple silicon
+
+# this repository, on main
+cd ~/dev/TBACroppedOutVid && git checkout main && git pull
+python3 -m venv .venv-train && .venv-train/bin/pip install "ultralytics>=8.4" opencv-python-headless
+mkdir -p models && cp ~/Downloads/fuel_relabel.pt models/     # only for the combo
+```
+
+### 2. Draw the hubs and measure a ball (once per camera position)
+
+```bash
+cd ~/dev/TBACroppedOutVid
+.venv-train/bin/python run.py hubgui --setup cams.json
+```
+
+In the page: **Find cameras**, add the red hub's camera and name it
+`red-cam`, set its *Size* to `1920x1080` (the resolution frc-fms will ask
+for). Draw the red hub's outline around the funnel mouth, put a few balls
+near the hub, press **Measure**. Same for `blue-cam`. **Save**. Close the
+page (Ctrl-C) -- it must not hold the cameras while frc-fms runs.
+
+### 3a. Way A -- frc-fms counts, with our counter as its plugin (recommended)
+
+Everything runs inside frc-fms; its control page is the only screen.
+
+```bash
+cp ~/dev/TBACroppedOutVid/deploy/frc-fms.vision.yaml ~/dev/frc-fms/config/vision.yaml
+open -e ~/dev/frc-fms/config/vision.yaml
+```
+
+Fill in the marked lines: the model path (or switch to `ColourCounter` for
+colour only), each hub's camera `source`, and the `setup:` path to
+`cams.json` with the camera names from step 2. Keep `fps` at the cameras'
+real rate (60 if they do 60). Then start everything with our repository on
+the Python path:
+
+```bash
+cd ~/dev/frc-fms
+PYTHONPATH=~/dev/TBACroppedOutVid ./run.sh ../config/vision.yaml --preview
+```
+
+`--preview` opens a window per hub showing the outline and, for the combo,
+both halves (`red: 42 (colour 44, model 40)`). Watch the terminal for
+`[tbavid] ... the model skipped N frames -- turned off`: that hub has fallen
+back to colour only, the Mac is too slow for the model.
+
+### 3b. Way B -- our page counts and posts to frc-fms
+
+For several cameras per hub, or to keep our page and its `/board`.
+
+```bash
+# terminal 1: frc-fms's server only (run.sh would also start its own vision)
+cd ~/dev/frc-fms && source .venv/bin/activate && python -m fms.server
+
+# terminal 2: our page
+cd ~/dev/TBACroppedOutVid && .venv-train/bin/python run.py hubgui --setup cams.json
+```
+
+On our page: optionally step 3 *Fuel model* -> `models/fuel_relabel.pt`.
+In *Run*, put `http://VISIONKEY@127.0.0.1:8000` in the address box, with
+`server.vision_key` from frc-fms's `config/event.yaml` as VISIONKEY, and
+press **Start**. Same from the command line:
+`run.py hubfeed --setup cams.json --model models/fuel_relabel.pt --target http://VISIONKEY@127.0.0.1:8000`.
+
+### 4. Check it before the first match
+
+1. Open `http://localhost:8000/control`, enter the control PIN, **Setup**
+   tab, **Vision** panel. Each hub should read about `60 fps` and the
+   counter (`tbavid.fms_counter:ComboCounter` in A, `tbavid colour + model`
+   in B); the top bar shows **vision ok**. A red pill means a camera is not
+   delivering frames, or (B) one is under 28 fps.
+2. Drop 20 balls into each hub by hand, counting them. The count should
+   rise by about 20 per hub (the spec's acceptance test). Do it with and
+   without the model if you have time; keep whichever is closer.
+3. Keep a human scorekeeper for the event regardless. frc-fms's control
+   page lets them type the real count in "final" over vision for any
+   period; vision data is never deleted.
+
+### 5. After a match: re-count from the recording (way A)
+
+frc-fms records each hub's video to `vision/recordings/<match>_<start>_<hub>.mp4`, with a `.csv` of frame times beside it. To re-count one
+with the same counter (the plugin waits for the model on every frame, so a
+re-count skips nothing):
+
+```bash
+cd ~/dev/frc-fms/vision
+PYTHONPATH=~/dev/TBACroppedOutVid python rescore.py --match qm3 --hub red \
+  --video recordings/qm3_<start>_red.mp4 --config ../config/vision.yaml --dry-run
+```
+
+Drop `--dry-run` to replace that hub's events in frc-fms.
+
+### If something is wrong
+
+| you see | it means / do |
+|---|---|
+| `ModuleNotFoundError: tbavid` | `PYTHONPATH=~/dev/TBACroppedOutVid` was not set for `run.sh` / `rescore.py` |
+| `ComboCounter needs model:` | the `model:` line is missing; or use `ColourCounter` |
+| `name the camera in cams.json` | `camera:` does not match a name saved in step 2 |
+| `camera read failed` on the control page | wrong `source` index, or `hubgui` still holds the camera |
+| counts about double | ways A and B are both running |
+| `model skipped ... turned off` | the Mac cannot run the model at camera speed; colour only from then on |
+| control page `vision down` / `never connected` (B) | wrong vision key in the URL, or frc-fms not on that address |
+
 ## A. Plugin: frc-fms runs our counter
 
 In frc-fms's `config/vision.yaml`:
@@ -164,7 +283,7 @@ Either give `zone` a fuel-only model
 train), or add `classes=[0]` to the `self.model.predict(...)` call in
 frc-fms's `vision/counters/zone.py`.
 
-frc-fms's match recordings (`vision/recordings/<match>_<hub>.mp4`) come
+frc-fms's match recordings (`vision/recordings/<match>_<start>_<hub>.mp4`) come
 from the real camera mount. They are the best training data there is: feed
 them to `train/relabel_video.py --video`.
 

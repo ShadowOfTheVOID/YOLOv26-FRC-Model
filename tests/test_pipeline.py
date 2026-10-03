@@ -3022,6 +3022,17 @@ def test_model_worker_and_fms_combo():
     seen = [re._is_offline(t0 + i * 0.5, wall=t0 + 1) for i in range(10)]
     check("a recording read faster than real time (rescore.py) waits for the model",
           seen[-1] and re.offline)
+    # deploy/frc-fms.vision.yaml is copied over frc-fms's config by the
+    # setup steps: every counter it names must exist, and the keys it uses
+    # must be ones the plugin reads.
+    import re
+    example = (Path(__file__).resolve().parent.parent / "deploy" /
+               "frc-fms.vision.yaml").read_text()
+    named = re.findall(r'counter: "tbavid\.fms_counter:(\w+)"', example)
+    check("the frc-fms example config names plugins that exist",
+          named and all(hasattr(FC, n) for n in named))
+    check("and per hub gives a cams.json setup and camera, which the plugin reads",
+          "setup:" in example and "camera:" in example and "fps: 60" in example)
     old = FC.ComboCounter(dict(base, model="m.pt"))
     check("so does one read slower, stamped when it was recorded: a busy CPU "
           "made rescore.py look live and the model was dropped",
