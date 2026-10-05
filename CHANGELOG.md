@@ -19,6 +19,10 @@ the build rather than publishing an empty release.
   one at a time. The raised outline got 6.4% on the same match. Exit lines
   stay, listed second and marked untested, for a camera aimed right at the
   chute.
+- `run.py count`, `shots` and `detect` take `--device` (mps, 0, cpu). Not
+  given, it is CUDA, then MPS, then CPU, and the choice is printed at
+  startup. Before this Ultralytics chose, and it never picks MPS, so on a Mac
+  these ran the model on the CPU.
 
 ### Measured
 

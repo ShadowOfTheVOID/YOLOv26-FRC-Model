@@ -195,13 +195,16 @@ def write_rows(con, frame_id: int, rows: Sequence[Dict]) -> int:
 def detect_match(con, model, match_key: str, source: str,
                  conf: float = DEFAULT_CONF,
                  tracker: str = DEFAULT_TRACKER,
-                 progress=None) -> Dict:
+                 progress=None, device: str = "") -> Dict:
     """Run the model over one match's frames and record the detections.
 
     Idempotent: a match's existing detections are cleared first, so re-running
     with better weights replaces that match rather than accumulating two
     models' opinions in one table. `source` is what tells them apart
     afterwards, and is why the column exists.
+
+    `device` goes to Ultralytics as is; "" leaves the choice to it, which
+    never picks MPS (run.py resolves it with hubmodel.pick_device first).
     """
     frames = match_frames(con, match_key)
     if not frames:
@@ -224,7 +227,7 @@ def detect_match(con, model, match_key: str, source: str,
         # every frame would start a fresh track and identify.assign_tracks
         # would see one track per frame instead of one per robot.
         result = model.track(source=str(path), persist=True, tracker=tracker,
-                             conf=conf, verbose=False)
+                             conf=conf, device=device, verbose=False)
         result = result[0] if isinstance(result, list) else result
         rows = rows_from_boxes(_boxes_of(result), names, source=source)
         total += write_rows(con, frame_id, rows)
