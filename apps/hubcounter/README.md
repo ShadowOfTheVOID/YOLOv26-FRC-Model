@@ -43,9 +43,35 @@ None of the builds is signed, so each system warns once:
   `hubcounter.log` go there too.
 - Closing the browser tab leaves the counter running; open the program again
   to get the page back. **Quit** (top right) stops it.
-- The page only answers on the computer it runs on. A Pi with no screen is
-  set up differently (its page reachable from your laptop); that is not
-  this app.
+- The page answers only on the computer it runs on until you press
+  **Share** (below).
+
+## Open it on other devices: Share on Wi-Fi
+
+Press **Share** (top right). The page then also opens on any phone or
+computer on the **same Wi-Fi**, at the address it shows (port 8791), after
+the 6-digit PIN it shows. The scoreboard (`/board`, for a TV) opens without
+a PIN. Only the computer running the counter can quit it or stop sharing.
+Five wrong PINs from one device lock it out for a minute.
+
+If the other device cannot connect, the network may keep devices apart
+(common on venue and school Wi-Fi; use your own router), or the firewall
+blocks port 8791 (allow Hub Counter when asked).
+
+## No app: run it as a website
+
+The app is the same page as the terminal version, so you can skip it. From
+a checkout of this repository:
+
+```bash
+python3 run.py hubgui --setup cams.json          # opens http://127.0.0.1:8790
+python3 run.py hubgui --setup cams.json --share  # also on Wi-Fi; prints the address and PIN
+```
+
+On a Mac, double-clicking `hubfeed.command` does the first one and installs
+what it needs. On a Pi with no screen,
+`python3 run.py hubgui --setup cams.json --share --pin 4821 --no-browser`
+lets you set it up from your laptop's browser at `http://<pi-address>:8791`.
 
 ## Not in the app
 

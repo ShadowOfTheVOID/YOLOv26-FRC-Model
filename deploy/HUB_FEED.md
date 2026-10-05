@@ -134,7 +134,10 @@ needs the terminal version below.
 ```
 
 Double-clicking `hubfeed.command` does the same from a checkout, installing
-what it needs the first time. The page needs nothing but Python, OpenCV and (for
+what it needs the first time. **Share** (or `--share`) also opens the page
+to other devices on the same Wi-Fi, behind a PIN shown on this computer.
+That covers a phone at the table, or a Pi with no screen
+(`--share --pin NNNN --no-browser`). The scoreboard needs no PIN. The page needs nothing but Python, OpenCV and (for
 streams) yt-dlp; its logic lives in `tbavid/hubapp.py`. Work down the
 right-hand side:
 
@@ -713,6 +716,12 @@ Read it carefully:
   The blend moved about half that (red 107 against 101), and colour did
   not move. The table above was measured on one phase, so treat
   differences of a few points between settings as noise.
+
+**On the Central Valley broadcast the combo was worse than colour alone**
+(2026-10-05, raised outlines): 34.5% against 6.4%, final 265 / 823 against
+the official 159 / 810. The model half counted blue 363: in this wider
+shot it fires on far more than the hub's balls. Red's model half was close
+(837). Use colour only on a camera like this one.
 
 What would settle it is the same thing as for colour alone: a hand-counted
 recording from the real camera position. Run it with and without `--model`

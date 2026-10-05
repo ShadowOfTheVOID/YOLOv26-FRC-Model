@@ -28,6 +28,16 @@ the build rather than publishing an empty release.
   app itself, so adding a stream would have started a second copy of the
   counter. A packaged app now calls yt-dlp as a library, with the same
   format choice and messages.
+- **Share on Wi-Fi.** A Share button on the page (or `run.py hubgui
+  --share [--pin N]`) opens it to other devices on the same network, at
+  port 8791, behind a 6-digit PIN shown only on the counting computer.
+  That covers a phone at the table, or a Pi with no screen set up from a
+  laptop. `/board` stays open for a TV. Quit and stopping the share are
+  host-only. Five wrong PINs from one address lock it out for a minute.
+  The page on the counting computer itself is unchanged (127.0.0.1, no
+  PIN). Checked in Chromium: the PIN screen on a phone, the full page
+  after it with Quit and Share hidden, and the address and PIN shown on
+  the host.
 - **A Quit button on the hub page**, since an app has no terminal to press
   Ctrl-C in. It asks first, and says so if counting is running or the
   setup is unsaved.
@@ -48,6 +58,11 @@ the build rather than publishing an empty release.
   these ran the model on the CPU.
 
 ### Measured
+
+- **The colour + model combo was worse than colour alone on Central
+  Valley**: 34.5% against 6.4% with the same raised outlines (final
+  265 / 823 against 159 / 810). The model half counted blue 363. Use colour
+  only on cameras like this.
 
 - **Outline height decides the count on a wide broadcast** (2026 Central
   Valley, upper-bracket match 1, scored against the broadcast's fuel

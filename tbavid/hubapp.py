@@ -583,6 +583,9 @@ class HubController:
         if self.stop_evt:
             self.stop_evt.set()
 
+    # Set by the web server: its Share (the page on Wi-Fi, behind a PIN).
+    share = None
+
     # Set by the web server: shuts it down. A double-clicked app has no
     # terminal to press Ctrl-C in, so the page's Quit button is the way out.
     on_quit: Optional[Callable[[], None]] = None

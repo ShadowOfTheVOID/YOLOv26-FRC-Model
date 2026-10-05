@@ -3245,6 +3245,62 @@ def test_hub_counter_app():
           got == "https://cdn.example/live.m3u8" and calls
           and calls[0]["format"] == "best[height<=1080]/best")
 
+    # Share on Wi-Fi: the page on the network, behind a PIN.
+    import json as _json
+    import time
+    import urllib.error
+    import urllib.request
+    share = W.Share(A.HubController())
+    share.ctl.share = share
+    share.start("246810", port=0)
+    base = f"http://127.0.0.1:{share.httpd.server_address[1]}"
+
+    def req(path, body=None, cookie=""):
+        r = urllib.request.Request(base + path, method="POST" if body is not None else "GET",
+                                   data=_json.dumps(body).encode() if body is not None else None,
+                                   headers={"Content-Type": "application/json", "Cookie": cookie})
+        try:
+            with urllib.request.urlopen(r, timeout=5) as resp:
+                return resp.status, resp.read().decode(), resp.headers.get("Set-Cookie", "")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode(), ""
+    try:
+        code, page, _ = req("/")
+        check("a shared device first gets the PIN page, not the counter",
+              code == 200 and "Enter the PIN" in page)
+        check("and nothing from the API without the PIN",
+              req("/api/state")[0] == 401 and req("/api/save", {})[0] == 401)
+        check("the scoreboard opens without one (it is for a TV)", req("/board")[0] == 200)
+        check("a wrong PIN is refused", req("/login", {"pin": "000000"})[0] == 403)
+        code, _, cookie = req("/login", {"pin": "246810"})
+        cookie = cookie.split(";")[0]
+        check("the right PIN gives a session", code == 200 and cookie.startswith("hubpin="))
+        code, body, _ = req("/api/state", cookie=cookie)
+        st = _json.loads(body)
+        check("with it the page works, marked as remote, and never shows the PIN",
+              code == 200 and st["remote"] and st["share"]["on"] and "pin" not in st["share"])
+        check("a shared device cannot quit the counter or stop sharing",
+              req("/api/quit", {}, cookie)[0] == 403 and req("/api/share_off", {}, cookie)[0] == 403)
+        guesser = W.Share(share.ctl)
+        guesser.pin = "111111"
+        for _ in range(W.MAX_TRIES):
+            guesser.login("10.0.0.9", "222222")
+        try:
+            guesser.login("10.0.0.9", "111111")
+            check("guessing locks an address out after five wrong PINs", False)
+        except PermissionError:
+            check("guessing locks an address out after five wrong PINs", True)
+        check("the host's own page shows the PIN to read out",
+              share.status(host=True)["pin"] == "246810")
+    finally:
+        share.stop()
+    time.sleep(0.5)
+    try:
+        urllib.request.urlopen(base + "/board", timeout=2)
+        check("stopping sharing closes the port", False)
+    except OSError:
+        check("stopping sharing closes the port", True)
+
     spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
     check("the app bundles the hub pages and keeps the scraper and torch out",
           "hubweb.html" in spec and "hubboard.html" in spec
