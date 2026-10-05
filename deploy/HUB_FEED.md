@@ -755,6 +755,23 @@ every checkpoint after the first. Raised about 60 px it over-counted blue
 a right height. Check it the same way here: drop 20 balls in and see that
 about 20 count.
 
+**The rule is "where a falling ball is still in clear view", not a fixed
+raise.** Raising every outline automatically by k ball widths was tried on
+all five scored matches:
+
+| k | E4 | E5 | E1 | E8 | Central Valley |
+|---|---|---|---|---|---|
+| 0 (as drawn) | 16.2% | 6.2% | 9.1% | 8.8% | 38.9% |
+| 1 | 14.8% | 20.0% | 28.4% | 10.1% | 24.2% |
+| 2 | 30.7% | 13.7% | 18.7% | 30.1% | 9.6% |
+| 3 | 21.7% | 16.5% | 24.7% | 28.9% | 5.7% |
+| 4 | 31.3% | 26.4% | 22.9% | 44.4% | 7.0% |
+
+The Einstein outlines were already drawn where balls are visible, so
+raising them only adds flyovers. Central Valley's sat where they are
+hidden. No single k suits both, so the counter does not raise outlines
+itself; the person drawing them does, by looking.
+
 ## 2. Measure one ball (once per camera position)
 
 Put several balls near each hub, apart from each other, and:

@@ -34,7 +34,10 @@ the build rather than publishing an empty release.
   fragments. Raised about 45 px it got 166 / 808, 6.4% error, AUTO right.
   Raised about 60 px it over-counted (blue 225 / 159, 21.4%). The setup
   page and runbook now say to put the top edge 3-4 ball widths above the
-  hood.
+  hood. Doing that in code instead (every outline raised by k ball widths)
+  was rejected. At k = 3, Central Valley went to 5.7% but the four
+  Einsteins went from 6-16% to 17-29%: their outlines were already where
+  balls are visible.
 
 ## v0.4.0 — 2026-10-03
 
