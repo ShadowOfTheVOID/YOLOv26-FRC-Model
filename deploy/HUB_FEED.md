@@ -273,7 +273,18 @@ slider, 0 unless moved, which pins the setting that measured 20-34%. A
 setup file without `"rules": 2` has its blur 0 read as 0.3, with a note
 printed. Save it once from the page and it keeps what it has from then on.
 
-## Count at the exits (recommended)
+## Count at the exits (untested; failed on both broadcasts)
+
+**Use a raised outline instead** (section 1, "Draw the outlines"). On the
+2026 Central Valley broadcast (2026-10-05), whose exits are in view, exit
+lines got 25-32 of blue's 159 and 52-100 of red's 810: 82-85% error. The
+raised outline got 166 / 808 (6.4%) on the same match. The balls do not
+leave one at a time: they pour into a pile against the hub, so new ones push
+into the heap instead of crossing the line as separate blobs. Referees and
+robots also stand at the exit. Red's exit count was still under 20 at
+141 s, against 634. The idea below still holds for a camera aimed right
+at the chute, where balls cross before the pile. Check that with 20 balls
+first.
 
 Every ball that scores comes back out of the hub, so the number leaving
 through the exits is the score. Counting there removes the error that sank
@@ -396,8 +407,8 @@ What this does not fix:
   feed.
 - **Exit lines stay unmeasurable on broadcasts.** The exits are behind the
   hubs, 9-34% visible. Their 76% error is the camera angle, not the
-  counter. On a practice hub with a camera on the chute, they are still
-  the recommended zone.
+  counter. (Later, Central Valley's exits were in view and still gave
+  82-85%: the balls pile up at the exit. See "Count at the exits".)
 
 ## Downward entries and a learned ball (2026-09-29, the current rules)
 

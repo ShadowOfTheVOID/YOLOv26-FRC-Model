@@ -208,8 +208,11 @@ with balls in flight and retrain.
 Wireless cameras: `hubcount.is_network_camera` (rtsp/http, not a stream
 page), FFmpeg over TCP unbuffered, reconnect forever, pre-drop blobs cleared.
 Zones are an outline (funnel mouth) or an exit line (`ExitLineCounter`,
-`"line"`+`"out"`); the user wants exits counted -- exits equal entries and
-rim bounces never reach an exit. Exits are not visible enough on broadcasts
+`"line"`+`"out"`); the user wanted exits counted (exits equal entries, rim
+bounces never reach an exit), but on Central Valley (2026-10-05, exits in
+view) exit lines were 82-85% wrong -- balls pile at the exit -- and the
+page now recommends a raised outline (top edge 3-4 balls above the hood;
+38.9% -> 6.4% there). Exits are not visible enough on broadcasts
 to validate (9-34%); only a practice hub can. Per-camera `blur`/`remove_static` exist only as calibration
 against a hand-counted recording -- the best value differed on every Einstein
 match. Plumbing is tested; counting is unvalidated on a practice-field

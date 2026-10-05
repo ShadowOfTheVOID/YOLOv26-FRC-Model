@@ -9,6 +9,17 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Changed
+
+- **The setup page recommends a raised outline, not exit lines.** It
+  listed exit lines first as "recommended" and its hints said to draw one.
+  On the 2026 Central Valley broadcast, the first with its exits in view,
+  exit lines measured 82-85% error (blue 25-32 of 159, red 52-100 of 810):
+  balls pour out into a pile against the hub instead of crossing the line
+  one at a time. The raised outline got 6.4% on the same match. Exit lines
+  stay, listed second and marked untested, for a camera aimed right at the
+  chute.
+
 ### Measured
 
 - **Outline height decides the count on a wide broadcast** (2026 Central

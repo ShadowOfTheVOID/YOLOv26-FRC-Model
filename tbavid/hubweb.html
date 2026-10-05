@@ -269,15 +269,15 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     <section class="card step" id="st2">
       <h2><span class="n">2</span>Where to count</h2>
       <div class="list" id="zones"></div>
-      <div class="muted" style="margin:2px 0 6px"><b style="color:var(--ink)">Exit lines</b> — recommended: every scored ball comes back out, and a ball that bounces off the rim never does.</div>
+      <div class="muted" style="margin:2px 0 6px"><b style="color:var(--ink)">Outline around the hub's opening</b> — recommended. Put its top edge 3-4 ball widths above the hood, where a falling ball is still clear of the hood's mesh.</div>
       <div class="row">
-        <button class="btn red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
-        <button class="btn blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
+        <button class="btn red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Red outline</button>
+        <button class="btn blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Blue outline</button>
       </div>
-      <div class="muted" style="margin:10px 0 6px">Or an outline around the hub's opening, its top edge 3-4 ball widths above the hood (where a falling ball is still clear of the hood's mesh):</div>
+      <div class="muted" style="margin:10px 0 6px">Or an exit line — untested: balls pile up at the exit and stop crossing one by one. Only for a camera aimed right at the chute, and check it with 20 balls.</div>
       <div class="row">
-        <button class="btn sm red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Red outline</button>
-        <button class="btn sm blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Blue outline</button>
+        <button class="btn sm red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
+        <button class="btn sm blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
       </div>
       <div class="comb"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
       <div class="comb"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
@@ -388,7 +388,7 @@ function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","f
   const m=c.model||null;$("modelstate").textContent=m?"("+m.weights.split("/").pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
   $("modeloff").style.display=m?"":"none";$("mwrow").style.display=m?"":"none";if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}}
 function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
-  if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an exit line across each hub's exit.</div>`;return;}
+  if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an outline around each hub's opening.</div>`;return;}
   for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";const ex=!!z.line;
     const pt=(S.live.parts||{})[z.name];const both=pt?` (colour ${pt.colour} · model ${pt.model})`:"";
     d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in")+both:(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
@@ -421,7 +421,7 @@ function handleJob(){const j=S.job;
   else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
     else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
   else if(j.name==="calibrate"&&j.result)showCalibration(j.result);
-  else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Red exit</b> or <b>Blue exit</b> and click across the hub's exit.":"");}}
+  else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Red outline</b> or <b>Blue outline</b> and click around the hub's opening, top edge a few balls above the hood.":"");}}
 async function chooseCamera(found){if(!found.length){modal("No camera found","<p>Check the camera is plugged in. On a Mac, the terminal needs permission: <b>System Settings → Privacy &amp; Security → Camera</b>.</p>",[{label:"OK",cls:"primary"}]);return;}
   const body=`<p>Numbers can change when cameras are re-plugged — check the picture after adding.</p><div class="pick">`+
     found.map(c=>`<div class="item" data-i="${c.index}"><span class="icon"><svg><use href="#i-cam"/></svg></span><span class="t">Camera ${c.index}</span><span class="s">${esc(c.size)}</span></div>`).join("")+"</div>";
