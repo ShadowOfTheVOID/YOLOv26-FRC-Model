@@ -9,6 +9,23 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Added
+
+- **Hub Counter.app for macOS** (`apps/hubcounter/`,
+  `.github/workflows/mac-app.yml`). The hub counter's web page as a
+  double-click app: nothing to install and no terminal. It keeps the setup
+  and logs in `Documents/Hub Counter/`, and opening it again only reopens
+  the page. It holds the hub counter only: none of the scraper, PyTorch or
+  Ultralytics, so no `--model` blend. The app is built on GitHub's macOS
+  runners for every pull request touching it (as an artifact) and attached
+  to each release as `HubCounter-mac.zip`. Each build is smoke-tested:
+  the page loads, and the Quit button ends the app. A Linux build of the
+  same spec held exactly the nine hub modules and the two pages, came up,
+  only reopened the page when launched twice, and exited on Quit.
+- **A Quit button on the hub page**, since an app has no terminal to press
+  Ctrl-C in. It asks first, and says so if counting is running or the
+  setup is unsaved.
+
 ### Changed
 
 - **The setup page recommends a raised outline, not exit lines.** It

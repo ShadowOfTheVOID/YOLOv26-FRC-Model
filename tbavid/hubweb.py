@@ -125,6 +125,7 @@ ACTIONS = {
                                   bool(b.get("log", True))),
     "stop": lambda c, b: c.stop(),
     "save": lambda c, b: c.save(b.get("path") or None),
+    "quit": lambda c, b: c.quit(),
     "load": lambda c, b: c.load(b["path"]),
 }
 
@@ -133,6 +134,9 @@ def serve(ctl: HubController, port: int = 8790, bind: str = "127.0.0.1",
           open_browser: bool = True) -> None:
     remote = bind not in ("127.0.0.1", "localhost", "::1")
     httpd = ThreadingHTTPServer((bind, port), make_handler(ctl, remote))
+    # Later than the reply to the Quit click, and from another thread:
+    # shutdown() waits for serve_forever, which this request is inside.
+    ctl.on_quit = lambda: threading.Timer(0.3, httpd.shutdown).start()
     url = f"http://{'127.0.0.1' if bind in ('0.0.0.0', '') else bind}:{port}/"
     print(f"hub counter at {url}  (Ctrl-C to quit)")
     if remote:

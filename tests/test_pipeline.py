@@ -3172,6 +3172,55 @@ def test_relabel_video_helpers():
           RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
 
 
+def test_hub_counter_app():
+    """Hub Counter.app: the hub page as a double-click app, with a Quit button.
+
+    A double-clicked app has no terminal to Ctrl-C in, so the page must be
+    able to stop it; and the bundle must hold only the hub counter, not the
+    scraper (its spec is checked here, the build runs in CI on a Mac).
+    """
+    import os
+    import socket
+    from tbavid import hubapp as A
+    from tbavid import hubweb as W
+
+    ctl = A.HubController()
+    quit_calls = []
+    ctl.on_quit = lambda: quit_calls.append(1)
+    W.ACTIONS["quit"](ctl, {})
+    check("the page's Quit stops the counter and shuts the server down",
+          quit_calls == [1])
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "apps" / "hubcounter"))
+    import main as APP
+    with tempfile.TemporaryDirectory() as tmp:
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = tmp
+        try:
+            d = APP.data_dir()
+        finally:
+            if old is not None:
+                os.environ["HOME"] = old
+        check("the setup and logs live in ~/Documents/Hub Counter (the app is read-only)",
+              d == Path(tmp) / "Documents" / "Hub Counter" and d.is_dir())
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        check("a second launch sees the first one running and only reopens the page",
+              APP.already_running(port))
+    check("and a free port is not mistaken for a running app",
+          not APP.already_running(port))
+
+    spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
+    check("the app bundles the hub pages and keeps the scraper and torch out",
+          "hubweb.html" in spec and "hubboard.html" in spec
+          and '"tbavid.tba"' in spec and '"tbavid.pipeline"' in spec and '"torch"' in spec)
+    check("and asks macOS for the camera and the local network, or it gets neither",
+          "NSCameraUsageDescription" in spec and "NSLocalNetworkUsageDescription" in spec)
+
+
 def test_hub_scoreboard_view():
     """The live scoreboard: bioarena's score when linked, the camera's otherwise.
 
@@ -3577,7 +3626,8 @@ def main() -> int:
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
-               test_hub_model_blend, test_model_worker_and_fms_combo):
+               test_hub_model_blend, test_model_worker_and_fms_combo,
+               test_hub_counter_app):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

@@ -121,12 +121,19 @@ ms per frame on a laptop CPU.
 
 ## The easy way: the web page
 
+**On a Mac, use Hub Counter.app** (`apps/hubcounter/README.md`). Download
+`HubCounter-mac.zip` from the release, unzip it, and double-click. It opens
+this page in your browser with nothing to install and no terminal. The
+setup and count logs go to `Documents/Hub Counter/`. Stop it with the
+page's **Quit** button. It counts by colour; the fuel-model blend still
+needs the terminal version below.
+
 ```bash
 .venv/bin/python run.py hubgui --setup cams.json            # opens in your browser
 ```
 
-On a Mac, double-clicking `hubfeed.command` does the same, installing what
-it needs the first time. The page needs nothing but Python, OpenCV and (for
+Double-clicking `hubfeed.command` does the same from a checkout, installing
+what it needs the first time. The page needs nothing but Python, OpenCV and (for
 streams) yt-dlp; its logic lives in `tbavid/hubapp.py`. Work down the
 right-hand side:
 

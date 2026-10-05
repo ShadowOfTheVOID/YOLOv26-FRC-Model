@@ -1,0 +1,78 @@
+name: mac-app
+
+# Builds "Hub Counter.app" -- the hub fuel counter's web page as a
+# double-click Mac app (apps/hubcounter/) -- on a macOS runner, because a Mac
+# app can only be built on a Mac. The scraper is not in it.
+#
+#   pull request touching the app or the hub code: build + smoke test,
+#     zip kept as a workflow artifact (Actions tab -> the run -> Artifacts)
+#   "Run workflow" button: the same, on demand
+#   v* tag: the same, then the zip is attached to that release
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "apps/hubcounter/**"
+      - "tbavid/hub*"
+      - "tbavid/fmslink.py"
+      - "tbavid/count.py"
+      - "tbavid/trackvis.py"
+      - ".github/workflows/mac-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write            # to attach the zip to a release
+
+jobs:
+  build:
+    runs-on: macos-14        # Apple silicon (M1-M4)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the build tools and the counter's only dependencies
+        run: pip install pyinstaller opencv-python-headless numpy yt-dlp
+
+      - name: Build
+        env:
+          HUBCOUNTER_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
+        run: pyinstaller --noconfirm apps/hubcounter/HubCounter.spec
+
+      # The page must come up and the Quit button must end the app: a
+      # frozen app that cannot find its HTML, or never exits, is caught here.
+      - name: Smoke test the built app
+        run: |
+          export HOME="$RUNNER_TEMP/home" && mkdir -p "$HOME"
+          "dist/Hub Counter.app/Contents/MacOS/Hub Counter" &
+          pid=$!
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8790/ >/dev/null && break; sleep 1; done
+          curl -fs http://127.0.0.1:8790/ | grep -q "Hub Counter"
+          curl -fs http://127.0.0.1:8790/board >/dev/null
+          test -d "$HOME/Documents/Hub Counter"
+          curl -fs -X POST -H "Content-Type: application/json" -d '{}' http://127.0.0.1:8790/api/quit
+          for i in $(seq 1 20); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then echo "::error::app still running after Quit"; exit 1; fi
+          du -sh "dist/Hub Counter.app"
+
+      - name: Zip
+        run: ditto -c -k --keepParent "dist/Hub Counter.app" HubCounter-mac.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HubCounter-mac
+          path: HubCounter-mac.zip
+
+      # release.yml creates the release from the same tag; wait for it.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 40); do
+            gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
+            sleep 15
+          done
+          gh release upload "${{ github.ref_name }}" HubCounter-mac.zip --clobber

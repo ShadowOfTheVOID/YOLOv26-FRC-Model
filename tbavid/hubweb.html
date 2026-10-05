@@ -213,6 +213,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   <a class="btn ghost" href="/board" target="_blank" rel="noopener" style="text-decoration:none" title="Full-screen live scoreboard for a TV or projector">Scoreboard ↗</a>
   <button class="btn ghost" onclick="openSetup()"><svg><use href="#i-open"/></svg>Open</button>
   <button class="btn" onclick="save()"><svg><use href="#i-save"/></svg>Save</button>
+  <button class="btn ghost" onclick="quitApp()" title="Stop the counter and close it">Quit</button>
 </div>
 
 <div class="wrap">
@@ -522,6 +523,11 @@ async function removeCam(name){if(await confirmBox("Remove camera",`Remove <b>${
 async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked});
   hint("Running. Leave it on across matches — bioarena marks each match's start itself.");}catch(e){}}
 function stop(){api("stop");hint("");}
+async function quitApp(){
+  const msg=(S&&S.running?"Counting stops and the feed goes OFFLINE. ":"")+(S&&savedCfg!==null&&JSON.stringify(S.cfg)!==savedCfg?"<b>The setup is not saved.</b> ":"")+"Quit the hub counter?";
+  if(!await confirmBox("Quit",msg,"Quit"))return;
+  try{await api("quit",{});}catch(e){}
+  document.body.innerHTML='<div style="padding:40px;font:16px system-ui;color:#aaa">The hub counter has quit. Open it again to keep counting.</div>';}
 async function save(){let p=null;if(!S.path){p=await ask("Save setup","File name","cams.json");if(p===null)return;}
   await api("save",{path:p});savedCfg=JSON.stringify(S.cfg);toast("Setup saved");refresh();}
 async function openSetup(){const p=await ask("Open setup","Setup file",S&&S.path||"cams.json");if(p){await api("load",{path:p});cur=null;lastPic="";savedCfg=null;refresh();}}
