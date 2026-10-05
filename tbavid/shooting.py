@@ -801,7 +801,8 @@ def model_can_shoot(names: Dict[int, str],
 def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
               conf: float = 0.25, tracker: str = "bytetrack.yaml",
               learn_frames: int = 90, fps: float = 0.0, max_frames: int = 0,
-              on_event=None, on_frame=None, counter_factory=None) -> Dict:
+              on_event=None, on_frame=None, counter_factory=None,
+              device: str = "") -> Dict:
     """Run the detector over a source and attribute every shot.
 
     One tracker call tracks robots and balls together; the class says which
@@ -842,7 +843,8 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
     numbering = RobotNumbers()
 
     for result in model.track(source=source, stream=True, persist=True,
-                              tracker=tracker, conf=conf, verbose=False):
+                              tracker=tracker, conf=conf, device=device,
+                              verbose=False):
         t = frame / fps if fps else _time.monotonic() - started
         found: Dict[int, Tuple[str, Box, float]] = {}
         balls: Dict[int, Box] = {}

@@ -223,6 +223,7 @@ def cmd_detect(args, cfg):
     from tbavid import identify
 
     model = det.load(args.weights)
+    device = _device(args)
     source = det.model_source(args.weights)
     con = dbmod.connect()
 
@@ -250,7 +251,8 @@ def cmd_detect(args, cfg):
             print(f"\r  {mk}: {n}/{of} frames, {found} detections", end="")
 
         got = det.detect_match(con, model, mk, source, conf=args.conf,
-                               tracker=args.tracker, progress=progress)
+                               tracker=args.tracker, progress=progress,
+                               device=device)
         print(f"\r  {mk}: {got['frames']} frames, {got['detections']} detections, "
               f"{got['tracks']} track(s)"
               + (f", {got['missing']} frame file(s) missing" if got["missing"] else ""))
@@ -298,6 +300,18 @@ def _lan_address():
         s.close()
 
 
+def _device(args) -> str:
+    """--device, or CUDA then MPS then CPU. Ultralytics left to itself
+    never picks MPS, so on a Mac `count`, `shots` and `detect` ran the model
+    on the CPU (hubmodel.pick_device has the numbers). Said once, so a slow
+    run can be told from a CPU run."""
+    from tbavid.hubmodel import pick_device
+
+    device = args.device or pick_device()
+    print(f"device: {device}" + ("" if args.device else " (auto)"))
+    return device
+
+
 def _hub_arg(raw, what):
     if not raw:
         return None
@@ -336,6 +350,7 @@ def cmd_count(args, cfg):
               f"it once per event instead.")
 
     model = det.load(args.weights)
+    device = _device(args)
     source = int(args.source) if str(args.source).isdigit() else args.source
     print(f"model: {det.model_source(args.weights)}  source: {source}\n")
 
@@ -425,7 +440,7 @@ def cmd_count(args, cfg):
         model, source, factory, conf=args.conf, tracker=args.tracker,
         learn_frames=args.learn, hubs=hubs or None, on_event=on_event,
         max_frames=args.frames, expect_fps=args.expect_fps,
-        on_health=on_health)
+        on_health=on_health, device=device)
 
     if out.get("error"):
         print(f"\n  ! {out['error']}")
@@ -518,6 +533,7 @@ def cmd_shots(args, cfg):
               "for a recording.")
 
     model = det.load(args.weights)
+    device = _device(args)
     print(f"model: {det.model_source(args.weights)}  source: {source}\n")
 
     state = {"writer": None, "flash": None}
@@ -583,7 +599,7 @@ def cmd_shots(args, cfg):
                                 conf=args.conf, tracker=args.tracker,
                                 learn_frames=args.learn, fps=fps,
                                 max_frames=args.frames, on_event=on_event,
-                                on_frame=on_frame)
+                                on_frame=on_frame, device=device)
     if state["writer"] is not None:
         state["writer"].release()
         print(f"annotated video: {args.annotate}")
@@ -1184,6 +1200,9 @@ def main(argv=None):
                    help="points per ball in auto (default 1, i.e. show balls)")
     p.add_argument("--teleop-points", dest="teleop_points", type=float,
                    default=1.0, help="points per ball in teleop (default 1)")
+    p.add_argument("--device", default="",
+                   help="mps on a Mac, 0 for a GPU, cpu; default: cuda, then "
+                        "mps, then cpu")
     p.set_defaults(func=cmd_count)
 
     p = sub.add_parser("detect",
@@ -1202,6 +1221,9 @@ def main(argv=None):
                    help="also try to name each track's team. Reports nothing "
                         "until identify.py has a scorer, which is the honest "
                         "answer rather than a guess.")
+    p.add_argument("--device", default="",
+                   help="mps on a Mac, 0 for a GPU, cpu; default: cuda, then "
+                        "mps, then cpu")
     p.set_defaults(func=cmd_detect)
 
     p = sub.add_parser("shots",
@@ -1237,6 +1259,9 @@ def main(argv=None):
                         "outcome drawn on -- for assigning teams and for "
                         "checking shots by eye")
     p.add_argument("--out", type=Path, help="write the results as JSON")
+    p.add_argument("--device", default="",
+                   help="mps on a Mac, 0 for a GPU, cpu; default: cuda, then "
+                        "mps, then cpu")
     p.set_defaults(func=cmd_shots)
 
     p = sub.add_parser("live",

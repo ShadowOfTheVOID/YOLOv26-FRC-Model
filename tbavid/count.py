@@ -374,7 +374,8 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
                learn_frames: int = LEARN_FRAMES,
                hubs: Optional[Dict[str, Box]] = None,
                on_event=None, on_frame=None, max_frames: int = 0,
-               expect_fps: float = 0.0, on_health=None) -> Dict:
+               expect_fps: float = 0.0, on_health=None,
+               device: str = "") -> Dict:
     """Run the detector over a live source and count what goes in.
 
     `counter_factory(hubs) -> BallCounter` is called once the hub geometry is
@@ -424,7 +425,8 @@ def run_source(model, source, counter_factory, conf: float = 0.25,
     last_tick = started
 
     for result in model.track(source=source, stream=True, persist=True,
-                              tracker=tracker, conf=conf, verbose=False):
+                              tracker=tracker, conf=conf, device=device,
+                              verbose=False):
         t = _time.monotonic() - started
         balls: Dict[int, Box] = {}
         seen_hubs: Dict[str, Box] = {}
