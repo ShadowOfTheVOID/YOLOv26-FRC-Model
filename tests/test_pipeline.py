@@ -3173,7 +3173,7 @@ def test_relabel_video_helpers():
 
 
 def test_hub_counter_app():
-    """Hub Counter.app: the hub page as a double-click app, with a Quit button.
+    """The Hub Counter app (every OS): the hub page as a double-click program, with Quit.
 
     A double-clicked app has no terminal to Ctrl-C in, so the page must be
     able to stop it; and the bundle must hold only the hub counter, not the
@@ -3212,6 +3212,38 @@ def test_hub_counter_app():
               APP.already_running(port))
     check("and a free port is not mistaken for a running app",
           not APP.already_running(port))
+
+    # In a packaged app sys.executable is the app: "-m yt_dlp" would start a
+    # second copy of it. The frozen path must call yt-dlp in-process.
+    import types
+    from tbavid import hubcount as HC
+    calls = []
+    class FakeYDL:
+        def __init__(self, opts):
+            calls.append(opts)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def extract_info(self, url, download=False):
+            return {"url": "https://cdn.example/live.m3u8"}
+    saved_mod, saved_frozen = sys.modules.get("yt_dlp"), getattr(sys, "frozen", None)
+    sys.modules["yt_dlp"] = types.SimpleNamespace(YoutubeDL=FakeYDL)
+    sys.frozen = True
+    try:
+        got = HC.resolve_stream("twitch.tv/somechannel")
+    finally:
+        if saved_mod is None:
+            sys.modules.pop("yt_dlp", None)
+        else:
+            sys.modules["yt_dlp"] = saved_mod
+        if saved_frozen is None:
+            del sys.frozen
+        else:
+            sys.frozen = saved_frozen
+    check("inside the app a stream is looked up in-process, not by re-running the app",
+          got == "https://cdn.example/live.m3u8" and calls
+          and calls[0]["format"] == "best[height<=1080]/best")
 
     spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
     check("the app bundles the hub pages and keeps the scraper and torch out",

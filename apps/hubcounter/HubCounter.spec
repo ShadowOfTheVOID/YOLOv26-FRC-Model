@@ -1,5 +1,6 @@
-# PyInstaller spec for Hub Counter.app (macOS). Built by
-# .github/workflows/mac-app.yml on a macOS runner; to build by hand on a Mac:
+# PyInstaller spec for Hub Counter: an .app on macOS, a folder with
+# "Hub Counter.exe" on Windows, a folder with "Hub Counter" on Linux. Each is
+# built on its own OS by .github/workflows/hub-app.yml; by hand, on that OS:
 #   pip install pyinstaller opencv-python-headless numpy yt-dlp
 #   pyinstaller apps/hubcounter/HubCounter.spec      (from the repo root)
 #
@@ -9,6 +10,7 @@
 # needs neither, and with them the app is over 1 GB. The fuel-model blend
 # (--model) therefore stays a terminal-version feature; the page says so.
 import os
+import sys
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 TB = os.path.join(ROOT, "tbavid")
@@ -35,20 +37,21 @@ pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Hub Counter",
           console=False, upx=False)
 coll = COLLECT(exe, a.binaries, a.datas, name="Hub Counter", upx=False)
-app = BUNDLE(
-    coll,
-    name="Hub Counter.app",
-    bundle_identifier="org.tbavid.hubcounter",
-    info_plist={
-        "CFBundleShortVersionString": os.environ.get("HUBCOUNTER_VERSION", "0.0.0"),
-        # Without these macOS refuses the camera, and since macOS 15 the
-        # local network (UDP to bioarena, HTTP to frc-fms), without asking.
-        "NSCameraUsageDescription":
-            "Hub Counter counts fuel from the hub cameras.",
-        "NSLocalNetworkUsageDescription":
-            "Hub Counter sends counts to the field system (bioarena or frc-fms) "
-            "and reads Wi-Fi cameras on this network.",
-        "LSMinimumSystemVersion": "12.0",
-        "NSHighResolutionCapable": True,
-    },
-)
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="Hub Counter.app",
+        bundle_identifier="org.tbavid.hubcounter",
+        info_plist={
+            "CFBundleShortVersionString": os.environ.get("HUBCOUNTER_VERSION", "0.0.0"),
+            # Without these macOS refuses the camera, and since macOS 15 the
+            # local network (UDP to bioarena, HTTP to frc-fms), without asking.
+            "NSCameraUsageDescription":
+                "Hub Counter counts fuel from the hub cameras.",
+            "NSLocalNetworkUsageDescription":
+                "Hub Counter sends counts to the field system (bioarena or frc-fms) "
+                "and reads Wi-Fi cameras on this network.",
+            "LSMinimumSystemVersion": "12.0",
+            "NSHighResolutionCapable": True,
+        },
+    )

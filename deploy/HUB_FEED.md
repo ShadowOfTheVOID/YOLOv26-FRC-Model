@@ -121,8 +121,9 @@ ms per frame on a laptop CPU.
 
 ## The easy way: the web page
 
-**On a Mac, use Hub Counter.app** (`apps/hubcounter/README.md`). Download
-`HubCounter-mac.zip` from the release, unzip it, and double-click. It opens
+**Use the Hub Counter app** (`apps/hubcounter/README.md`): Mac, Windows,
+Linux or Raspberry Pi. Download yours from the release, unzip it, and
+double-click. It opens
 this page in your browser with nothing to install and no terminal. The
 setup and count logs go to `Documents/Hub Counter/`. Stop it with the
 page's **Quit** button. It counts by colour; the fuel-model blend still

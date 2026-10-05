@@ -1,0 +1,97 @@
+name: hub-app
+
+# Builds the Hub Counter app -- the hub fuel counter's web page as a
+# double-click program (apps/hubcounter/) -- on each OS, since each can only
+# be built on its own. The scraper is not in it.
+#
+#   macOS (Apple silicon)  HubCounter-mac.zip            Hub Counter.app
+#   Windows                HubCounter-windows.zip        Hub Counter\Hub Counter.exe
+#   Linux x64              HubCounter-linux-x64.tar.gz   Hub Counter/Hub Counter
+#   Linux arm64 (Pi 4/5)   HubCounter-linux-arm64.tar.gz Hub Counter/Hub Counter
+#
+#   pull request touching the app or the hub code: build + smoke test each,
+#     kept as workflow artifacts (Actions tab -> the run -> Artifacts)
+#   "Run workflow" button: the same, on demand
+#   v* tag: the same, then each is attached to that release
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "apps/hubcounter/**"
+      - "tbavid/hub*"
+      - "tbavid/fmslink.py"
+      - "tbavid/count.py"
+      - "tbavid/trackvis.py"
+      - ".github/workflows/hub-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write            # to attach the builds to a release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            asset: HubCounter-mac.zip
+            program: dist/Hub Counter.app/Contents/MacOS/Hub Counter
+          - os: windows-latest
+            asset: HubCounter-windows.zip
+            program: dist/Hub Counter/Hub Counter.exe
+          # 22.04's older glibc so the Linux builds also run on newer
+          # Ubuntu / Debian and on Raspberry Pi OS (bookworm).
+          - os: ubuntu-22.04
+            asset: HubCounter-linux-x64.tar.gz
+            program: dist/Hub Counter/Hub Counter
+          - os: ubuntu-22.04-arm
+            asset: HubCounter-linux-arm64.tar.gz
+            program: dist/Hub Counter/Hub Counter
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the build tools and the counter's only dependencies
+        run: pip install pyinstaller opencv-python-headless numpy yt-dlp
+
+      - name: Build
+        env:
+          HUBCOUNTER_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
+        run: pyinstaller --noconfirm apps/hubcounter/HubCounter.spec
+
+      - name: Smoke test (page, board, data folder, Quit)
+        run: python apps/hubcounter/smoke_test.py "${{ matrix.program }}"
+
+      - name: Package
+        run: |
+          case "${{ matrix.asset }}" in
+            *mac.zip)  ditto -c -k --keepParent "dist/Hub Counter.app" "${{ matrix.asset }}" ;;
+            *.zip)     python -c "import shutil; shutil.make_archive('${{ matrix.asset }}'[:-4], 'zip', 'dist', 'Hub Counter')" ;;
+            *.tar.gz)  tar -czf "${{ matrix.asset }}" -C dist "Hub Counter" ;;
+          esac
+          ls -l "${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+      # release.yml creates the release from the same tag; wait for it.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 40); do
+            gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
+            sleep 15
+          done
+          gh release upload "${{ github.ref_name }}" "${{ matrix.asset }}" --clobber
