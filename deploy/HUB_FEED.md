@@ -730,6 +730,20 @@ into that outline and is taken back when it crosses out, so the outline must
 be somewhere a scored ball goes in and disappears, and a ball flying past
 does not stop.
 
+**Take the top edge 3-4 ball widths above the hood, not on its rim.** On
+the 2026 Central Valley broadcast (2026-10-05) balls drop into the hub
+behind the hood's mesh, over a hub top lit bright blue or red. There each
+ball shows only as yellow fragments, mostly below the minimum blob, so a
+crossing at the rim is mostly missed. An outline whose top edge sat on
+the hood rim counted blue 57 of 159 and red 665 of 810: 38.9% mean error.
+With the top edge raised 30-45 px (about 3-4 ball widths there), the balls
+cross it as clean blobs against the wall behind. Raised about 45 px it
+counted 166 / 808: 6.4%, AUTO right, 93-122% of the official count at
+every checkpoint after the first. Raised about 60 px it over-counted blue
+225 / 159 (21.4%), catching misses that arc down past the hood. So there is
+a right height. Check it the same way here: drop 20 balls in and see that
+about 20 count.
+
 ## 2. Measure one ball (once per camera position)
 
 Put several balls near each hub, apart from each other, and:

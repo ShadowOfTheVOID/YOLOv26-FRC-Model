@@ -9,6 +9,18 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Measured
+
+- **Outline height decides the count on a wide broadcast** (2026 Central
+  Valley, upper-bracket match 1, scored against the broadcast's fuel
+  counts; deploy/HUB_FEED.md). With the top edge on the hood rim the
+  colour counter got blue 57 / 159 and red 665 / 810 (38.9% error): balls
+  dropped behind the hood's mesh over a lit hub top showed only as small
+  fragments. Raised about 45 px it got 166 / 808, 6.4% error, AUTO right.
+  Raised about 60 px it over-counted (blue 225 / 159, 21.4%). The setup
+  page and runbook now say to put the top edge 3-4 ball widths above the
+  hood.
+
 ## v0.4.0 — 2026-10-03
 
 Hub fuel counting for the scrimmage: a live counter that feeds bioarena's
