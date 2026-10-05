@@ -80,8 +80,37 @@ from . import hubcount as HC
 OFFLINE_AGE_S = 30.0    # a frame stamped this far in the past is a re-count
 
 
+# frc-fms's plugin contract (vision/counters/__init__.py there): the metadata
+# it lists with --list-counters and checks configs against, and the status()
+# line its /control page shows. Installed with `pip install -e` this repo, the
+# two classes are found by the short names in pyproject.toml's
+# `watchtower.counters` entry points: tbavid-colour, tbavid-combo.
+_COLOUR_OPTIONS = {
+    "outline": "funnel-mouth polygon [[x, y], ...], top edge 3-4 balls above the hood",
+    "line": "exit line [[x, y], [x, y]] (with out:) -- untested, balls pile at exits",
+    "out": "a point on the side balls leave towards, for line:",
+    "setup": "a cams.json drawn in run.py hubgui (outlines, ball size, blur)",
+    "camera": "which camera in that cams.json",
+    "ball_area": "one ball's pixel area (run.py hubfeed --measure 5)",
+    "blur": "motion-blur correction, 0-1 (0.3)",
+    "remove_static": "ignore yellow that stays still (false)",
+}
+_MODEL_OPTIONS = {
+    "model": "fuel model .pt (fuel_relabel.pt)",
+    "model_weight": "the model's share of the count, 0-1 (0.5)",
+    "device": "cuda / mps / cpu (best found)",
+}
+
+
 class ColourCounter:
     """frc-fms counter interface: __init__(cfg), process(frame, t), total, draw."""
+
+    PLUGIN_API = 1
+    NAME = "tbavid-colour"
+    DESCRIPTION = ("Yellow blobs crossing down into a hub outline; 10.1% on four "
+                   "Einstein matches, 6.4% on Central Valley; no model")
+    NEEDS: tuple = ()
+    OPTIONS = {**_COLOUR_OPTIONS, **_MODEL_OPTIONS}
 
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -232,6 +261,31 @@ class ColourCounter:
         self.total += new
         return new
 
+    def status(self) -> dict:
+        """The line frc-fms's /control shows under this hub: both halves of
+        the count, or why the model is not in it."""
+        colour = sum(c.reported for c in self.counters)
+        if self.worker is None:
+            if self.model and not self.counters:
+                return {"detail": "waiting for the first frame"}
+            return {"detail": f"colour {colour}"}
+        if self.worker.error:
+            return {"detail": f"colour {colour} (model failed)",
+                    "warning": f"model failed: {self.worker.error}; counting by colour only"}
+        if self.worker.off:
+            return {"detail": f"colour {colour} (model off)",
+                    "warning": "model too slow, turned off; counting by colour only"}
+        model = sum(m.reported for m in self.models if m is not None)
+        out = {"detail": f"colour {colour} · model {model}"}
+        if self.worker.skipped:
+            out["warning"] = f"model skipped {self.worker.skipped} frames"
+        return out
+
+    def close(self) -> None:
+        """Let the model thread finish its frame (frc-fms calls this on stop)."""
+        if self.worker is not None:
+            self.worker.close(wait=2.0)
+
     def draw(self, frame):
         import cv2
         import numpy as np
@@ -251,6 +305,11 @@ class ColourCounter:
 
 class ComboCounter(ColourCounter):
     """ColourCounter with the fuel model blended in; `model:` is required."""
+
+    NAME = "tbavid-combo"
+    DESCRIPTION = ("Colour counter blended with the fuel model; 6.8% on four Einstein "
+                   "matches, but 34.5% on Central Valley -- check on your camera")
+    NEEDS = ("model", "gpu")
 
     def __init__(self, cfg: dict):
         if not cfg.get("model"):

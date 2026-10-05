@@ -1,15 +1,21 @@
 # frc-fms config/vision.yaml for counting with this repository's counter.
 # Copy over frc-fms's config/vision.yaml (keep its fms_url / vision_key lines
 # if you changed them) and fill in the four marked values per hub.
-# Steps: deploy/FRC_FMS.md, "Set up on the day".
+# Steps: deploy/FRC_FMS.md, "Set up on the day". `python run_vision.py
+# --list-counters` (in frc-fms/vision) shows the counters it can see.
 fms_url: http://127.0.0.1:8000
 record_dir: recordings           # raw hub video per match, for rescore.py and retraining
+# Where this repository is, relative to this file (frc-fms/config/). With the
+# plugin system (deploy/frc-fms-patches/0004) this replaces PYTHONPATH; or
+# `pip install -e ~/dev/TBACroppedOutVid` in frc-fms's venv and drop the line.
+plugin_paths: [../../TBACroppedOutVid]
 
 defaults:
   # Colour + fuel model blended (Apple silicon or a GPU). For colour only,
-  # which needs no model: counter: "tbavid.fms_counter:ColourCounter" and
-  # delete the model lines.
-  counter: "tbavid.fms_counter:ComboCounter"
+  # which needs no model: counter: tbavid-colour, and delete the model lines.
+  # (Without the plugin-system patch, use the full names
+  # "tbavid.fms_counter:ComboCounter" / ":ColourCounter" and PYTHONPATH.)
+  counter: tbavid-combo          # or tbavid-colour: no model, and better on wide broadcast-like views
   model: /Users/YOU/dev/TBACroppedOutVid/models/fuel_relabel.pt   # <-- 1. path to the model
   model_weight: 0.5              # the model's share; 0.5 is the tuned value
   # The camera's REAL frame rate. The colour counter measured 10.5% error at

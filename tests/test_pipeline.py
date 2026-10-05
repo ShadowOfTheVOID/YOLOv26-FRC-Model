@@ -3013,6 +3013,26 @@ def test_model_worker_and_fms_combo():
           cc._zone_count(0) == 8)
     cc.worker.off = True
     check("and colour alone once its model is off", cc._zone_count(0) == 10)
+    # frc-fms's plugin contract: metadata for --list-counters, and status()
+    # for the line /control shows under the hub.
+    check("both counters declare themselves to frc-fms's plugin system",
+          FC.ColourCounter.NAME == "tbavid-colour" and FC.ComboCounter.NAME == "tbavid-combo"
+          and FC.ColourCounter.PLUGIN_API == 1 and "model" in FC.ComboCounter.NEEDS
+          and "outline" in FC.ColourCounter.OPTIONS and "model_weight" in FC.ComboCounter.OPTIONS)
+    check("a model turned off says so on frc-fms's page",
+          cc.status() == {"detail": "colour 10 (model off)",
+                          "warning": "model too slow, turned off; counting by colour only"})
+    cc.worker = NS(off=False, error="", skipped=0)
+    check("a running blend shows both halves", cc.status() == {"detail": "colour 10 · model 4"})
+    plain = FC.ColourCounter(dict(base))
+    check("colour alone shows its count", plain.status() == {"detail": "colour 0"})
+    root = Path(__file__).resolve().parent.parent
+    pyproj = (root / "pyproject.toml").read_text()
+    check("pyproject registers both under frc-fms's entry-point group",
+          '[project.entry-points."watchtower.counters"]' in pyproj
+          and 'tbavid-colour = "tbavid.fms_counter:ColourCounter"' in pyproj
+          and 'tbavid-combo = "tbavid.fms_counter:ComboCounter"' in pyproj
+          and "dependencies = []" in pyproj)
     live = FC.ComboCounter(dict(base, model="m.pt"))
     t0 = 1_700_000_000.0
     seen = [live._is_offline(t0 + i / 60, wall=t0 + i / 60 + 0.01) for i in range(5)]
@@ -3028,9 +3048,13 @@ def test_model_worker_and_fms_combo():
     import re
     example = (Path(__file__).resolve().parent.parent / "deploy" /
                "frc-fms.vision.yaml").read_text()
-    named = re.findall(r'counter: "tbavid\.fms_counter:(\w+)"', example)
+    # It uses the plugin short names; each must be registered in pyproject.toml
+    # and point at a class that exists.
+    pyproj = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+    eps = dict(re.findall(r'^(tbavid-[\w-]+) = "tbavid\.fms_counter:(\w+)"', pyproj, re.M))
+    named = re.findall(r"counter: (tbavid-[\w-]+)", example)
     check("the frc-fms example config names plugins that exist",
-          named and all(hasattr(FC, n) for n in named))
+          named and all(n in eps and hasattr(FC, eps[n]) for n in named))
     check("and per hub gives a cams.json setup and camera, which the plugin reads",
           "setup:" in example and "camera:" in example and "fps: 60" in example)
     old = FC.ComboCounter(dict(base, model="m.pt"))
@@ -3614,6 +3638,9 @@ def test_hub_model_blend():
           HM.too_slow(HM.MODEL_WARMUP_FRAMES, HM.MODEL_WARMUP_FRAMES // 2)
           and not HM.too_slow(HM.MODEL_WARMUP_FRAMES - 1, HM.MODEL_WARMUP_FRAMES - 1)
           and not HM.too_slow(1000, 100))
+    check("or after 10 s of wall time, if it is too slow to reach 300 frames by then",
+          HM.too_slow(40, 20, elapsed=11.0) and not HM.too_slow(40, 20, elapsed=5.0)
+          and not HM.too_slow(20, 15, elapsed=11.0))
     check("and colour alone takes over: weight 0 is the colour count",
           HM.blend(103, 1, 0.0) == 103)
     check("weight 0 is colour alone, 1 the model alone",

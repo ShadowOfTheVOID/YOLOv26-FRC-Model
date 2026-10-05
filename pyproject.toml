@@ -1,0 +1,30 @@
+# Lets watchtower-fms (frc-fms) find this repository's hub counters by name.
+# In frc-fms's vision environment:
+#     pip install -e ~/dev/TBACroppedOutVid
+# then in its config/vision.yaml:  counter: tbavid-colour   (or tbavid-combo)
+#
+# No dependencies are declared on purpose: frc-fms's vision already has
+# numpy and OpenCV (and Ultralytics, for the combo), and installing this must
+# not pull a second torch into that environment. The rest of this repository
+# keeps its own setup (README: .venv / .venv-train); this file is only the
+# plugin's name tag.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tbavid"
+version = "0.4.0"
+description = "Hub fuel counters for FRC 2026, as watchtower-fms counter plugins"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.entry-points."watchtower.counters"]
+tbavid-colour = "tbavid.fms_counter:ColourCounter"
+tbavid-combo = "tbavid.fms_counter:ComboCounter"
+
+[tool.setuptools]
+packages = ["tbavid"]
+
+[tool.setuptools.package-data]
+tbavid = ["*.html", "*.yaml"]

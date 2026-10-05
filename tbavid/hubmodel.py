@@ -52,6 +52,12 @@ KEEP_CONF = 0.1
 # after 40 s of Einstein 1. Past MODEL_WARMUP_FRAMES offered, a model that
 # has skipped more than MODEL_MAX_SKIP of them is dropped for the session.
 MODEL_WARMUP_FRAMES = 300       # 10 s at 30 fps: loading and first inference
+# ... or 10 s of wall time, whichever comes first. A slow CPU also drags the
+# camera loop down with it -- frc-fms's runner fell from 60 to 13 fps with the
+# combo on 4 cores -- so 300 frames took 45 s to arrive and the counting was
+# wrong for all of AUTO before the model was dropped.
+MODEL_WARMUP_S = 10.0
+MODEL_MIN_OFFERED = 30          # but never judged on fewer frames than this
 MODEL_MAX_SKIP = 0.2
 
 # Tuned on Einstein 4/5/8/1 with fuel_relabel.pt (deploy/HUB_FEED.md, "The
@@ -209,9 +215,12 @@ def pick_device() -> str:
     return "cpu"
 
 
-def too_slow(offered: int, skipped: int) -> bool:
-    """Has the model fallen far enough behind to be dropped?"""
-    return offered >= MODEL_WARMUP_FRAMES and skipped > MODEL_MAX_SKIP * offered
+def too_slow(offered: int, skipped: int, elapsed: float = 0.0) -> bool:
+    """Has the model fallen far enough behind to be dropped? Judged after
+    MODEL_WARMUP_FRAMES offered or MODEL_WARMUP_S seconds, whichever is first."""
+    warm = offered >= MODEL_WARMUP_FRAMES or (
+        elapsed >= MODEL_WARMUP_S and offered >= MODEL_MIN_OFFERED)
+    return warm and skipped > MODEL_MAX_SKIP * offered
 
 
 def _close_all() -> None:
@@ -261,6 +270,7 @@ class ModelWorker:
         self.off = False
         self.error = ""
         self._job = None
+        self._t0 = 0.0
         self._busy = False
         self._reset = False
         self._done = False
@@ -273,6 +283,9 @@ class ModelWorker:
         if self.off or self._done:
             return
         with self._ready:
+            if self.offered == 0:
+                import time
+                self._t0 = time.monotonic()
             self.offered += 1
             if self._job is not None:
                 self.skipped += 1
@@ -330,7 +343,7 @@ class ModelWorker:
                 if mc.update(t, dets, assist):
                     self.on_rise(name, tag)
             self._busy = False
-            if too_slow(self.offered, self.skipped):
+            if too_slow(self.offered, self.skipped, time.monotonic() - self._t0):
                 self.off = True
                 self._done = True
                 if self.on_off:

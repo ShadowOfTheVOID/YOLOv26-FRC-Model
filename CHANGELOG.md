@@ -11,6 +11,27 @@ the build rather than publishing an empty release.
 
 ### Added
 
+- **A counter plugin system for frc-fms (watchtower-fms), and our counters as
+  plugins of it** (`deploy/frc-fms-patches/0003-0004`, `pyproject.toml`).
+  - **His side:** `counter:` finds plugins by short name, either installed
+    packages registering `watchtower.counters` entry points or `plugin_paths:`
+    folders. `--list-counters` lists them. A misspelt option is flagged
+    (`ball_aera` → "did you mean `ball_area`?"). A plugin's `status()` shows
+    under its hub on `/control`, and a plugin that fails to load says why
+    instead of the hub reading "never connected".
+  - **Ours:** `tbavid-colour` and `tbavid-combo` declare their name, needs
+    and options, report `colour N · model M` or "model off" as their status,
+    and release the model thread in `close()`. They are found by
+    `pip install -e` this repository or by `plugin_paths:`, with no
+    `PYTHONPATH`.
+  - **Checked** against a running watchtower-fms, both ways. Its tests pass
+    with the patches (37).
+- **A slow model is now dropped after 10 s of wall time, not only after 300
+  frames.** Inside frc-fms's runner on 4 CPU cores, the combo dragged the
+  camera loop from 60 to 13 fps, so 300 frames took about 45 s to arrive.
+  Counting was wrong for all of AUTO before the model was dropped. Now it
+  goes at about 10 s and the hub is back at 60 fps on colour.
+
 - **The Hub Counter app for Mac, Windows, Linux and Raspberry Pi**
   (`apps/hubcounter/`, `.github/workflows/hub-app.yml`). The hub counter's
   web page as a double-click program: nothing to install and no terminal.
