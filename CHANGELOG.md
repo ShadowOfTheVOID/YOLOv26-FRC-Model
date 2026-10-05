@@ -9,6 +9,11 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- `run.py count`, `shots` and `detect` take `--device` (mps, 0, cpu). Not
+  given, it is CUDA, then MPS, then CPU, and the choice is printed at
+  startup. Before this Ultralytics chose, and it never picks MPS, so on a Mac
+  these ran the model on the CPU.
+
 ## v0.4.0 — 2026-10-03
 
 Hub fuel counting for the scrimmage: a live counter that feeds bioarena's
