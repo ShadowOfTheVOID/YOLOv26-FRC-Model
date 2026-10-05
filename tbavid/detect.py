@@ -71,8 +71,28 @@ def alliance_of(cls_name: str) -> Optional[str]:
     return None
 
 
-def load(weights: Path):
+def pick_device() -> str:
+    """CUDA (NVIDIA, or AMD under ROCm), then Apple MPS, then CPU.
+
+    Ultralytics left to itself never picks MPS: on a Mac it ran the model on
+    the CPU, which on 4 cores managed 2.6 fps against the 30 the hub counter
+    was tuned at. torch is imported here, not at module scope, for the same
+    reason as in `load`.
+    """
+    import torch
+    if torch.cuda.is_available():
+        return "cuda"
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def load(weights: Path, device: str = ""):
     """A YOLO model, or a message a person can act on.
+
+    `device` is passed to Ultralytics for every predict/track call on the
+    model; "" picks the best one found (`pick_device`) and says which.
 
     Imported here rather than at module scope on purpose. `requirements.txt` is
     requests and numpy; torch and ultralytics are hundreds of megabytes and are
@@ -107,7 +127,21 @@ def load(weights: Path):
             f"what its\n  class indices mean. Guessing would relabel every "
             f"detection silently.\n  Re-export it from a checkpoint that has "
             f"them.")
+    use_device(model, device)
     return model
+
+
+def use_device(model, device: str = "") -> str:
+    """Make `device` (or the best one found) the default for every predict
+    and track call on `model`, and say which it is: a run that quietly fell
+    back to the CPU looks like a slow model, not a missing driver."""
+    device = device or pick_device()
+    # Ultralytics merges model.overrides under each call's own arguments, so
+    # a device= passed to a call still wins.
+    model.overrides["device"] = device
+    note = "  (no GPU found: slow)" if device == "cpu" else ""
+    print(f"device: {device}{note}")
+    return device
 
 
 def frame_path(file: str) -> Path:

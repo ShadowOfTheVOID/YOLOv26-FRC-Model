@@ -9,6 +9,11 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- `run.py detect`, `count`, `shots` and `track` use the GPU automatically:
+  CUDA (or ROCm), then Apple MPS, then the CPU, and print which. Ultralytics
+  on its own never picks MPS, so on a Mac these ran on the CPU unless
+  `track --device mps` was given. `--device` on each still overrides.
+
 ## v0.4.0 — 2026-10-03
 
 Hub fuel counting for the scrimmage: a live counter that feeds bioarena's

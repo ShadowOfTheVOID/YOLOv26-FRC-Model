@@ -242,6 +242,8 @@ def render(weights: str, source: str, out: str, imgsz: int = 960,
     import cv2
     from ultralytics import YOLO
 
+    from .detect import use_device
+
     model = YOLO(weights)
     names = model.names
     cap = cv2.VideoCapture(source)
@@ -252,8 +254,7 @@ def render(weights: str, source: str, out: str, imgsz: int = 960,
     writer = None
     frame = 0
     kw = dict(stream=True, imgsz=imgsz, conf=conf, max_det=1000, verbose=False)
-    if device:
-        kw["device"] = device
+    use_device(model, device or "")
     trackers: Dict[int, BallTracker] = {}
     if tracker == "bytetrack":
         results = model.track(source, persist=True, tracker=TRACKER, **kw)

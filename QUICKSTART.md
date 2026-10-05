@@ -43,7 +43,7 @@ M=models/fuel_withBotbest.pt
 ## 3. See what the model sees
 
 ```bash
-$PY run.py track --weights $M --source match.mp4          # add --device mps on a Mac
+$PY run.py track --weights $M --source match.mp4          # uses the GPU / Apple MPS if found
 ```
 
 It writes `match_tracked.mp4`: a thin box and a small track number on every

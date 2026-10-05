@@ -28,6 +28,7 @@ import math
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .count import REACQUIRE_PX, BallCounter
+from .detect import pick_device
 from .trackvis import ASSIST_CONF, BallTracker
 
 Point = Tuple[float, float]
@@ -194,19 +195,6 @@ class ModelEye:
                                                   self.ball_px)]
         self.prev = frame
         return dets, assist
-
-
-def pick_device() -> str:
-    """CUDA, then Apple MPS, then CPU. Ultralytics left to itself never picks
-    MPS: on a Mac it would run the model on the CPU, which on 4 cores
-    managed 2.6 fps against the 30 the counter was tuned at."""
-    import torch
-    if torch.cuda.is_available():
-        return "cuda"
-    mps = getattr(torch.backends, "mps", None)
-    if mps is not None and mps.is_available():
-        return "mps"
-    return "cpu"
 
 
 def too_slow(offered: int, skipped: int) -> bool:

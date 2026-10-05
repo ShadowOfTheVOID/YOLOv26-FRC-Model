@@ -3557,6 +3557,39 @@ def test_hub_model_blend():
           and "model" not in HC.setup_to_dict(plain)["cameras"][0])
 
 
+def test_device_is_picked_when_not_given():
+    """With no --device, a model runs on CUDA, then MPS, then the CPU, and
+    an explicit one wins. Ultralytics alone never picks MPS, so a Mac ran
+    every model on the CPU. torch is faked: CI has none."""
+    import types
+    from tbavid import detect as det
+
+    def fake_torch(cuda, mps):
+        t = types.ModuleType("torch")
+        t.cuda = types.SimpleNamespace(is_available=lambda: cuda)
+        t.backends = types.SimpleNamespace(
+            mps=types.SimpleNamespace(is_available=lambda: mps))
+        return t
+
+    saved = sys.modules.get("torch")
+    try:
+        for cuda, mps, want in ((True, True, "cuda"), (False, True, "mps"),
+                                (False, False, "cpu")):
+            sys.modules["torch"] = fake_torch(cuda, mps)
+            assert det.pick_device() == want, (cuda, mps)
+            model = types.SimpleNamespace(overrides={})
+            assert det.use_device(model) == want
+            assert model.overrides["device"] == want
+        model = types.SimpleNamespace(overrides={})
+        assert det.use_device(model, "cpu") == "cpu"
+        assert model.overrides["device"] == "cpu"
+    finally:
+        if saved is None:
+            sys.modules.pop("torch", None)
+        else:
+            sys.modules["torch"] = saved
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -3577,7 +3610,8 @@ def main() -> int:
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
-               test_hub_model_blend, test_model_worker_and_fms_combo):
+               test_hub_model_blend, test_model_worker_and_fms_combo,
+               test_device_is_picked_when_not_given):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

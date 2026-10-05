@@ -222,7 +222,7 @@ def cmd_detect(args, cfg):
     from tbavid import detect as det
     from tbavid import identify
 
-    model = det.load(args.weights)
+    model = det.load(args.weights, args.device)
     source = det.model_source(args.weights)
     con = dbmod.connect()
 
@@ -335,7 +335,7 @@ def cmd_count(args, cfg):
               f"there is no\n  'in' for a ball to go. `run.py db hub` records "
               f"it once per event instead.")
 
-    model = det.load(args.weights)
+    model = det.load(args.weights, args.device)
     source = int(args.source) if str(args.source).isdigit() else args.source
     print(f"model: {det.model_source(args.weights)}  source: {source}\n")
 
@@ -517,7 +517,7 @@ def cmd_shots(args, cfg):
         print("  frame rate unknown, so shot times are wall-clock. Pass --fps "
               "for a recording.")
 
-    model = det.load(args.weights)
+    model = det.load(args.weights, args.device)
     print(f"model: {det.model_source(args.weights)}  source: {source}\n")
 
     state = {"writer": None, "flash": None}
@@ -1184,6 +1184,8 @@ def main(argv=None):
                    help="points per ball in auto (default 1, i.e. show balls)")
     p.add_argument("--teleop-points", dest="teleop_points", type=float,
                    default=1.0, help="points per ball in teleop (default 1)")
+    p.add_argument("--device", default="",
+                   help="cuda, mps or cpu (default: cuda, then mps, then cpu)")
     p.set_defaults(func=cmd_count)
 
     p = sub.add_parser("detect",
@@ -1202,6 +1204,8 @@ def main(argv=None):
                    help="also try to name each track's team. Reports nothing "
                         "until identify.py has a scorer, which is the honest "
                         "answer rather than a guess.")
+    p.add_argument("--device", default="",
+                   help="cuda, mps or cpu (default: cuda, then mps, then cpu)")
     p.set_defaults(func=cmd_detect)
 
     p = sub.add_parser("shots",
@@ -1237,6 +1241,8 @@ def main(argv=None):
                         "outcome drawn on -- for assigning teams and for "
                         "checking shots by eye")
     p.add_argument("--out", type=Path, help="write the results as JSON")
+    p.add_argument("--device", default="",
+                   help="cuda, mps or cpu (default: cuda, then mps, then cpu)")
     p.set_defaults(func=cmd_shots)
 
     p = sub.add_parser("live",
@@ -1356,7 +1362,8 @@ def main(argv=None):
     p.add_argument("--no-trails", dest="no_trails", action="store_true")
     p.add_argument("--coast", type=int, default=8,
                    help="frames a lost ball is still drawn where it should be")
-    p.add_argument("--device", help="mps on a Mac, 0 for a GPU, cpu")
+    p.add_argument("--device", default="",
+                   help="cuda, mps or cpu (default: cuda, then mps, then cpu)")
     p.add_argument("--frames", type=int, default=0, help="stop after N frames")
     p.add_argument("--tracker", choices=("distance", "bytetrack"),
                    default="distance",
