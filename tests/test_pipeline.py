@@ -3326,11 +3326,81 @@ def test_hub_counter_app():
         check("stopping sharing closes the port", True)
 
     spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
-    check("the app bundles the hub pages and keeps the scraper and torch out",
+    check("the app bundles the hub pages and the model runtime, and keeps the scraper out",
           "hubweb.html" in spec and "hubboard.html" in spec
-          and '"tbavid.tba"' in spec and '"tbavid.pipeline"' in spec and '"torch"' in spec)
+          and '"tbavid.tba"' in spec and '"tbavid.pipeline"' in spec
+          and '"torch"' in spec and 'collect_submodules("ultralytics")' in spec)
+    check("it carries torchvision's compiled ops (nms), which nothing imports by name",
+          "binaries=torchvision_ops()" in spec)
+    check("and the built-in model, required in CI so no build ships without it",
+          '"fuel_relabel.pt"' in spec and "HUBCOUNTER_REQUIRE_MODEL" in spec)
+    wf = (root / ".github" / "workflows" / "hub-app.yml").read_text()
+    check("CI runs the built-in model inside every build",
+          "HUBCOUNTER_REQUIRE_MODEL" in wf and "fuel_relabel.pt" in wf)
     check("and asks macOS for the camera and the local network, or it gets neither",
           "NSCameraUsageDescription" in spec and "NSLocalNetworkUsageDescription" in spec)
+
+
+def test_hub_builtin_model():
+    """`model: built-in` is fuel_relabel.pt shipped with the app (or in models/).
+
+    Stored as a name, not a path: inside an app the path changes whenever the
+    app is moved or updated, and the saved setup would point at nothing.
+    """
+    import json
+    import os
+    import sys
+    import tempfile
+    from tbavid import hubapp as A
+    from tbavid import hubcount as HC
+    from tbavid import hubmodel as M
+
+    here = M.bundled_model()       # a checkout may have models/fuel_relabel.pt
+    tmp = tempfile.mkdtemp()
+    old = getattr(sys, "_MEIPASS", None)
+    try:
+        sys._MEIPASS = tmp         # an app whose bundle has no model
+        if here is None:
+            check("no model anywhere: none built in", M.bundled_model() is None)
+            try:
+                M.resolve_weights(M.BUILTIN)
+                check("asking for it says it is missing", False)
+            except FileNotFoundError as e:
+                check("asking for it says it is missing", "fuel_relabel.pt" in str(e))
+        os.makedirs(os.path.join(tmp, "models"))
+        open(os.path.join(tmp, "models", "fuel_relabel.pt"), "wb").close()
+        want = os.path.join(tmp, "models", "fuel_relabel.pt")
+        check("inside an app the bundled file is found first", M.bundled_model() == want)
+        check("built-in resolves to it", M.resolve_weights(M.BUILTIN) == want)
+        check("any other path is left alone", M.resolve_weights("/x/my.pt") == "/x/my.pt")
+
+        cfg = {"cameras": [{"name": "c", "source": "0", "ball_area": 200,
+                            "zones": [{"hub": "red", "outline": [[0, 0], [9, 0], [9, 9]]}],
+                            "model": {"weights": "built-in", "weight": 0.5}}]}
+        probs = A.problems(cfg)
+        check("built-in is not reported as a missing file",
+              not any("is not there" in p or "no built-in" in p for p in probs))
+        ctl = A.HubController()
+        check("the page is told a built-in model exists", ctl.state()["builtin_model"] is True)
+
+        setup = HC.setup_from_dict(json.loads(json.dumps({k: v for k, v in cfg.items()})))
+        HC.add_model(setup, "built-in")
+        check("--model built-in is accepted",
+              setup.cameras[0].model["weights"] == "built-in")
+        check("and saved as the name, not the bundle's path",
+              HC.setup_to_dict(setup)["cameras"][0]["model"]["weights"] == "built-in")
+
+        os.remove(want)
+        if here is None:
+            probs = A.problems(cfg)
+            check("a copy without it says so before Start",
+                  any("no built-in fuel model" in p for p in probs))
+            check("and the page hides the button", A.HubController().state()["builtin_model"] is False)
+    finally:
+        if old is None:
+            del sys._MEIPASS
+        else:
+            sys._MEIPASS = old
 
 
 def test_hub_scoreboard_view():
@@ -3742,7 +3812,7 @@ def main() -> int:
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
-               test_hub_counter_app):
+               test_hub_counter_app, test_hub_builtin_model):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

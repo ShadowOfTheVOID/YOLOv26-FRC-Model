@@ -9,6 +9,36 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Added
+
+- **Every Hub Counter app can run the colour + model blend.** The builds
+  carry PyTorch, Ultralytics and `fuel_relabel.pt`, and the page has a **Use
+  built-in model** button. Setups save `model: built-in` rather than the file's
+  path inside the app, which changes when the app moves or updates;
+  `run.py hubfeed --model built-in` and frc-fms's `model: built-in` work too,
+  if a checkout has `models/fuel_relabel.pt`.
+  - **Where it keeps up:** on Apple silicon the model runs on the GPU (MPS).
+    Windows and Linux carry CPU PyTorch, because a CUDA build is ~3 GB, over
+    GitHub's 2 GB asset limit. On a CPU the model turns itself off after
+    ~10 s and the hub counts by colour. A linux-x64 build tried here, on 4
+    cores, did exactly that on Einstein 1.
+  - **Size:** each download is ~400 MB (linux-x64 412 MB) instead of 60-100 MB.
+  - **The smoke test now runs the model inside each build.** The first build
+    passed every page check, yet failed on the first prediction:
+    torchvision's `_C_stable` ops (`nms`) are loaded by path, so neither the
+    bundler nor `collect_dynamic_libs` saw them. The spec now lists them.
+- **Every release carries the models.** `release.yml` copies
+  `fuel_relabel.pt` and `scout_relabel.pt` from the release named in
+  `.github/models-release` (v0.4.0), after checking them against the
+  checksums recorded here. `hub-app.yml` puts the same `fuel_relabel.pt` in
+  the apps. Training new models means attaching them to that release by hand
+  once and changing that file.
+
+### Fixed
+
+- **The Fuel model label on the page stayed "(off)" after turning the model
+  on** until another camera was picked. It now updates on every refresh.
+
 ## v0.4.1 — 2026-10-06
 
 The hub counter as a double-click app for Mac, Windows, Linux and Raspberry

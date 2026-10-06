@@ -276,6 +276,13 @@ regardless. Open questions: can they record a hub, is the scoreboard OCR
 right (red 63 at 30 s), live or recorded counting (the Mac processed 18 fps
 against 60 fps video).
 
+Hub Counter app (`apps/hubcounter/`, hub-app.yml, all four OSes): bundles
+torch + Ultralytics + fuel_relabel.pt (`model: built-in`, hubmodel.bundled_model;
+the source release is `.github/models-release`, and release.yml copies both .pt
+files onto every release). Linux x64 must take CPU torch (CUDA wheel ~3 GB >
+2 GB asset limit). torchvision's `_C_stable` ops are loaded by path, so the
+spec lists them by hand; the smoke test's `--selftest-model` is what catches
+that, since every page check passed without them.
 Training/droplet notes: the MI300X guide is `deploy/AMD_DEVCLOUD.md`; the
 scouting dataset recipe is `autolabel_fuel` -> `autolabel_robots` (fuel
 greyed before YOLOE; unknown-alliance robots painted out; `--min-robots` 2)

@@ -35,7 +35,37 @@ def already_running(port: int = PORT) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def ultralytics_home() -> None:
+    """Ultralytics writes a settings file at import, by default under
+    ~/.config, which a sandboxed or managed account may refuse (the build
+    test's scratch home did, with a warning per launch)."""
+    os.environ.setdefault("YOLO_CONFIG_DIR", str(data_dir() / "ultralytics"))
+
+
+def selftest_model(out: str) -> int:
+    """`Hub Counter --selftest-model RESULT_FILE`, for the build's smoke test:
+    load the built-in model and run it once. Exit 0 if it ran. The result
+    goes to a file because a windowed Windows build has no stdout."""
+    import time
+    msg, code = "", 1
+    try:
+        import numpy as np
+        from tbavid.hubmodel import BUILTIN, ModelEye, pick_device
+        t = time.time()
+        eye = ModelEye(BUILTIN, {"red": [(100, 100), (300, 100), (300, 200), (100, 200)]})
+        eye.detect(np.zeros((720, 1280, 3), np.uint8))
+        msg, code = f"model ran on {pick_device()} in {time.time() - t:.1f} s", 0
+    except Exception as e:                          # report anything, never hang
+        msg = f"{type(e).__name__}: {e}"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(msg + "\n")
+    return code
+
+
 def main() -> int:
+    ultralytics_home()
+    if len(sys.argv) == 3 and sys.argv[1] == "--selftest-model":
+        return selftest_model(sys.argv[2])
     if already_running():
         webbrowser.open(URL)
         return 0

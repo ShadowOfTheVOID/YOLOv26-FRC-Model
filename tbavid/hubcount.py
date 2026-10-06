@@ -989,7 +989,10 @@ def add_model(setup: Setup, weights: str, weight: Optional[float] = None,
     replacing any "model" the setup file gave. Raises ValueError on a bad
     weight or a missing file."""
     import os
-    if not os.path.exists(weights):
+    from .hubmodel import BUILTIN, bundled_model
+    if weights == BUILTIN and bundled_model() is None:
+        raise ValueError("no built-in fuel model here: put fuel_relabel.pt in models/")
+    if weights != BUILTIN and not os.path.exists(weights):
         raise ValueError(f"no model file {weights!r}")
     raw = {"weights": weights, "device": device}
     if weight is not None:

@@ -73,16 +73,34 @@ what it needs. On a Pi with no screen,
 `python3 run.py hubgui --setup cams.json --share --pin 4821 --no-browser`
 lets you set it up from your laptop's browser at `http://<pi-address>:8791`.
 
-## Not in the app
+## The fuel model (colour + model blend)
 
-The fuel-model blend (`--model`, the page's *Fuel model*) needs PyTorch,
-which would make each build over 1 GB. The page says when it is missing.
-For the blend, use the terminal version (`deploy/FRC_FMS.md`, step 1).
+Every build has PyTorch and the fuel model (`fuel_relabel.pt`) inside, so
+each download is about 400 MB. Open **Fuel model** on the page and press
+**Use built-in model**; or pick another `.pt` with **Choose model**.
+
+| computer | runs the model on | in practice |
+|---|---|---|
+| Mac, Apple silicon | its GPU (MPS) | fast enough; the one to use for the blend |
+| Windows / Linux PC | the CPU | the builds carry the CPU PyTorch: a CUDA one is ~3 GB, over GitHub's limit. Usually too slow |
+| Raspberry Pi | the CPU | too slow; use colour only |
+
+When the model cannot keep up it turns itself off after about 10 s, the
+page says so, and the hub counts by colour alone, so turning it on cannot
+make a slow computer miss balls. For the blend on an NVIDIA PC, use the
+terminal version (`deploy/FRC_FMS.md`, step 1) with CUDA PyTorch.
+
+On the Central Valley broadcast the blend was worse than colour alone
+(34.5% against 6.4%), so compare both on your own camera before choosing.
 
 ## Build it yourself (on the OS you want it for)
 
 ```bash
+pip install torch torchvision     # Linux x64: add --index-url https://download.pytorch.org/whl/cpu
 pip install pyinstaller opencv-python-headless numpy yt-dlp
+pip install --no-deps ultralytics ultralytics-thop
+pip install matplotlib pillow pyyaml requests psutil polars
+mkdir -p models   # put v0.4.0's fuel_relabel.pt here, or the build has no built-in model
 pyinstaller apps/hubcounter/HubCounter.spec
 python apps/hubcounter/smoke_test.py "dist/Hub Counter/Hub Counter"   # Mac: dist/Hub Counter.app/Contents/MacOS/Hub Counter
 ```

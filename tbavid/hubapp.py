@@ -20,7 +20,7 @@ from collections import deque
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .hubcount import DEFAULT_BLUR
-from .hubmodel import DEFAULT_WEIGHT
+from .hubmodel import BUILTIN, DEFAULT_WEIGHT, bundled_model
 
 HUBS = ("red", "blue")
 COMBINE = ("sum", "max", "median")
@@ -123,7 +123,10 @@ def problems(cfg: Dict) -> List[str]:
             out.append(f"{c['name']}: measure the ball size "
                        f"(put a few balls near the hub, then Measure).")
         m = c.get("model") or {}
-        if m.get("weights") and not os.path.exists(m["weights"]):
+        if m.get("weights") == BUILTIN and bundled_model() is None:
+            out.append(f"{c['name']}: this copy has no built-in fuel model "
+                       f"-- choose the .pt file, or turn the model off.")
+        elif m.get("weights") and m["weights"] != BUILTIN and not os.path.exists(m["weights"]):
             out.append(f"{c['name']}: the fuel model {m['weights']} is not there "
                        f"-- pick it again, or turn the model off.")
     if any((c.get("model") or {}).get("weights") for c in cams) and not _has_ultralytics():
@@ -610,6 +613,7 @@ class HubController:
                "kinds": kinds, "stream_warning": STREAM_WARNING,
                "wireless_warning": WIRELESS_WARNING,
                "problems": problems(cfg), "pictures": pictures,
+               "builtin_model": bundled_model() is not None,
                "log": self.messages_since(last_log)}
         s = self.sender
         live = {"counts": {"red": 0, "blue": 0}, "linked": False, "reply": None,

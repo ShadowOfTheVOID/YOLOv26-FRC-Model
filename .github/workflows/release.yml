@@ -64,9 +64,11 @@ jobs:
             echo
             echo '## Artifacts'
             echo
-            echo 'Source only — no videos, frames or database. Model weights, when a'
-            echo 'release has them, are attached to it by hand; their checksums are in'
-            echo 'the notes above.'
+            echo 'Source archives hold no videos, frames or database. The trained'
+            echo 'models (`fuel_relabel.pt`, `scout_relabel.pt`) are attached to every'
+            echo "release, copied from $(cat .github/models-release), the release that trained them;"
+            echo 'their checksums are in that release'"'"'s notes. The Hub Counter apps,'
+            echo 'with the fuel model inside, are attached by the hub-app workflow.'
             echo 'Verify with `sha256sum -c SHA256SUMS`.'
             echo
             echo '| file | sha256 |'
@@ -93,6 +95,31 @@ jobs:
             --notes-file notes.md \
             dist/tbavid-*.zip dist/tbavid-*.tar.gz dist/tbavid-*.tar.xz \
             dist/SHA256SUMS
+
+      # Models are not in git (20 MB each, retrained rarely). Every release
+      # carries the current pair, so one release page has everything; they
+      # come from the release named in .github/models-release, checked
+      # against the checksums CHANGELOG.md recorded when they were trained.
+      - name: Attach the models
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          src="$(cat .github/models-release)"
+          mkdir -p models
+          gh release download "$src" -p fuel_relabel.pt -p scout_relabel.pt -D models --clobber
+          python - <<'PY'
+          import hashlib, re
+          log = open("CHANGELOG.md").read()
+          for name in ("fuel_relabel.pt", "scout_relabel.pt"):
+              want = re.search(r"^([0-9a-f]{64})  " + re.escape(name) + "$", log, re.M).group(1)
+              got = hashlib.sha256(open("models/" + name, "rb").read()).hexdigest()
+              assert got == want, f"{name} is {got}, CHANGELOG says {want}"
+              print(name, got)
+          PY
+          if [ "$src" != "${{ steps.v.outputs.version }}" ]; then
+            gh release upload "${{ steps.v.outputs.version }}" models/fuel_relabel.pt models/scout_relabel.pt --clobber
+          fi
 
       - name: Dry run summary
         if: github.event_name == 'workflow_dispatch'
