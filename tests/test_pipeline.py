@@ -3362,6 +3362,11 @@ def test_hub_counter_app():
               "HUBCOUNTER_REQUIRE_MODEL" in wf and "fuel_relabel.pt" in wf)
         check("CI builds and smoke-tests the Watchtower app beside the Hub Counter",
               "apps/watchtower/smoke_test.py" in wf and "matrix.wasset" in wf)
+        iss = (root / "apps" / "installer" / "windows.iss").read_text()
+        check("Mac gets a .dmg and Windows an installer, and CI runs what they install",
+              "Watchtower-mac.dmg" in wf and "Watchtower-Setup-windows.exe" in wf
+              and "hdiutil attach" in wf and "//VERYSILENT" in wf
+              and "PrivilegesRequired=lowest" in iss and "{autoprograms}" in iss)
     check("and asks macOS for the camera and the local network, or it gets neither",
           "NSCameraUsageDescription" in spec and "NSLocalNetworkUsageDescription" in spec)
 
@@ -3426,6 +3431,150 @@ def test_hub_builtin_model():
             del sys._MEIPASS
         else:
             sys._MEIPASS = old
+
+
+def test_watchtower_settings():
+    """The Watchtower app edits event.yaml for the user, never the other way.
+
+    Only the changed lines are rewritten, so fms.init's comments (the only
+    documentation of the other settings) survive; anything the file holds as
+    a block, not one line, is reported so the caller rewrites it whole.
+    Watchtower's own rule -- the scorekeeper PIN differs from the others --
+    is checked before anything is written.
+    """
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("wt_settings", root / "apps" / "watchtower" / "settings.py")
+    St = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(St)
+
+    check("teams parse from any separators, in order, without repeats",
+          St.parse_teams("254, 1678 971\n604;254") == [254, 1678, 971, 604])
+    clean, err = St.check({"event.name": " X ", "event.date": "2026-10-10", "event.qual_start": "09:00",
+                           "event.utc_offset_hours": "-7", "event.teams": "1 2",
+                           "event.tba_event_key": "2026CATSTD", "game.tower": "0 10 20 30",
+                           "game.fouls": "5,15", "server.pins.control": "123456",
+                           "server.pins.ref": "222222", "server.pins.emcee": "333333"})
+    check("good values come out clean and typed",
+          not err and clean["event.name"] == "X" and clean["event.utc_offset_hours"] == -7
+          and clean["event.tba_event_key"] == "2026catstd"
+          and clean["game.tower"] == {"L0": 0, "L1": 10, "L2": 20, "L3": 30}
+          and clean["game.fouls"] == {"minor": 5, "major": 15})
+    _, err = St.check({"event.date": "10/10/2026", "event.lunch": "25:00", "game.n_shifts": "-1",
+                       "server.pins.control": "111111", "server.pins.ref": "111111",
+                       "server.pins.emcee": "12", "tba.enabled": True})
+    check("bad values are refused, each with its own reason",
+          set(err) == {"event.date", "event.lunch", "game.n_shifts", "server.pins.emcee",
+                       "server.pins.control", "tba.enabled"})
+    pins = St.new_pins()
+    check("new PINs are three different 6-digit numbers",
+          len(set(pins.values())) == 3 and all(len(p) == 6 and p.isdigit() for p in pins.values()))
+
+    text = ['# top\n', 'event:\n', '  name: "Old"          # the name\n', '  teams: []   # list\n',
+            'server:\n', '  pins:\n', '    control: "1"\n', 'game:\n', '  tower: {L0: 0}\n',
+            '  rp:\n', '    win: 3\n']
+    lines = list(text)
+    ok = (St._set_line(lines, ("event", "name"), St._render("New \"x\""))
+          and St._set_line(lines, ("event", "teams"), St._render([254, 1678]))
+          and St._set_line(lines, ("server", "pins", "control"), St._render("999999"))
+          and St._set_line(lines, ("game", "tower"), St._render({"L0": 0, "L1": 10}))
+          and St._set_line(lines, ("game", "rp", "win"), St._render(2)))
+    check("one-line fields are rewritten in place, comments kept",
+          ok and lines[2] == '  name: "New \\"x\\""          # the name\n'
+          and lines[3] == "  teams: [254, 1678]   # list\n" and lines[6] == '    control: "999999"\n'
+          and lines[8] == "  tower: {L0: 0, L1: 10}\n" and lines[10] == "    win: 2\n")
+    block = ['event:\n', '  teams:\n', '    - 1\n']
+    check("a field held as a block is reported, not mangled",
+          not St._set_line(block, ("event", "teams"), "[1]") and block[1] == "  teams:\n")
+    check("a missing field is reported",
+          not St._set_line(['event:\n', '  name: "x"\n'], ("event", "date"), '""'))
+    lines = ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '\n', '# next\n', 'game:\n', '  auto_s: 20\n']
+    check("a field the file never had is added at the end of its section",
+          St._add_line(lines, ("tba", "read_key"), '"k"')
+          and lines[:4] == ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '  read_key: "k"\n']
+          and lines[5:] == ['# next\n', 'game:\n', '  auto_s: 20\n'])
+    check("but not into a section that is not there",
+          not St._add_line(['event:\n', '  name: "x"\n'], ("tba", "read_key"), '"k"'))
+
+    # Import teams from TBA, against a stand-in for TBA's read API.
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class TBA(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path == "/event/2026catstd":        # the public page's Scouting tab
+                body = ('<h2>Scouting</h2><textarea id="team-list-csv" readonly>'
+                        "team_number,team_name,city,state_prov,country,robot_image_url\n"
+                        "8033,Highlander Robotics,Piedmont,California,USA,https://i.imgur.com/1FI8W7pm.jpg\n"
+                        "114,Eaglestrike,Los Altos,California,USA,\n"
+                        "2035,The Rockin&#39; Bots,Carmel,California,USA,</textarea>").encode()
+                self.send_response(200); self.end_headers(); self.wfile.write(body); return
+            if self.path.startswith("/event/"):              # a page with no team list yet
+                self.send_response(200); self.end_headers(); self.wfile.write(b"<html></html>"); return
+            if self.headers.get("X-TBA-Auth-Key") != "goodkey":
+                self.send_response(401); self.end_headers(); return
+            if self.path != "/api/v3/event/2026later/teams/simple":
+                self.send_response(404); self.end_headers(); return
+            body = _json.dumps([{"team_number": 1678, "nickname": "Citrus Circuits"},
+                                {"team_number": 254, "nickname": "The Cheesy Poofs"}]).encode()
+            self.send_response(200); self.end_headers(); self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), TBA)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    St.TBA_API, St.TBA_WEB = base + "/api/v3", base
+    try:
+        r = St.tba_teams("2026CATSTD", "")
+        check("the event page's Scouting list is read with no key: only team_number, names kept",
+              r.get("teams") == [114, 2035, 8033] and r["names"]["2035"] == "The Rockin' Bots")
+        r = St.tba_teams("2026later", "goodkey")
+        check("a page with no list yet falls back to the Read API",
+              r.get("teams") == [254, 1678] and r["names"]["254"] == "The Cheesy Poofs")
+        check("a wrong key and a missing event key each say what to fix",
+              "refused" in St.tba_teams("2026later", "bad")["error"]
+              and "event key first" in St.tba_teams("", "goodkey")["error"])
+    finally:
+        srv.shutdown()
+    pasted = St.parse_team_text("team_number,team_name,city,state_prov,country,robot_image_url\n"
+                                "114,Eaglestrike,Los Altos,California,USA,https://i.imgur.com/Xt75qTWm.jpg\n")
+    check("pasted TBA CSV gives the team, not the 75 in its photo URL", pasted["teams"] == [114])
+    check("JSON from TBA's API pastes too",
+          St.parse_team_text('[{"key":"frc254","team_number":254,"nickname":"Poofs"},"frc971"]')["teams"] == [254, 971])
+    St.TBA_API = St.TBA_WEB = "http://127.0.0.1:1"
+    check("no internet says so", "online" in St.tba_teams("2026catstd", "goodkey")["error"])
+
+
+def test_watchtower_home_api():
+    """The Home window's API object holds methods and nothing pywebview could walk into.
+
+    pywebview exposes a js_api object by walking every public attribute,
+    recursively. Given the app object, it walked into the window and, on
+    Windows, read WebView2's controller off the UI thread: the window never
+    loaded. HomeApi has only methods, and every call home.html makes must be
+    one of them (and of the browser-mode list, HOME_API).
+    """
+    import ast
+    import re
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "apps" / "watchtower" / "main.py").read_text()
+    tree = ast.parse(src)
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HomeApi")
+    methods = {f.name for f in cls.body if isinstance(f, ast.FunctionDef) and not f.name.startswith("_")}
+    stores = [t.attr for f in cls.body if isinstance(f, ast.FunctionDef) for n in ast.walk(f)
+              if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Attribute)]
+    check("HomeApi keeps only private attributes (pywebview skips '_' names)",
+          stores and all(a.startswith("_") for a in stores))
+    page = (root / "apps" / "watchtower" / "home.html").read_text()
+    calls = set(re.findall(r"api\(\)\.(\w+)\(", page))
+    check("every call home.html makes is on HomeApi", calls and calls <= methods)
+    i = src.index("HOME_API = (")
+    listed = set(re.findall(r'"(\w+)"', src[i:src.index(")", i)]))
+    check("and the browser-mode list allows exactly the same calls", listed == methods)
+    check("the window is given HomeApi, not the app", "js_api=HomeApi(app)" in src)
 
 
 def test_hub_scoreboard_view():
@@ -3837,7 +3986,8 @@ def main() -> int:
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
-               test_hub_counter_app, test_hub_builtin_model):
+               test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
+               test_watchtower_home_api):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

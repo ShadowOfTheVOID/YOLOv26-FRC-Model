@@ -10,15 +10,16 @@ From the repository's **Releases** (v0.4.1 on), download the one for your
 computer. Between releases: **Actions** tab -> the latest `hub-app` run ->
 **Artifacts**.
 
-| computer | download | open |
+| computer | download | install |
 |---|---|---|
-| Mac (Apple silicon, M1-M4) | `HubCounter-mac.zip` | unzip, drag **Hub Counter** to Applications, double-click |
-| Windows 10/11 | `HubCounter-windows.zip` | unzip (Extract All), open the **Hub Counter** folder, double-click **Hub Counter.exe** |
+| Mac (Apple silicon, M1-M4) | `HubCounter-mac.dmg` | open it, drag **Hub Counter** onto **Applications**, eject, open it from Applications |
+| Windows 10/11 | `HubCounter-Setup-windows.exe` | run it, Next, Install. Start menu → **Hub Counter**. Uninstall from Settings → Apps |
 | Linux PC | `HubCounter-linux-x64.tar.gz` | extract, open **Hub Counter**, run **Hub Counter** |
 | Raspberry Pi 4/5 (64-bit Pi OS) | `HubCounter-linux-arm64.tar.gz` | same as Linux, on the Pi's desktop |
 
-Keep the Windows and Linux folders whole: the program needs the
-`_internal` folder beside it.
+The Windows installer installs for your user only, so it needs no admin
+rights. On Linux keep the folder whole: the program needs the `_internal`
+folder beside it.
 
 ## First launch
 
@@ -28,8 +29,8 @@ None of the builds is signed, so each system warns once:
   Privacy & Security** and click **Open Anyway**. Allow **camera** and
   **local network** access when asked. Without them the cameras show
   nothing and counts never reach bioarena / frc-fms.
-- **Windows:** "Windows protected your PC". Click **More info -> Run
-  anyway**. Allow it on **Private networks** when the firewall asks.
+- **Windows:** "Windows protected your PC" when you run the installer.
+  Click **More info -> Run anyway**. Allow it on **Private networks** when the firewall asks.
   Camera access: **Settings -> Privacy & security -> Camera -> Let desktop
   apps access your camera** must be on.
 - **Linux / Pi:** if it will not start, right-click it -> Properties ->

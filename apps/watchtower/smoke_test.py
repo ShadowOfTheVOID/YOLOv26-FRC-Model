@@ -66,7 +66,19 @@ def main(program: str) -> int:
             return 1
         d = os.path.join(home, "Documents", "Watchtower")
         assert os.path.isfile(os.path.join(d, "config", "event.yaml")), "no event.yaml made"
-        assert os.path.isfile(os.path.join(d, "Watchtower - start here.html")), "no start page"
+        # Home (browser mode here: --no-browser): its address carries the
+        # launch token; the API refuses calls without it and answers with it.
+        link = os.path.join(d, "webview", "home-url.txt")
+        assert os.path.isfile(link), "no Home address written"
+        url = open(link).read().strip()
+        token = url.split("t=", 1)[1]
+        assert "Watchtower" in get(url), "Home page not served"
+        home_api = url.split("/?")[0] + "/api/state"
+        assert post(home_api, [], {"X-Home-Token": "wrong"}) == 403, "Home API answered without the token"
+        req = urllib.request.Request(home_api, data=b"[]", method="POST",
+                                     headers={"Content-Type": "application/json", "X-Home-Token": token})
+        state = json.loads(urllib.request.urlopen(req, timeout=5).read())["result"]
+        assert state["fms_ok"] and set(state["pins"]) == {"control", "ref", "emcee"}, "Home state wrong"
         target = json.loads(get(HUB + "/api/state"))["default_target"]
         assert target.startswith("http://") and target.endswith("@127.0.0.1:8000"), \
             "the hub counter is not set to this Watchtower"
@@ -93,8 +105,37 @@ def main(program: str) -> int:
             proc.kill()
 
 
+def window_test(program: str) -> int:
+    """--window: the real app windows (WebKit on macOS, WebView2 on Windows):
+    Home fills itself through the Python API, and Scorekeeper, Hub cameras
+    and Field display each open on their page. Needs a desktop session,
+    which GitHub's macOS and Windows runners have."""
+    home = tempfile.mkdtemp(prefix="watchtower-home-")
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
+    out = os.path.join(home, "window.json")
+    try:
+        code = subprocess.run([program, "--selftest-window", out], env=env, timeout=300).returncode
+    except subprocess.TimeoutExpired:
+        log = os.path.join(home, "Documents", "Watchtower", "watchtower.log")
+        tail = open(log, errors="replace").read().splitlines()[-25:] if os.path.exists(log) else []
+        fail("app windows: no answer in 300 s | log: " + " / ".join(l.strip() for l in tail if l.strip())[-1500:])
+        return 1
+    res = json.load(open(out)) if os.path.exists(out) else {"ok": False, "error": f"no result (exit {code})"}
+    for s in res.get("steps", []):
+        print("  " + s)
+    if not res.get("ok"):
+        fail("app windows: " + res.get("error", "failed"))
+        return 1
+    print("OK: app windows (" + "; ".join(res.get("steps", [])) + ")")
+    if os.environ.get("GITHUB_ACTIONS"):
+        print("::notice title=Watchtower windows::" + "; ".join(res.get("steps", [])))
+    return 0
+
+
 if __name__ == "__main__":
     try:
+        if sys.argv[1:2] == ["--window"]:
+            sys.exit(window_test(sys.argv[2]))
         sys.exit(main(sys.argv[1]))
     except (AssertionError, OSError, subprocess.TimeoutExpired) as e:
         fail(f"{type(e).__name__}: {e}")

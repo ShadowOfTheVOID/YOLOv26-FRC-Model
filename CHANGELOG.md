@@ -9,6 +9,61 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Changed
+
+- **Proper installers instead of zips** for both apps:
+  - **Mac:** `Watchtower-mac.dmg` / `HubCounter-mac.dmg`. Open it and drag
+    the app onto Applications.
+  - **Windows:** `Watchtower-Setup-windows.exe` /
+    `HubCounter-Setup-windows.exe`, an Inno Setup installer
+    (`apps/installer/windows.iss`). It installs per user, so no admin
+    rights are needed, adds a Start-menu shortcut (desktop optional) and an
+    uninstaller, and a newer one upgrades in place.
+  - **Why:** the zip had to be extracted whole and run from wherever it
+    landed. Not one self-extracting exe: with PyTorch inside, it would
+    unpack ~1 GB on every start.
+  - **CI tests what people download:** on Mac, the app is run out of the
+    mounted .dmg; on Windows, the installer runs silently and the
+    installed apps are smoke-tested.
+  - Linux and the Pi keep the `.tar.gz`.
+
+- **The Watchtower app is a desktop app with its own windows**, not pages in
+  the browser. It is built on pywebview: WebKit on macOS, WebView2 on
+  Windows.
+  - **The Home window** has every setting a scrimmage needs (event, teams,
+    schedule, time zone, PINs, The Blue Alliance, game rules). Nobody edits
+    `event.yaml` by hand any more.
+  - **Saving** checks the settings with Watchtower's own rules, changes only
+    those lines (the file's comments stay), and restarts the app.
+  - **Phones:** a QR code and address for refs and emcee, plus a warning
+    when the computer is not on a network.
+  - **Windows:** Scorekeeper, Hub cameras and Field display each open in
+    their own window. A framed page would lose its login: WebKit partitions
+    storage for pages framed from another origin.
+  - **Closing Home quits.**
+  - **Checked here** with Qt's engine, offscreen: Home filled itself through
+    the app's API; the three windows loaded "FMS Control", "Hub Counter"
+    and "FMS Display"; a save restarted the app serving the new name and
+    teams; and Quit on the hub page closed it. CI runs the same window test
+    on macOS and Windows (`smoke_test.py --window`).
+  - **Import teams from TBA, no key needed.** A button on Event &
+    schedule reads the team list from the event page's public **Scouting**
+    tab on The Blue Alliance (`team_number,team_name,city,...` CSV; 11
+    teams for 2026catstd today, with names) and fills the Teams box, with a
+    names preview to check before Save. The Read API is only a fallback,
+    for an event page with no list yet; its key goes on The Blue Alliance
+    tab, or comes from `$TBA_AUTH_KEY`, and is stored as `tba.read_key`.
+    Watchtower ignores that key; it is added as one line at the end of its
+    section. Pasting the Scouting CSV (Copy to Clipboard) or TBA's JSON
+    into the Teams box also turns it into a clean list. Only the
+    team_number column counts, so the "75" in a photo URL is not a team.
+  - **Linux and the Pi** open the same Home page in the browser instead (no
+    window toolkit is bundled there), so settings are never hand-edited
+    there either. It is served on 127.0.0.1:8789, and every call needs a
+    per-launch token in a header, which another web page cannot send.
+    Checked in Chromium: saving restarted the app, which then served the new
+    name, date and teams.
+
 ## v0.4.3 — 2026-10-06
 
 A Watchtower app: the Watchtower FMS and the hub counter in one double-click

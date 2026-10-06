@@ -288,7 +288,14 @@ HUBAPP=watchtower from a clone of watchtower-fms at `.github/watchtower-release`
 runs fms.init into ~/Documents/Watchtower/config, uvicorn in a thread on :8000,
 and the hub counter with `HubController.default_target` set to
 http://KEY@127.0.0.1:8000. fms.server reads event.yaml at import, so chdir and
-FMS_CONFIG come first.
+FMS_CONFIG come first. It is a pywebview desktop app (home.html + settings.py,
+which edits event.yaml line by line; the user wants no hand-editing of YAML).
+Each page is its own top-level window, never a frame: Watchtower keeps logins
+in localStorage, which WebKit partitions for cross-origin frames. Saving
+settings relaunches the process (fms.server reads config at import and starts
+an unstoppable TBA thread). Linux/Pi fall back to the browser. Qt's engine
+(local testing only) hangs with a persistent profile and a second window:
+WATCHTOWER_WEBVIEW_PRIVATE=1.
 Training/droplet notes: the MI300X guide is `deploy/AMD_DEVCLOUD.md`; the
 scouting dataset recipe is `autolabel_fuel` -> `autolabel_robots` (fuel
 greyed before YOLOE; unknown-alliance robots painted out; `--min-robots` 2)
