@@ -283,6 +283,12 @@ files onto every release). Both Linux builds take CPU torch (PyPI's carries CUDA
 2 GB asset limit). torchvision's `_C_stable` ops are loaded by path, so the
 spec lists them by hand; the smoke test's `--selftest-model` is what catches
 that, since every page check passed without them.
+Watchtower app (`apps/watchtower/main.py`, built by the same spec with
+HUBAPP=watchtower from a clone of watchtower-fms at `.github/watchtower-release`):
+runs fms.init into ~/Documents/Watchtower/config, uvicorn in a thread on :8000,
+and the hub counter with `HubController.default_target` set to
+http://KEY@127.0.0.1:8000. fms.server reads event.yaml at import, so chdir and
+FMS_CONFIG come first.
 Training/droplet notes: the MI300X guide is `deploy/AMD_DEVCLOUD.md`; the
 scouting dataset recipe is `autolabel_fuel` -> `autolabel_robots` (fuel
 greyed before YOLOE; unknown-alliance robots painted out; `--min-robots` 2)

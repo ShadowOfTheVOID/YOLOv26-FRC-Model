@@ -34,3 +34,4 @@ hubfeed_*.csv
 # pip install -e . (the frc-fms plugin) writes these
 *.egg-info/
 build/
+watchtower-src/

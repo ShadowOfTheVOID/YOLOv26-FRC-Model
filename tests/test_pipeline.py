@@ -3334,6 +3334,19 @@ def test_hub_counter_app():
           "binaries=torchvision_ops()" in spec)
     check("and the built-in model, required in CI so no build ships without it",
           '"fuel_relabel.pt"' in spec and "HUBCOUNTER_REQUIRE_MODEL" in spec)
+    ctl2 = A.HubController()
+    check("the address box starts empty-handed (bioarena's default in the page)",
+          ctl2.state()["default_target"] == "")
+    ctl2.default_target = "http://KEY@127.0.0.1:8000"
+    check("an app can preset it, e.g. Watchtower to its own FMS",
+          ctl2.state()["default_target"] == "http://KEY@127.0.0.1:8000")
+    wt = (root / "apps" / "watchtower" / "main.py").read_text()
+    check("the Watchtower app makes its config, starts the FMS and presets the counter",
+          "init.init(" in wt and "uvicorn.Server" in wt and "ctl.default_target" in wt
+          and '"0.0.0.0"' in wt)
+    check("and one spec builds it, with the FMS pages and example configs",
+          'APP == "watchtower"' in spec and '"fms", "static"' in spec
+          and "event.example.yaml" in spec)
     launcher = (root / "apps" / "hubcounter" / "main.py").read_text()
     readme = (root / "apps" / "hubcounter" / "README.md").read_text()
     check("a Pi with no screen can share from the command line, and start at boot",
@@ -3347,6 +3360,8 @@ def test_hub_counter_app():
         wf = wf_path.read_text()
         check("CI runs the built-in model inside every build",
               "HUBCOUNTER_REQUIRE_MODEL" in wf and "fuel_relabel.pt" in wf)
+        check("CI builds and smoke-tests the Watchtower app beside the Hub Counter",
+              "apps/watchtower/smoke_test.py" in wf and "matrix.wasset" in wf)
     check("and asks macOS for the camera and the local network, or it gets neither",
           "NSCameraUsageDescription" in spec and "NSLocalNetworkUsageDescription" in spec)
 

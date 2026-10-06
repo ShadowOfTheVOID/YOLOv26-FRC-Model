@@ -10,6 +10,7 @@ there. Apply them in a checkout of it with `git am`.
 | 0002 | README docs for this repo's counter plugin | **in its main** (77199c9) |
 | 0003 | `/control` shows a counter's own status line (detail / warning) | new |
 | 0004 | A counter plugin system: plugin lookup by short name, `plugin_paths:`, `--list-counters`, option checks, `status()`, `close()` | new |
+| 0006 | The Watchtower app: `.github/workflows/app.yml` builds it on each tag for Mac, Windows, Linux and Pi, from YOLOv26-FRC-Model's `apps/watchtower/` at the tag in `.github/hubcounter-release` (v0.4.3) | new |
 | 0005 | Easier plugins: drop a `.py` into `vision/plugins/`, or `run_vision.py --add-plugin <repo folder>` | new (needs 0004) |
 
 ## 0003 + 0004: the plugin system
@@ -120,3 +121,35 @@ Without the GitHub CLI: after `git push -u origin release-v0.1.0`, open
 https://github.com/arnan-bajaj/watchtower-fms/compare/main...release-v0.1.0
 to make the pull request; after the tag, Releases -> Draft a new release ->
 tag `v0.1.0`, paste `watchtower-v0.1.0.md`, Publish.
+
+## 0006: the Watchtower app in Watchtower's own releases
+
+Watchtower's own releases then carry `Watchtower-mac.zip`, `-windows.zip`,
+`-linux-x64.tar.gz` and `-linux-arm64.tar.gz`. These are the same app as on
+YOLOv26-FRC-Model's releases, built with Watchtower's own code. The
+launcher, spec and smoke test stay in this repository; its workflow checks
+out this repository at the tag in `.github/hubcounter-release`. So **this
+repository's v0.4.3 must be tagged first**, or the workflow has nothing to
+check out.
+
+```bash
+cd ~/dev/watchtower-fms
+git checkout main
+git pull
+git checkout -b app-builds
+git am ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0006-*.patch
+git push -u origin app-builds
+gh pr create --repo arnan-bajaj/watchtower-fms --base main --head app-builds --title "The Watchtower app: build it on each tag" --body "Builds Watchtower as a double-click app for Mac, Windows, Linux and Pi on each tag (.github/workflows/app.yml)."
+```
+
+After that pull request is merged, release Watchtower v0.1.1 with the apps:
+
+```bash
+cd ~/dev/watchtower-fms
+git checkout main
+git pull
+git tag -a v0.1.1 -m "v0.1.1"
+git push origin v0.1.1
+gh release create v0.1.1 --repo arnan-bajaj/watchtower-fms --title "v0.1.1" --notes "The Watchtower app: double-click Watchtower for Mac, Windows, Linux and Raspberry Pi, with the hub counter built in. Downloads below (attached by the app workflow in about 20 minutes)."
+```
+
