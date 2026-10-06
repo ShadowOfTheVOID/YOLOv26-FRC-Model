@@ -1,0 +1,265 @@
+From ee794965e0c831f5f66f1e3fbe66bbb7766d4033 Mon Sep 17 00:00:00 2001
+From: ShadowOfTheVOID <teddtony@outlook.com>
+Date: Tue, 6 Oct 2026 03:51:58 +0000
+Subject: [PATCH] The Watchtower app: build it on each tag, for Mac, Windows,
+ Linux and Pi
+
+Running Watchtower meant a clone, a venv, fms.init and run.sh, and typing
+the vision key into the hub counter. .github/workflows/app.yml builds a
+double-click app per OS on each v* tag and attaches it to the release:
+first launch runs fms.init into Documents/Watchtower/config, every launch
+starts the FMS on :8000 and the YOLOv26-FRC-Model hub counter already
+sending to it, and opens a start page with every link and PIN.
+
+The launcher, build spec and smoke test come from YOLOv26-FRC-Model at
+the tag in .github/hubcounter-release; this repository's checkout is the
+FMS that gets bundled. Each build is smoke-tested (first-launch config,
+FMS up, counter preset to it, vision key accepted and a wrong one refused
+with 401, Quit stops both) before it is attached.
+
+Checked from YOLOv26-FRC-Model: a packaged linux-x64 build counted a
+recorded Einstein match into its own Watchtower live (59.9 fps both hubs),
+with /ws updates working. 42 tests pass here.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01H8z93x3TYFuGBjjWb4pL17
+---
+ .github/hubcounter-release |   1 +
+ .github/workflows/app.yml  | 148 +++++++++++++++++++++++++++++++++++++
+ CLAUDE.md                  |   4 +
+ README.md                  |  30 ++++++++
+ 4 files changed, 183 insertions(+)
+ create mode 100644 .github/hubcounter-release
+ create mode 100644 .github/workflows/app.yml
+
+diff --git a/.github/hubcounter-release b/.github/hubcounter-release
+new file mode 100644
+index 0000000..f87d474
+--- /dev/null
++++ b/.github/hubcounter-release
+@@ -0,0 +1 @@
++v0.4.3
+diff --git a/.github/workflows/app.yml b/.github/workflows/app.yml
+new file mode 100644
+index 0000000..e6ad9a3
+--- /dev/null
++++ b/.github/workflows/app.yml
+@@ -0,0 +1,148 @@
++name: app
++
++# Builds the Watchtower app -- this FMS plus the YOLOv26-FRC-Model hub
++# counter, set up and started on a double-click -- on each OS:
++#
++#   macOS (Apple silicon)  Watchtower-mac.zip            Watchtower.app
++#   Windows                Watchtower-windows.zip        Watchtower\Watchtower.exe
++#   Linux x64              Watchtower-linux-x64.tar.gz   Watchtower/Watchtower
++#   Linux arm64 (Pi 4/5)   Watchtower-linux-arm64.tar.gz Watchtower/Watchtower
++#
++# The launcher, build spec and smoke test live in YOLOv26-FRC-Model
++# (apps/watchtower/), at the tag in .github/hubcounter-release; this repo's
++# own code is what gets bundled as the FMS. The fuel model comes from that
++# repository's releases, checked against the checksum in its CHANGELOG.
++#
++#   v* tag here: build, smoke test, attach the four apps to this release
++#   pull request touching the FMS or this file: build + smoke test only
++#   "Run workflow" button: the same, on demand
++on:
++  push:
++    tags: ["v*"]
++  pull_request:
++    paths:
++      - "fms/**"
++      - "config/*.example.yaml"
++      - ".github/workflows/app.yml"
++      - ".github/hubcounter-release"
++  workflow_dispatch:
++
++permissions:
++  contents: write            # to attach the builds to a release
++
++jobs:
++  build:
++    strategy:
++      fail-fast: false
++      matrix:
++        include:
++          - os: macos-14
++            asset: Watchtower-mac.zip
++            program: dist/Watchtower.app/Contents/MacOS/Watchtower
++          - os: windows-latest
++            asset: Watchtower-windows.zip
++            program: dist/Watchtower/Watchtower.exe
++          - os: ubuntu-22.04
++            asset: Watchtower-linux-x64.tar.gz
++            program: dist/Watchtower/Watchtower
++          - os: ubuntu-22.04-arm
++            asset: Watchtower-linux-arm64.tar.gz
++            program: dist/Watchtower/Watchtower
++    runs-on: ${{ matrix.os }}
++    defaults:
++      run:
++        shell: bash
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          path: watchtower-src
++
++      - name: Which YOLOv26-FRC-Model release builds the app
++        id: hub
++        run: echo "ref=$(cat watchtower-src/.github/hubcounter-release)" >> "$GITHUB_OUTPUT"
++
++      - uses: actions/checkout@v4
++        with:
++          repository: ShadowOfTheVOID/YOLOv26-FRC-Model
++          ref: ${{ steps.hub.outputs.ref }}
++          path: hub
++
++      - uses: actions/setup-python@v5
++        with:
++          python-version: "3.12"
++
++      # PyPI's Linux torch carries CUDA (~3 GB, over GitHub's 2 GB asset
++      # limit); PyTorch's CPU index has it without. Ultralytics --no-deps, or
++      # it pulls a second OpenCV and SciPy.
++      - name: Install the build tools, OpenCV, PyTorch, Ultralytics and the FMS's server
++        run: |
++          if [ "${{ runner.os }}" = "Linux" ]; then
++            pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
++          else
++            pip install torch torchvision
++          fi
++          pip install pyinstaller opencv-python-headless numpy yt-dlp
++          pip install --no-deps ultralytics ultralytics-thop
++          pip install matplotlib pillow pyyaml requests psutil polars
++          pip install fastapi uvicorn websockets
++
++      - name: The fuel model, checked against YOLOv26-FRC-Model's CHANGELOG
++        env:
++          GH_TOKEN: ${{ github.token }}
++        working-directory: hub
++        run: |
++          mkdir -p models
++          gh release download "$(cat .github/models-release)" --repo ShadowOfTheVOID/YOLOv26-FRC-Model -p fuel_relabel.pt -D models --clobber
++          python - <<'PY'
++          import hashlib, re
++          want = re.search(r"^([0-9a-f]{64})  fuel_relabel\.pt$", open("CHANGELOG.md").read(), re.M).group(1)
++          got = hashlib.sha256(open("models/fuel_relabel.pt", "rb").read()).hexdigest()
++          assert got == want, f"fuel_relabel.pt is {got}, CHANGELOG says {want}"
++          print("fuel_relabel.pt", got)
++          PY
++
++      - name: Build
++        working-directory: hub
++        env:
++          HUBAPP: watchtower
++          WATCHTOWER_SRC: ${{ github.workspace }}/watchtower-src
++          HUBCOUNTER_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
++          HUBCOUNTER_REQUIRE_MODEL: "1"
++        run: pyinstaller --noconfirm --workpath build/watchtower apps/hubcounter/HubCounter.spec
++
++      - name: Smoke test (setup, FMS, counter preset to it, vision key, Quit)
++        working-directory: hub
++        run: python apps/watchtower/smoke_test.py "${{ matrix.program }}"
++
++      - name: Package
++        working-directory: hub
++        run: |
++          case "${{ matrix.asset }}" in
++            *mac.zip)  ditto -c -k --keepParent "dist/Watchtower.app" "${{ matrix.asset }}" ;;
++            *.zip)     python -c "import shutil; shutil.make_archive('${{ matrix.asset }}'[:-4], 'zip', 'dist', 'Watchtower')" ;;
++            *.tar.gz)  tar -czf "${{ matrix.asset }}" -C dist Watchtower ;;
++          esac
++          # A release asset over 2 GB is refused at upload; stop here instead.
++          python -c "import os,sys; n=os.path.getsize('${{ matrix.asset }}'); print(n>>20,'MB'); sys.exit(n > 1900*2**20)"
++
++      - uses: actions/upload-artifact@v4
++        with:
++          name: ${{ matrix.asset }}
++          path: hub/${{ matrix.asset }}
++
++      # The release is normally made by hand from the tag (gh release create
++      # with the notes); wait for it, and make a bare one if nobody did.
++      - name: Attach to the release
++        if: startsWith(github.ref, 'refs/tags/v')
++        working-directory: hub
++        env:
++          GH_TOKEN: ${{ github.token }}
++          GH_REPO: ${{ github.repository }}
++        run: |
++          for i in $(seq 1 40); do
++            gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
++            sleep 15
++          done
++          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || \
++            gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "Apps attached by the app workflow." || true
++          gh release upload "${{ github.ref_name }}" "${{ matrix.asset }}" --clobber
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 092fe50..57a465c 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -96,3 +96,7 @@ TBA `score_breakdown` (off by default; TBA validates per-season keys), alliance
+ Direct answers, uncomfortable truths first. Prove changes with tests or a mock run before calling them done.
+ Small commits; don't refactor across `fms/` and `vision/` in one change. Update README.md (and this file)
+ in the same commit as any change to setup, usage or invariants.
++- The Watchtower app (`.github/workflows/app.yml`) is built from YOLOv26-FRC-Model's `apps/watchtower/` (launcher,
++  spec, smoke test) at the tag in `.github/hubcounter-release`, with this repo's code as the FMS. It runs fms.init
++  into `~/Documents/Watchtower/config`, so `fms.server`'s import-time `config.load()` and relative `data/` paths must
++  keep working from whatever folder the process chdirs to. Bump `.github/hubcounter-release` to pick up counter fixes.
+diff --git a/README.md b/README.md
+index 97524d2..522a2bd 100644
+--- a/README.md
++++ b/README.md
+@@ -23,6 +23,34 @@ Built for the 10th Street Showdown (October 2026) and shared so other teams can
+ 
+ ---
+ 
++## The app (no terminal)
++
++Each release has **Watchtower** as a double-click app, with the hub-camera
++counter from [YOLOv26-FRC-Model](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model)
++built in:
++
++| computer | download |
++|---|---|
++| Mac (Apple silicon) | `Watchtower-mac.zip` |
++| Windows 10/11 | `Watchtower-windows.zip` |
++| Linux PC | `Watchtower-linux-x64.tar.gz` |
++| Raspberry Pi 4/5 (64-bit Pi OS) | `Watchtower-linux-arm64.tar.gz` |
++
++- **First launch** makes `Documents/Watchtower/config/event.yaml` with new
++  PINs and a vision key.
++- **Every launch:**
++  - starts the FMS on port 8000 for phones on the Wi-Fi;
++  - starts the hub counter already sending to it;
++  - opens a start page with every link and PIN.
++- **Event name, date and teams:** set them in that `event.yaml`, then Quit
++  (on the hub camera page) and reopen.
++- **First open:** the apps are unsigned. On a Mac: System Settings → Privacy
++  & Security → Open Anyway. On Windows: More info → Run anyway.
++
++`.github/workflows/app.yml` builds them on each tag. The hub counter comes
++from the YOLOv26-FRC-Model release named in `.github/hubcounter-release`.
++Everything below is the from-source setup, which the app replaces.
++
+ ## Quick start (no cameras, about 5 minutes)
+ 
+ ```bash
+@@ -45,6 +73,7 @@ Open `http://localhost:8000` on the laptop, or `http://<laptop-ip>:8000` on a ph
+ 
+ ## Contents
+ 
++1. [The app (no terminal)](#the-app-no-terminal)
+ 1. [Quick start](#quick-start-no-cameras-about-5-minutes)
+ 1. [Architecture](#architecture)
+ 2. [Repo layout](#repo-layout)
+@@ -118,6 +147,7 @@ config/
+   vision.mock.yaml     fake fuel for rehearsal (committed)
+   event.yaml           your event; created by fms.init, gitignored
+   vision.yaml          your cameras; created by fms.init, gitignored
++.github/workflows/app.yml  builds the Watchtower app on each tag (see "The app")
+ docs/screenshots/  images used in this README
+ tests/             hand-computed scoring, schedule, bracket, selection, setup tests
+ run.sh             start FMS + vision together (runs fms.init on first use)
+-- 
+2.43.0
+

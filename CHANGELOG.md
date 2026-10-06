@@ -9,6 +9,18 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.4.3 — 2026-10-06
+
+A Watchtower app: the Watchtower FMS and the hub counter in one double-click
+program, already set up and pointed at each other, for Mac, Windows, Linux
+and Raspberry Pi. Watchtower's own releases can build the same app
+(`deploy/frc-fms-patches/0006`).
+
+| app | download |
+|---|---|
+| Watchtower: FMS + hub counter (Mac / Windows / Linux / Pi) | `Watchtower-mac.zip`, `Watchtower-windows.zip`, `Watchtower-linux-x64.tar.gz`, `Watchtower-linux-arm64.tar.gz` |
+| Hub counter only | `HubCounter-mac.zip`, `HubCounter-windows.zip`, `HubCounter-linux-x64.tar.gz`, `HubCounter-linux-arm64.tar.gz` |
+
 ### Added
 
 - **A Watchtower app: the FMS and the hub counter set up and started with a
@@ -26,6 +38,9 @@ the build rather than publishing an empty release.
     own Watchtower live (59.9 fps, both hubs), the live page updates
     (WebSocket) worked, a wrong vision key was refused (401), and Quit
     stopped both. CI's smoke test repeats this on every OS.
+- **Watchtower can build the app in its own releases** (patch 0006:
+  `.github/workflows/app.yml` there). It checks out this repository at the tag
+  in its `.github/hubcounter-release` and bundles its own code as the FMS.
 - **The hub counter's address box can be preset by the app that starts it**,
   and its label now names both targets: bioarena `host:port`, or Watchtower
   `http://KEY@host:8000`.
