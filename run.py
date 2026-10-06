@@ -924,7 +924,8 @@ def cmd_hubgui(args, cfg):
     """The hub counter as a web page: cameras, outlines, calibration, the feed."""
     from tbavid import hubweb
 
-    return hubweb.main(args.setup, args.port, args.bind, not args.no_browser)
+    return hubweb.main(args.setup, args.port, args.bind, not args.no_browser,
+                       args.share, args.pin)
 
 
 def cmd_hubfeed_listen(args, cfg):
@@ -1404,6 +1405,12 @@ def main(argv=None):
                         "others on the network control the counter")
     p.add_argument("--no-browser", dest="no_browser", action="store_true",
                    help="do not open the browser")
+    p.add_argument("--share", action="store_true",
+                   help="also open the page to other devices on this Wi-Fi, "
+                        "port 8791, behind a PIN (printed here); for a phone, "
+                        "or a Pi with no screen")
+    p.add_argument("--pin", default="",
+                   help="with --share, use this PIN instead of a random one")
     p.set_defaults(func=cmd_hubgui)
 
     p = sub.add_parser("hubfeed-listen",

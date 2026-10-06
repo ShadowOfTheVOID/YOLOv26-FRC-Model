@@ -69,16 +69,25 @@ cp ~/dev/TBACroppedOutVid/deploy/frc-fms.vision.yaml ~/dev/frc-fms/config/vision
 open -e ~/dev/frc-fms/config/vision.yaml
 ```
 
-Fill in the marked lines: the model path (or switch to `ColourCounter` for
-colour only), each hub's camera `source`, and the `setup:` path to
-`cams.json` with the camera names from step 2. Keep `fps` at the cameras'
-real rate (60 if they do 60). Then start everything with our repository on
-the Python path:
+Fill in the marked lines: the model path (or switch to `tbavid-colour`
+for colour only, the better choice on wide, broadcast-like views), each
+hub's camera `source`, and the `setup:` path to `cams.json` with the camera
+names from step 2. Keep `fps` at the cameras' real rate (60 if they do 60).
+Its `plugin_paths:` line is how frc-fms finds this repository. With patch
+0005 there is a simpler way: delete that line and run
+`cd ~/dev/frc-fms/vision && python run_vision.py --add-plugin ~/dev/TBACroppedOutVid`
+once. Check that it finds the counters, then start everything:
 
 ```bash
-cd ~/dev/frc-fms
-PYTHONPATH=~/dev/TBACroppedOutVid ./run.sh ../config/vision.yaml --preview
+cd ~/dev/frc-fms/vision && python run_vision.py --config ../config/vision.yaml --list-counters
+cd ~/dev/frc-fms && ./run.sh ../config/vision.yaml --preview
 ```
+
+`--list-counters` should show `tbavid-colour` and `tbavid-combo`. This
+needs frc-fms with the plugin system (`deploy/frc-fms-patches/0003-0005`,
+not in its main yet). Without it, use the full names
+(`"tbavid.fms_counter:ColourCounter"`) and start with
+`PYTHONPATH=~/dev/TBACroppedOutVid ./run.sh ...`.
 
 `--preview` opens a window per hub showing the outline and, for the combo,
 both halves (`red: 42 (colour 44, model 40)`). Watch the terminal for
@@ -107,9 +116,11 @@ press **Start**. Same from the command line:
 
 1. Open `http://localhost:8000/control`, enter the control PIN, **Setup**
    tab, **Vision** panel. Each hub should read about `60 fps` and the
-   counter (`tbavid.fms_counter:ComboCounter` in A, `tbavid colour + model`
-   in B); the top bar shows **vision ok**. A red pill means a camera is not
-   delivering frames, or (B) one is under 28 fps.
+   counter (`tbavid-combo` in A, `tbavid colour + model` in B). Under it, in
+   A, is the plugin's own line, e.g. `colour 44 · model 40`, or an amber
+   warning if the model was too slow and turned itself off. The top bar shows
+   **vision ok**. A red pill means a camera is not delivering frames, or
+   (B) one is under 28 fps.
 2. Drop 20 balls into each hub by hand, counting them. The count should
    rise by about 20 per hub (the spec's acceptance test). Do it with and
    without the model if you have time; keep whichever is closer.
@@ -125,7 +136,7 @@ re-count skips nothing):
 
 ```bash
 cd ~/dev/frc-fms/vision
-PYTHONPATH=~/dev/TBACroppedOutVid python rescore.py --match qm3 --hub red \
+python rescore.py --match qm3 --hub red \
   --video recordings/qm3_<start>_red.mp4 --config ../config/vision.yaml --dry-run
 ```
 
@@ -135,8 +146,9 @@ Drop `--dry-run` to replace that hub's events in frc-fms.
 
 | you see | it means / do |
 |---|---|
-| `ModuleNotFoundError: tbavid` | `PYTHONPATH=~/dev/TBACroppedOutVid` was not set for `run.sh` / `rescore.py` |
-| `ComboCounter needs model:` | the `model:` line is missing; or use `ColourCounter` |
+| `counter 'tbavid-colour' not found` | `plugin_paths:` does not point at this repository (it is relative to `config/`), or frc-fms lacks the plugin-system patch. Easiest fix: `python run_vision.py --add-plugin ~/dev/TBACroppedOutVid` (patch 0005) |
+| `has no option 'ball_aera' (did you mean 'ball_area'?)` | a misspelt key in `vision.yaml`; it was ignored |
+| `ComboCounter needs model:` | the `model:` line is missing; or use `tbavid-colour` |
 | `name the camera in cams.json` | `camera:` does not match a name saved in step 2 |
 | `camera read failed` on the control page | wrong `source` index, or `hubgui` still holds the camera |
 | counts about double | ways A and B are both running |
@@ -144,6 +156,13 @@ Drop `--dry-run` to replace that hub's events in frc-fms.
 | control page `vision down` / `never connected` (B) | wrong vision key in the URL, or frc-fms not on that address |
 
 ## A. Plugin: frc-fms runs our counter
+
+**With frc-fms's plugin system** (`deploy/frc-fms-patches/0003-0005`), use
+the short names `tbavid-colour` / `tbavid-combo` and a `plugin_paths:` line
+(or `pip install -e` this repository) instead of the full names and
+`PYTHONPATH` below. `python run_vision.py --list-counters` shows both, with
+their options, and `/control` shows each hub's status line. The rest of this
+section is for an frc-fms without that patch.
 
 In frc-fms's `config/vision.yaml`:
 

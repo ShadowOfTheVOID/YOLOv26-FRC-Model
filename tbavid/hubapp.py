@@ -583,6 +583,19 @@ class HubController:
         if self.stop_evt:
             self.stop_evt.set()
 
+    # Set by the web server: its Share (the page on Wi-Fi, behind a PIN).
+    share = None
+
+    # Set by the web server: shuts it down. A double-clicked app has no
+    # terminal to press Ctrl-C in, so the page's Quit button is the way out.
+    on_quit: Optional[Callable[[], None]] = None
+
+    def quit(self) -> None:
+        """Stop counting, then end the server (after this reply is sent)."""
+        self.stop()
+        if self.on_quit:
+            self.on_quit()
+
     # -- what the front ends draw -------------------------------------------------
     def state(self, last_log: int = 0) -> Dict:
         """Everything a front end shows, as plain JSON-able data."""

@@ -1,0 +1,58 @@
+"""Smoke test a built Hub Counter on any OS: python smoke_test.py PATH_TO_PROGRAM
+
+Starts the program with a scratch home folder, then checks that the page
+and the scoreboard load, that ~/Documents/Hub Counter was made, and that
+the page's Quit ends the program. A frozen build that cannot find its HTML,
+or never exits, fails here instead of on someone's laptop.
+"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+URL = "http://127.0.0.1:8790"
+
+
+def get(path: str) -> str:
+    with urllib.request.urlopen(URL + path, timeout=5) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def main(program: str) -> int:
+    home = tempfile.mkdtemp(prefix="hubcounter-home-")
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
+    proc = subprocess.Popen([program], env=env)
+    try:
+        for _ in range(60):                 # Windows and first launches are slow
+            try:
+                page = get("/")
+                break
+            except OSError:
+                time.sleep(1)
+        else:
+            print("FAIL: the page never came up")
+            return 1
+        assert "Hub Counter" in page, "the page is not the hub counter's"
+        get("/board")
+        docs = os.path.join(home, "Documents", "Hub Counter")
+        assert os.path.isdir(docs), f"{docs} was not made"
+        req = urllib.request.Request(URL + "/api/quit", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        assert json.loads(urllib.request.urlopen(req, timeout=5).read())["ok"]
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            print("FAIL: still running 30 s after Quit")
+            return 1
+        print(f"OK: page, board, data folder, Quit (exit code {proc.returncode})")
+        return 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1]))

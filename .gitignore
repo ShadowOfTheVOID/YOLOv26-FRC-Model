@@ -30,3 +30,7 @@ logs/
 /cams.json
 hubfeed_*.csv
 /dataset_einstein/
+
+# pip install -e . (the frc-fms plugin) writes these
+*.egg-info/
+build/

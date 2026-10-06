@@ -9,10 +9,101 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Added
+
+- **A counter plugin system for frc-fms (watchtower-fms), and our counters as
+  plugins of it** (`deploy/frc-fms-patches/0003-0005`, `pyproject.toml`).
+  - **His side:** `counter:` finds plugins by short name, either installed
+    packages registering `watchtower.counters` entry points or `plugin_paths:`
+    folders. `--list-counters` lists them. A misspelt option is flagged
+    (`ball_aera` → "did you mean `ball_area`?"). A plugin's `status()` shows
+    under its hub on `/control`, and a plugin that fails to load says why
+    instead of the hub reading "never connected".
+  - **Ours:** `tbavid-colour` and `tbavid-combo` declare their name, needs
+    and options, report `colour N · model M` or "model off" as their status,
+    and release the model thread in `close()`. They are found by
+    `pip install -e` this repository or by `plugin_paths:`, with no
+    `PYTHONPATH`.
+  - **Checked** against a running watchtower-fms, both ways. Its tests pass
+    with the patches (37).
+  - **Adding a plugin without editing config** (patch 0005). Drop a `.py`
+    into his `vision/plugins/` (copy the `_example.py` template), or run
+    `python run_vision.py --add-plugin ~/dev/TBACroppedOutVid` once. It
+    records the folder as a one-line `.path` file (no symlink, so it works on
+    Windows) and prints `tbavid-colour / tbavid-combo`. Files there are
+    parsed, not imported, so a broken one cannot stop vision from starting.
+    His tests: 42 pass.
+- **A slow model is now dropped after 10 s of wall time, not only after 300
+  frames.** Inside frc-fms's runner on 4 CPU cores, the combo dragged the
+  camera loop from 60 to 13 fps, so 300 frames took about 45 s to arrive.
+  Counting was wrong for all of AUTO before the model was dropped. Now it
+  goes at about 10 s and the hub is back at 60 fps on colour.
+
+- **The Hub Counter app for Mac, Windows, Linux and Raspberry Pi**
+  (`apps/hubcounter/`, `.github/workflows/hub-app.yml`). The hub counter's
+  web page as a double-click program: nothing to install and no terminal.
+  It keeps the setup and logs in `Documents/Hub Counter/`, and opening it
+  again only reopens the page. It holds the hub counter only: none of the
+  scraper, PyTorch or Ultralytics, so no `--model` blend. Each OS's build
+  runs on its own GitHub runner (macos-14, windows-latest, ubuntu-22.04,
+  ubuntu-22.04-arm) for every pull request touching it (as artifacts), and
+  is attached to each release. `apps/hubcounter/smoke_test.py` checks every
+  build: the page and the board load, the data folder is made, and Quit ends
+  the program. A Linux build of the same spec held exactly the nine hub
+  modules and the two pages, and passed it.
+- **Twitch / YouTube streams work inside the app.** Stream lookup ran
+  `sys.executable -m yt_dlp`. In a packaged app `sys.executable` is the
+  app itself, so adding a stream would have started a second copy of the
+  counter. A packaged app now calls yt-dlp as a library, with the same
+  format choice and messages.
+- **Share on Wi-Fi.** A Share button on the page (or `run.py hubgui
+  --share [--pin N]`) opens it to other devices on the same network, at
+  port 8791, behind a 6-digit PIN shown only on the counting computer.
+  That covers a phone at the table, or a Pi with no screen set up from a
+  laptop. `/board` stays open for a TV. Quit and stopping the share are
+  host-only. Five wrong PINs from one address lock it out for a minute.
+  The page on the counting computer itself is unchanged (127.0.0.1, no
+  PIN). Checked in Chromium: the PIN screen on a phone, the full page
+  after it with Quit and Share hidden, and the address and PIN shown on
+  the host.
+- **A Quit button on the hub page**, since an app has no terminal to press
+  Ctrl-C in. It asks first, and says so if counting is running or the
+  setup is unsaved.
+
+### Changed
+
+- **The setup page recommends a raised outline, not exit lines.** It
+  listed exit lines first as "recommended" and its hints said to draw one.
+  On the 2026 Central Valley broadcast, the first with its exits in view,
+  exit lines measured 82-85% error (blue 25-32 of 159, red 52-100 of 810):
+  balls pour out into a pile against the hub instead of crossing the line
+  one at a time. The raised outline got 6.4% on the same match. Exit lines
+  stay, listed second and marked untested, for a camera aimed right at the
+  chute.
 - `run.py count`, `shots` and `detect` take `--device` (mps, 0, cpu). Not
   given, it is CUDA, then MPS, then CPU, and the choice is printed at
   startup. Before this Ultralytics chose, and it never picks MPS, so on a Mac
   these ran the model on the CPU.
+
+### Measured
+
+- **The colour + model combo was worse than colour alone on Central
+  Valley**: 34.5% against 6.4% with the same raised outlines (final
+  265 / 823 against 159 / 810). The model half counted blue 363. Use colour
+  only on cameras like this.
+
+- **Outline height decides the count on a wide broadcast** (2026 Central
+  Valley, upper-bracket match 1, scored against the broadcast's fuel
+  counts; deploy/HUB_FEED.md). With the top edge on the hood rim the
+  colour counter got blue 57 / 159 and red 665 / 810 (38.9% error): balls
+  dropped behind the hood's mesh over a lit hub top showed only as small
+  fragments. Raised about 45 px it got 166 / 808, 6.4% error, AUTO right.
+  Raised about 60 px it over-counted (blue 225 / 159, 21.4%). The setup
+  page and runbook now say to put the top edge 3-4 ball widths above the
+  hood. Doing that in code instead (every outline raised by k ball widths)
+  was rejected. At k = 3, Central Valley went to 5.7% but the four
+  Einsteins went from 6-16% to 17-29%: their outlines were already where
+  balls are visible.
 
 ## v0.4.0 — 2026-10-03
 

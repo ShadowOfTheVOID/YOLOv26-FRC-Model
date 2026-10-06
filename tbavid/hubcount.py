@@ -500,6 +500,10 @@ def resolve_stream(page: str, timeout: float = 45.0) -> str:
     import sys
 
     url = page if "://" in page else "https://" + page
+    if getattr(sys, "frozen", False):
+        # Inside Hub Counter.app / .exe, sys.executable is the app itself:
+        # "-m yt_dlp" would start a second copy of the app, not yt-dlp.
+        return _resolve_in_process(url, timeout)
     if importlib.util.find_spec("yt_dlp") is not None:
         cmd = [sys.executable, "-m", "yt_dlp"]
     elif shutil.which("yt-dlp"):
@@ -520,6 +524,30 @@ def resolve_stream(page: str, timeout: float = 45.0) -> str:
             raise SystemExit(f"{url}: the channel is not live right now")
         raise SystemExit(f"{url}: {why.replace('ERROR: ', '')}")
     return lines[0]
+
+
+def _resolve_in_process(url: str, timeout: float) -> str:
+    """resolve_stream for a packaged app: yt-dlp as a library, same format
+    choice and the same messages as the command line's `-g`."""
+    try:
+        import yt_dlp
+    except ImportError:
+        raise SystemExit("this build cannot read Twitch or YouTube streams "
+                         "(yt-dlp is not in it)")
+    opts = {"quiet": True, "no_warnings": True, "noplaylist": True,
+            "format": "best[height<=1080]/best", "socket_timeout": timeout}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:                      # yt_dlp.utils.DownloadError & co
+        why = str(e).strip().splitlines()[-1] if str(e).strip() else "no stream found"
+        if "not currently live" in why:
+            raise SystemExit(f"{url}: the channel is not live right now")
+        raise SystemExit(f"{url}: {why.replace('ERROR: ', '')}")
+    got = (info or {}).get("url")
+    if not got:
+        raise SystemExit(f"{url}: no stream found")
+    return got
 
 
 NETWORK_SCHEMES = ("rtsp://", "rtsps://", "rtmp://", "http://", "https://",

@@ -121,12 +121,23 @@ ms per frame on a laptop CPU.
 
 ## The easy way: the web page
 
+**Use the Hub Counter app** (`apps/hubcounter/README.md`): Mac, Windows,
+Linux or Raspberry Pi. Download yours from the release, unzip it, and
+double-click. It opens
+this page in your browser with nothing to install and no terminal. The
+setup and count logs go to `Documents/Hub Counter/`. Stop it with the
+page's **Quit** button. It counts by colour; the fuel-model blend still
+needs the terminal version below.
+
 ```bash
 .venv/bin/python run.py hubgui --setup cams.json            # opens in your browser
 ```
 
-On a Mac, double-clicking `hubfeed.command` does the same, installing what
-it needs the first time. The page needs nothing but Python, OpenCV and (for
+Double-clicking `hubfeed.command` does the same from a checkout, installing
+what it needs the first time. **Share** (or `--share`) also opens the page
+to other devices on the same Wi-Fi, behind a PIN shown on this computer.
+That covers a phone at the table, or a Pi with no screen
+(`--share --pin NNNN --no-browser`). The scoreboard needs no PIN. The page needs nothing but Python, OpenCV and (for
 streams) yt-dlp; its logic lives in `tbavid/hubapp.py`. Work down the
 right-hand side:
 
@@ -273,7 +284,18 @@ slider, 0 unless moved, which pins the setting that measured 20-34%. A
 setup file without `"rules": 2` has its blur 0 read as 0.3, with a note
 printed. Save it once from the page and it keeps what it has from then on.
 
-## Count at the exits (recommended)
+## Count at the exits (untested; failed on both broadcasts)
+
+**Use a raised outline instead** (section 1, "Draw the outlines"). On the
+2026 Central Valley broadcast (2026-10-05), whose exits are in view, exit
+lines got 25-32 of blue's 159 and 52-100 of red's 810: 82-85% error. The
+raised outline got 166 / 808 (6.4%) on the same match. The balls do not
+leave one at a time: they pour into a pile against the hub, so new ones push
+into the heap instead of crossing the line as separate blobs. Referees and
+robots also stand at the exit. Red's exit count was still under 20 at
+141 s, against 634. The idea below still holds for a camera aimed right
+at the chute, where balls cross before the pile. Check that with 20 balls
+first.
 
 Every ball that scores comes back out of the hub, so the number leaving
 through the exits is the score. Counting there removes the error that sank
@@ -396,8 +418,8 @@ What this does not fix:
   feed.
 - **Exit lines stay unmeasurable on broadcasts.** The exits are behind the
   hubs, 9-34% visible. Their 76% error is the camera angle, not the
-  counter. On a practice hub with a camera on the chute, they are still
-  the recommended zone.
+  counter. (Later, Central Valley's exits were in view and still gave
+  82-85%: the balls pile up at the exit. See "Count at the exits".)
 
 ## Downward entries and a learned ball (2026-09-29, the current rules)
 
@@ -695,6 +717,12 @@ Read it carefully:
   not move. The table above was measured on one phase, so treat
   differences of a few points between settings as noise.
 
+**On the Central Valley broadcast the combo was worse than colour alone**
+(2026-10-05, raised outlines): 34.5% against 6.4%, final 265 / 823 against
+the official 159 / 810. The model half counted blue 363: in this wider
+shot it fires on far more than the hub's balls. Red's model half was close
+(837). Use colour only on a camera like this one.
+
 What would settle it is the same thing as for colour alone: a hand-counted
 recording from the real camera position. Run it with and without `--model`
 and keep whichever is closer.
@@ -729,6 +757,37 @@ the clear hood and the opening, **bottom edge on the solid front rim** -- as
 into that outline and is taken back when it crosses out, so the outline must
 be somewhere a scored ball goes in and disappears, and a ball flying past
 does not stop.
+
+**Take the top edge 3-4 ball widths above the hood, not on its rim.** On
+the 2026 Central Valley broadcast (2026-10-05) balls drop into the hub
+behind the hood's mesh, over a hub top lit bright blue or red. There each
+ball shows only as yellow fragments, mostly below the minimum blob, so a
+crossing at the rim is mostly missed. An outline whose top edge sat on
+the hood rim counted blue 57 of 159 and red 665 of 810: 38.9% mean error.
+With the top edge raised 30-45 px (about 3-4 ball widths there), the balls
+cross it as clean blobs against the wall behind. Raised about 45 px it
+counted 166 / 808: 6.4%, AUTO right, 93-122% of the official count at
+every checkpoint after the first. Raised about 60 px it over-counted blue
+225 / 159 (21.4%), catching misses that arc down past the hood. So there is
+a right height. Check it the same way here: drop 20 balls in and see that
+about 20 count.
+
+**The rule is "where a falling ball is still in clear view", not a fixed
+raise.** Raising every outline automatically by k ball widths was tried on
+all five scored matches:
+
+| k | E4 | E5 | E1 | E8 | Central Valley |
+|---|---|---|---|---|---|
+| 0 (as drawn) | 16.2% | 6.2% | 9.1% | 8.8% | 38.9% |
+| 1 | 14.8% | 20.0% | 28.4% | 10.1% | 24.2% |
+| 2 | 30.7% | 13.7% | 18.7% | 30.1% | 9.6% |
+| 3 | 21.7% | 16.5% | 24.7% | 28.9% | 5.7% |
+| 4 | 31.3% | 26.4% | 22.9% | 44.4% | 7.0% |
+
+The Einstein outlines were already drawn where balls are visible, so
+raising them only adds flyovers. Central Valley's sat where they are
+hidden. No single k suits both, so the counter does not raise outlines
+itself; the person drawing them does, by looking.
 
 ## 2. Measure one ball (once per camera position)
 

@@ -1,0 +1,36 @@
+From ff3c627786d37fd09f66b5b2c6b902368a475dea Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 23:52:52 +0000
+Subject: [PATCH 3/4] Control: show a vision counter's own status line under
+ its hub
+
+/control's Vision panel showed each hub's fps and counter name only. A counter could not
+say anything else, for example that its model was too slow and had been turned off.
+The panel now also shows two optional status keys the vision sender passes through:
+'detail', muted, and 'warning', in amber.
+A warning does not turn the 'vision ok' pill red, because counting goes on; 'error'
+still does. With no such keys the panel looks as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ fms/static/control.html | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fms/static/control.html b/fms/static/control.html
+index ba2622f..99bffa9 100644
+--- a/fms/static/control.html
++++ b/fms/static/control.html
+@@ -565,7 +565,9 @@ function renderSetup(s) {
+     const x = v[h];
+     return `<tr><td>${h} hub</td><td>${!x ? `<span class="pill bad">never connected</span>` :
+       x.age > 3 ? `<span class="pill bad">silent ${x.age}s</span>` :
+-      `<span class="pill ${x.error ? "bad" : "ok"}">${x.error ? esc(x.error) : x.fps + " fps"}</span> ${esc(x.counter || "")}`}</td></tr>`;
++      `<span class="pill ${x.error ? "bad" : "ok"}">${x.error ? esc(x.error) : x.fps + " fps"}</span> ${esc(x.counter || "")}` +
++      (x.detail ? `<div class="muted small">${esc(x.detail)}</div>` : "") +
++      (x.warning ? `<div class="small" style="color:#b45309">${esc(x.warning)}</div>` : "")}</td></tr>`;
+   }).join("");
+   const t = s.tba;
+   $("#ttable").innerHTML = `<tr><td>Event key</td><td>${esc(t.key || "not set")}</td></tr>
+-- 
+2.43.0
+

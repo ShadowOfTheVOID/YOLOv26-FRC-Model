@@ -3013,6 +3013,26 @@ def test_model_worker_and_fms_combo():
           cc._zone_count(0) == 8)
     cc.worker.off = True
     check("and colour alone once its model is off", cc._zone_count(0) == 10)
+    # frc-fms's plugin contract: metadata for --list-counters, and status()
+    # for the line /control shows under the hub.
+    check("both counters declare themselves to frc-fms's plugin system",
+          FC.ColourCounter.NAME == "tbavid-colour" and FC.ComboCounter.NAME == "tbavid-combo"
+          and FC.ColourCounter.PLUGIN_API == 1 and "model" in FC.ComboCounter.NEEDS
+          and "outline" in FC.ColourCounter.OPTIONS and "model_weight" in FC.ComboCounter.OPTIONS)
+    check("a model turned off says so on frc-fms's page",
+          cc.status() == {"detail": "colour 10 (model off)",
+                          "warning": "model too slow, turned off; counting by colour only"})
+    cc.worker = NS(off=False, error="", skipped=0)
+    check("a running blend shows both halves", cc.status() == {"detail": "colour 10 · model 4"})
+    plain = FC.ColourCounter(dict(base))
+    check("colour alone shows its count", plain.status() == {"detail": "colour 0"})
+    root = Path(__file__).resolve().parent.parent
+    pyproj = (root / "pyproject.toml").read_text()
+    check("pyproject registers both under frc-fms's entry-point group",
+          '[project.entry-points."watchtower.counters"]' in pyproj
+          and 'tbavid-colour = "tbavid.fms_counter:ColourCounter"' in pyproj
+          and 'tbavid-combo = "tbavid.fms_counter:ComboCounter"' in pyproj
+          and "dependencies = []" in pyproj)
     live = FC.ComboCounter(dict(base, model="m.pt"))
     t0 = 1_700_000_000.0
     seen = [live._is_offline(t0 + i / 60, wall=t0 + i / 60 + 0.01) for i in range(5)]
@@ -3028,9 +3048,13 @@ def test_model_worker_and_fms_combo():
     import re
     example = (Path(__file__).resolve().parent.parent / "deploy" /
                "frc-fms.vision.yaml").read_text()
-    named = re.findall(r'counter: "tbavid\.fms_counter:(\w+)"', example)
+    # It uses the plugin short names; each must be registered in pyproject.toml
+    # and point at a class that exists.
+    pyproj = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+    eps = dict(re.findall(r'^(tbavid-[\w-]+) = "tbavid\.fms_counter:(\w+)"', pyproj, re.M))
+    named = re.findall(r"counter: (tbavid-[\w-]+)", example)
     check("the frc-fms example config names plugins that exist",
-          named and all(hasattr(FC, n) for n in named))
+          named and all(n in eps and hasattr(FC, eps[n]) for n in named))
     check("and per hub gives a cams.json setup and camera, which the plugin reads",
           "setup:" in example and "camera:" in example and "fps: 60" in example)
     old = FC.ComboCounter(dict(base, model="m.pt"))
@@ -3170,6 +3194,143 @@ def test_relabel_video_helpers():
           washed[0][1] >= 20 and RV.gate_from(balls((27, 31), 26, 90), 5) is None)
     check("labels are YOLO-normalised",
           RV.to_yolo(0, (0, 0, 64, 32), 640, 320) == "0 0.050000 0.050000 0.100000 0.100000")
+
+
+def test_hub_counter_app():
+    """The Hub Counter app (every OS): the hub page as a double-click program, with Quit.
+
+    A double-clicked app has no terminal to Ctrl-C in, so the page must be
+    able to stop it; and the bundle must hold only the hub counter, not the
+    scraper (its spec is checked here, the build runs in CI on a Mac).
+    """
+    import os
+    import socket
+    from tbavid import hubapp as A
+    from tbavid import hubweb as W
+
+    ctl = A.HubController()
+    quit_calls = []
+    ctl.on_quit = lambda: quit_calls.append(1)
+    W.ACTIONS["quit"](ctl, {})
+    check("the page's Quit stops the counter and shuts the server down",
+          quit_calls == [1])
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "apps" / "hubcounter"))
+    import main as APP
+    with tempfile.TemporaryDirectory() as tmp:
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = tmp
+        try:
+            d = APP.data_dir()
+        finally:
+            if old is not None:
+                os.environ["HOME"] = old
+        check("the setup and logs live in ~/Documents/Hub Counter (the app is read-only)",
+              d == Path(tmp) / "Documents" / "Hub Counter" and d.is_dir())
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        check("a second launch sees the first one running and only reopens the page",
+              APP.already_running(port))
+    check("and a free port is not mistaken for a running app",
+          not APP.already_running(port))
+
+    # In a packaged app sys.executable is the app: "-m yt_dlp" would start a
+    # second copy of it. The frozen path must call yt-dlp in-process.
+    import types
+    from tbavid import hubcount as HC
+    calls = []
+    class FakeYDL:
+        def __init__(self, opts):
+            calls.append(opts)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def extract_info(self, url, download=False):
+            return {"url": "https://cdn.example/live.m3u8"}
+    saved_mod, saved_frozen = sys.modules.get("yt_dlp"), getattr(sys, "frozen", None)
+    sys.modules["yt_dlp"] = types.SimpleNamespace(YoutubeDL=FakeYDL)
+    sys.frozen = True
+    try:
+        got = HC.resolve_stream("twitch.tv/somechannel")
+    finally:
+        if saved_mod is None:
+            sys.modules.pop("yt_dlp", None)
+        else:
+            sys.modules["yt_dlp"] = saved_mod
+        if saved_frozen is None:
+            del sys.frozen
+        else:
+            sys.frozen = saved_frozen
+    check("inside the app a stream is looked up in-process, not by re-running the app",
+          got == "https://cdn.example/live.m3u8" and calls
+          and calls[0]["format"] == "best[height<=1080]/best")
+
+    # Share on Wi-Fi: the page on the network, behind a PIN.
+    import json as _json
+    import time
+    import urllib.error
+    import urllib.request
+    share = W.Share(A.HubController())
+    share.ctl.share = share
+    share.start("246810", port=0)
+    base = f"http://127.0.0.1:{share.httpd.server_address[1]}"
+
+    def req(path, body=None, cookie=""):
+        r = urllib.request.Request(base + path, method="POST" if body is not None else "GET",
+                                   data=_json.dumps(body).encode() if body is not None else None,
+                                   headers={"Content-Type": "application/json", "Cookie": cookie})
+        try:
+            with urllib.request.urlopen(r, timeout=5) as resp:
+                return resp.status, resp.read().decode(), resp.headers.get("Set-Cookie", "")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode(), ""
+    try:
+        code, page, _ = req("/")
+        check("a shared device first gets the PIN page, not the counter",
+              code == 200 and "Enter the PIN" in page)
+        check("and nothing from the API without the PIN",
+              req("/api/state")[0] == 401 and req("/api/save", {})[0] == 401)
+        check("the scoreboard opens without one (it is for a TV)", req("/board")[0] == 200)
+        check("a wrong PIN is refused", req("/login", {"pin": "000000"})[0] == 403)
+        code, _, cookie = req("/login", {"pin": "246810"})
+        cookie = cookie.split(";")[0]
+        check("the right PIN gives a session", code == 200 and cookie.startswith("hubpin="))
+        code, body, _ = req("/api/state", cookie=cookie)
+        st = _json.loads(body)
+        check("with it the page works, marked as remote, and never shows the PIN",
+              code == 200 and st["remote"] and st["share"]["on"] and "pin" not in st["share"])
+        check("a shared device cannot quit the counter or stop sharing",
+              req("/api/quit", {}, cookie)[0] == 403 and req("/api/share_off", {}, cookie)[0] == 403)
+        guesser = W.Share(share.ctl)
+        guesser.pin = "111111"
+        for _ in range(W.MAX_TRIES):
+            guesser.login("10.0.0.9", "222222")
+        try:
+            guesser.login("10.0.0.9", "111111")
+            check("guessing locks an address out after five wrong PINs", False)
+        except PermissionError:
+            check("guessing locks an address out after five wrong PINs", True)
+        check("the host's own page shows the PIN to read out",
+              share.status(host=True)["pin"] == "246810")
+    finally:
+        share.stop()
+    time.sleep(0.5)
+    try:
+        urllib.request.urlopen(base + "/board", timeout=2)
+        check("stopping sharing closes the port", False)
+    except OSError:
+        check("stopping sharing closes the port", True)
+
+    spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
+    check("the app bundles the hub pages and keeps the scraper and torch out",
+          "hubweb.html" in spec and "hubboard.html" in spec
+          and '"tbavid.tba"' in spec and '"tbavid.pipeline"' in spec and '"torch"' in spec)
+    check("and asks macOS for the camera and the local network, or it gets neither",
+          "NSCameraUsageDescription" in spec and "NSLocalNetworkUsageDescription" in spec)
 
 
 def test_hub_scoreboard_view():
@@ -3477,6 +3638,9 @@ def test_hub_model_blend():
           HM.too_slow(HM.MODEL_WARMUP_FRAMES, HM.MODEL_WARMUP_FRAMES // 2)
           and not HM.too_slow(HM.MODEL_WARMUP_FRAMES - 1, HM.MODEL_WARMUP_FRAMES - 1)
           and not HM.too_slow(1000, 100))
+    check("or after 10 s of wall time, if it is too slow to reach 300 frames by then",
+          HM.too_slow(40, 20, elapsed=11.0) and not HM.too_slow(40, 20, elapsed=5.0)
+          and not HM.too_slow(20, 15, elapsed=11.0))
     check("and colour alone takes over: weight 0 is the colour count",
           HM.blend(103, 1, 0.0) == 103)
     check("weight 0 is colour alone, 1 the model alone",
@@ -3577,7 +3741,8 @@ def main() -> int:
                test_hub_calibration_and_gui_helpers, test_hub_ui_controller_and_web,
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
-               test_hub_model_blend, test_model_worker_and_fms_combo):
+               test_hub_model_blend, test_model_worker_and_fms_combo,
+               test_hub_counter_app):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

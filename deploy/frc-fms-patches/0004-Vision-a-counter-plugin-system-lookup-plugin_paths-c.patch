@@ -1,0 +1,759 @@
+From 308c83b3b3d21a07cac79072ab69e0ce8882181f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 23:52:52 +0000
+Subject: [PATCH 4/4] Vision: a counter plugin system (lookup, plugin_paths,
+ checks, status, close)
+
+A counter was a 'module:Class' that had to be importable already, usually with
+PYTHONPATH set by hand. It could not describe itself or its options, nor report status.
+If it failed to load, its hub thread died silently and /control showed 'never connected'.
+
+vision/counters/__init__.py, plugin API 1:
+- lookup: built-ins, then the 'watchtower.counters' entry points of installed packages
+  (pip install a plugin, then counter: its-name), then a plugins: alias, then
+  'module:Class'. plugin_paths: in vision.yaml adds folders to the path, relative to that
+  file; a folder whose pyproject.toml registers entry points gets the short names without
+  being installed. Built-in names cannot be taken over.
+- describe/check: optional PLUGIN_API, NAME, DESCRIPTION, NEEDS and OPTIONS on the class.
+  A plugin built for a newer API is refused. A key that looks like a misspelt option
+  ('confidence' for 'conf') is warned at startup; other keys are left alone, since
+  defaults: is shared by every counter.
+- run_vision.py --list-counters prints every counter with its description, needs and
+  options, and survives one that cannot load.
+- The runner merges a plugin's status() (detail / warning / error) into each second's
+  report, calls close() on stop, and puts a load failure on /control and the console.
+  rescore.py uses the same lookup.
+- zone, linecross and mock declare their options. Older plugins with none of the new
+  attributes run unchanged.
+
+Checked: 11 new tests, no cv2 needed (37 pass). End to end against this server, with
+YOLOv26-FRC-Model's tbavid-colour / tbavid-combo loaded by short name both
+pip-installed and via plugin_paths only, without PYTHONPATH:
+- 'ball_aera' was flagged as 'ball_area';
+- /control showed 'colour 123', and for the combo on a CPU-only machine 'colour 29
+  (model off)' with its amber warning.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CLAUDE.md                    |  12 ++-
+ README.md                    |  51 +++++++--
+ config/vision.example.yaml   |  11 +-
+ tests/test_plugins.py        | 136 +++++++++++++++++++++++
+ vision/counters/__init__.py  | 202 ++++++++++++++++++++++++++++++++++-
+ vision/counters/base.py      |  23 +++-
+ vision/counters/linecross.py |   6 ++
+ vision/counters/mock.py      |   4 +
+ vision/counters/zone.py      |  10 ++
+ vision/rescore.py            |   5 +-
+ vision/run_vision.py         |  36 ++++++-
+ 11 files changed, 467 insertions(+), 29 deletions(-)
+ create mode 100644 tests/test_plugins.py
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 76763de..cb55c0d 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -57,11 +57,13 @@ When testing, run a separate server on another port with a scratch config, and s
+ pattern-kill `fms.server`/`run_vision.py` (it can hit the user's live processes).
+ 
+ ## Vision
+-- Counter plugins: `zone` (default; short nearest-neighbor tracks inside the hub ROI, built because ByteTrack
+-  fragmented badly on wide shots; counts only the model class named `fuel`, or `classes:`), `linecross`, `mock`, or custom `"module:Class"` with
+-  `process(frame, t) -> int` (see `vision/counters/base.py`). An external one, `tbavid.fms_counter:ColourCounter`
+-  / `ComboCounter` from YOLOv26-FRC-Model, loads through that path (needs it on `PYTHONPATH`); README
+-  "External hub counter". Do not copy it into this repo; it is maintained there.
++- Counter plugins (`vision/counters/__init__.py`, plugin API 1): `counter:` is a built-in (`zone`, `linecross`,
++  `mock`), a short name registered under the `watchtower.counters` entry-point group (pip-installed, or a
++  `plugin_paths:` folder's pyproject.toml), a `plugins:` alias, or `"module:Class"`. Required: `__init__(cfg)`,
++  `process(frame, t) -> int`. Optional, defaulted: PLUGIN_API, NAME, DESCRIPTION, NEEDS, OPTIONS (misspelt keys
++  warned), `status()` (detail/warning/error, shown in /control), `close()`. `--list-counters` prints them. Keep the
++  registry free of cv2 (tests run without it). `zone` counts only the class named `fuel` (or `classes:`). The
++  YOLOv26-FRC-Model counters (tbavid-colour / tbavid-combo) are maintained there, not copied here.
+ - Model weights go in `vision/models/` (gitignored). Restart only the vision process to swap models.
+ - Vision records raw hub video + per-frame timestamps per match; `vision/rescore.py` recounts a match offline
+   and replaces that hub's events in the FMS on the same clock.
+diff --git a/README.md b/README.md
+index 11cd936..1f9e39a 100644
+--- a/README.md
++++ b/README.md
+@@ -142,7 +142,7 @@ source .venv/bin/activate
+ pip install -r requirements.txt -r vision/requirements.txt
+ chmod +x run.sh
+ python -m fms.init                    # creates config/event.yaml + config/vision.yaml, prints PINs
+-python -m pytest -q                   # expect: 26 passed
++python -m pytest -q                   # expect: 37 passed
+ python -c "import torch, cv2, ultralytics; print(torch.__version__, torch.backends.mps.is_available())"
+ ```
+ 
+@@ -419,6 +419,41 @@ class MyCounter(Counter):            # vision/counters/base.py
+ 
+ Vision timestamps each count and batches it to the FMS 4× per second. If the FMS is unreachable, events buffer and re-send.
+ 
++### Counter plugins
++
++`counter:` takes a built-in name (`zone`, `linecross`, `mock`), the short name of a plugin, or a full `"module:Class"`. To see what's available:
++
++```bash
++cd vision && python run_vision.py --list-counters
++```
++
++**Using someone else's counter.** Either install it into this venv (`pip install -e path/to/their/repo`), or add its folder to `plugin_paths:` in `config/vision.yaml` (relative to that file, no install, no `PYTHONPATH`):
++
++```yaml
++plugin_paths: [../../their-repo]
++defaults:
++  counter: their-counter        # the short name it registers
++```
++
++**Writing one.** Only `__init__(cfg)` and `process(frame, t) -> int` are required. Optional, and read with defaults so older plugins keep working:
++
++| Attribute | What it's for |
++|---|---|
++| `PLUGIN_API = 1` | The contract version. A plugin newer than this vision is refused with a message. |
++| `NAME`, `DESCRIPTION`, `NEEDS` | Shown by `--list-counters` (e.g. `NEEDS = ("model", "gpu")`). |
++| `OPTIONS = {"key": "help"}` | Its config keys. A misspelt key (`confidence` for `conf`) is then flagged at startup. |
++| `status() -> {"detail", "warning", "error"}` | Sent with each second's report and shown under the hub in `/control` → Setup → Vision. |
++| `close()` | Called once when vision stops. |
++
++To give it a short name, register it in your package's `pyproject.toml`:
++
++```toml
++[project.entry-points."watchtower.counters"]
++my-counter = "my_package.module:MyCounter"
++```
++
++A plugin that fails to load now shows its error in `/control` instead of the hub just reading "never connected".
++
+ ### Swap in a model
+ 
+ 1. Copy weights to `vision/models/` (e.g. `fuel_best.pt`; `.pt` files are gitignored, so share them separately).
+@@ -478,16 +513,18 @@ These recordings are also your best training data, because they come from the re
+ 
+ ### External hub counter (YOLOv26-FRC-Model)
+ 
+-[YOLOv26-FRC-Model](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model) ships a counter plugin for this vision process. It is not part of this repo; clone it next to this one and put it on the Python path.
++[YOLOv26-FRC-Model](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model) ships two counter plugins for this vision process, `tbavid-colour` and `tbavid-combo`. They are not part of this repo: clone it next to this one, then either `pip install -e ../YOLOv26-FRC-Model` in this venv or add it to `plugin_paths:` (see [Counter plugins](#counter-plugins)).
+ 
+-- `tbavid.fms_counter:ColourCounter` counts yellow blobs crossing down into a hub outline. It needs no model or GPU. On four scored 2026 Einstein broadcasts it measured 10.1% mean error against the official counts at 60 fps, with the auto winner right on all four.
+-- `tbavid.fms_counter:ComboCounter` blends that with a fuel model (`model:`). On the same four it measured 6.8%, but three were in the model's training set; expect 7–9% on a new match. It needs Apple Silicon or a GPU. The model runs on its own thread; if it falls behind it turns itself off and the hub counts by colour.
++- `tbavid-colour` counts yellow blobs crossing down into a hub outline. It needs no model or GPU. On four scored 2026 Einstein broadcasts it measured 10.1% mean error against the official counts at 60 fps, with the auto winner right on all four.
++- `tbavid-combo` blends that with a fuel model (`model:`). On the same four it measured 6.8%, but three were in the model's training set; expect 7–9% on a new match. It needs Apple Silicon or a GPU. The model runs on its own thread; if it falls behind it turns itself off and the hub counts by colour.
++- Draw each outline with its top edge 3–4 ball widths above the hood, where a falling ball is still in view. On the 2026 Central Valley broadcast an outline on the hood rim gave 38.9% error and the raised one 6.4%. On that broadcast the combo was 34.5%, worse than colour alone, so check it on your own camera.
+ - Neither has been checked against a hand-counted practice hub yet. Do the 20-ball test before trusting it.
+ 
+ ```yaml
+ # config/vision.yaml
++plugin_paths: [../../YOLOv26-FRC-Model]   # or pip install -e it and drop this line
+ defaults:
+-  counter: "tbavid.fms_counter:ComboCounter"   # or ColourCounter (no model)
++  counter: tbavid-colour      # or tbavid-combo (needs model:)
+   model: /path/to/fuel_relabel.pt
+   fps: 60                     # the camera's real rate: it times the model, and 60 counts better than 30
+ hubs:
+@@ -497,9 +534,7 @@ hubs:
+     camera: red-cam
+ ```
+ 
+-```bash
+-PYTHONPATH=/path/to/YOLOv26-FRC-Model ./run.sh            # or before python run_vision.py / rescore.py
+-```
++`/control` → Setup → Vision shows each hub's counter with its own status line, e.g. `colour 123`, or `colour 29 · model 25`, or a warning when the model was too slow and turned itself off.
+ 
+ Its `deploy/FRC_FMS.md` has the full steps: drawing the hubs, measuring a ball, the pre-match checks. `rescore.py` works with it unchanged. On a recording the plugin waits for the model on every frame, so a recount skips nothing.
+ 
+diff --git a/config/vision.example.yaml b/config/vision.example.yaml
+index 232a4a1..5da7abf 100644
+--- a/config/vision.example.yaml
++++ b/config/vision.example.yaml
+@@ -18,10 +18,13 @@ record_dir: recordings           # raw hub video per match (for rescoring + trai
+ #     heartbeat_s: 0.1           # optional
+ 
+ defaults:                        # applied to both hubs unless overridden
+-  counter: zone                  # zone | linecross | mock | "your_module:YourClass"
+-  # External colour counter, see README "External hub counter":
+-  #   counter: "tbavid.fms_counter:ColourCounter"   (or ComboCounter + model: path/to/fuel_relabel.pt)
+-  #   and per hub: setup: path/to/cams.json, camera: <name>; run with PYTHONPATH=path/to/YOLOv26-FRC-Model
++  counter: zone                  # zone | linecross | mock | a plugin's name | "module:Class"
++  # `python run_vision.py --list-counters` shows what's available. External ones
++  # (README "Counter plugins"): pip install -e them, or list their folder in
++  # plugin_paths: at the top of this file. E.g. the YOLOv26-FRC-Model colour counter:
++  #   plugin_paths: [../../YOLOv26-FRC-Model]
++  #   counter: tbavid-colour     (or tbavid-combo + model: path/to/fuel_relabel.pt)
++  #   and per hub: setup: path/to/cams.json, camera: <name>
+   weights: models/fuel_best.pt   # drop new weights here, restart vision; FMS never needs to restart
+   conf: 0.25
+   imgsz: 640
+diff --git a/tests/test_plugins.py b/tests/test_plugins.py
+new file mode 100644
+index 0000000..b0a6f53
+--- /dev/null
++++ b/tests/test_plugins.py
+@@ -0,0 +1,136 @@
++"""Counter plugins: lookup, plugin_paths, installed entry points, checks, status.
++
++Pure: no cv2, no model. Plugins under test are written to a temp folder.
++"""
++import pathlib
++import sys
++import textwrap
++
++import pytest
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "vision"))
++import counters as C  # noqa: E402
++
++PLUG = '''
++class Fancy:
++    """Counts nothing, nicely."""
++    PLUGIN_API = 1
++    NAME = "fancy"
++    DESCRIPTION = "a test counter"
++    NEEDS = ("gpu",)
++    OPTIONS = {"conf": "confidence", "imgsz": "size"}
++    def __init__(self, cfg):
++        self.cfg, self.total = cfg, 0
++    def process(self, frame, t):
++        return 0
++    def status(self):
++        return {"detail": "all good", "junk": 1}
++
++class Old:
++    """A plugin written before any of this existed."""
++    def __init__(self, cfg):
++        self.total = 0
++    def process(self, frame, t):
++        return 1
++
++class Future(Old):
++    PLUGIN_API = 99
++
++class Broken(Old):
++    def status(self):
++        raise RuntimeError("boom")
++'''
++
++
++@pytest.fixture()
++def plugdir(tmp_path, monkeypatch):
++    (tmp_path / "myplug.py").write_text(textwrap.dedent(PLUG))
++    monkeypatch.setattr(C, "_entry_points", lambda: {})
++    yield tmp_path
++    sys.modules.pop("myplug", None)
++    if str(tmp_path) in sys.path:
++        sys.path.remove(str(tmp_path))
++
++
++def test_builtins_and_full_names_resolve(plugdir):
++    assert C.resolve("zone") == "counters.zone:ZoneCounter"
++    assert C.resolve("pkg.mod:Thing") == "pkg.mod:Thing"
++    assert C.resolve("mine", {"mine": "myplug:Fancy"}) == "myplug:Fancy"
++
++
++def test_unknown_name_suggests_the_close_one(plugdir):
++    with pytest.raises(SystemExit, match="did you mean 'zone'"):
++        C.resolve("zonee")
++
++
++def test_plugin_paths_load_without_pythonpath(plugdir):
++    C.add_plugin_paths(["."], base=plugdir)
++    c = C.load_counter({"counter": "myplug:Fancy", "hub": "red"})
++    assert c.process(None, 0.0) == 0
++
++
++def test_plugin_paths_relative_to_the_config_folder(plugdir, tmp_path):
++    cfgdir = tmp_path / "config"
++    cfgdir.mkdir()
++    added = C.add_plugin_paths([".."], base=cfgdir)
++    assert added == [str(tmp_path.resolve())]
++    with pytest.raises(SystemExit, match="not a folder"):
++        C.add_plugin_paths(["nope"], base=cfgdir)
++
++
++def test_installed_plugin_found_by_short_name(plugdir, monkeypatch):
++    C.add_plugin_paths([str(plugdir)])
++    monkeypatch.setattr(C, "_entry_points", lambda: {"fancy": ("myplug:Fancy", "fancy-dist")})
++    assert C.available()["fancy"]["source"] == "installed (fancy-dist)"
++    assert C.load_counter({"counter": "fancy", "hub": "red"}).process(None, 0) == 0
++    # A built-in name cannot be taken over by an installed package.
++    monkeypatch.setattr(C, "_entry_points", lambda: {"zone": ("myplug:Fancy", "evil")})
++    assert C.resolve("zone") == "counters.zone:ZoneCounter"
++
++
++def test_plugin_paths_folder_with_pyproject_gives_short_names(plugdir, monkeypatch):
++    monkeypatch.setattr(C, "_PATH_PLUGINS", {})
++    (plugdir / "pyproject.toml").write_text(
++        '[project]\nname = "x"\n[project.entry-points."watchtower.counters"]\n'
++        'nice-one = "myplug:Fancy"\n')
++    C.add_plugin_paths([str(plugdir)])
++    assert C.available()["nice-one"]["source"].startswith("plugin_paths")
++    assert C.load_counter({"counter": "nice-one", "hub": "red"}).process(None, 0) == 0
++
++
++def test_misspelt_option_is_warned_and_others_left_alone(plugdir):
++    C.add_plugin_paths([str(plugdir)])
++    warned = []
++    C.load_counter({"counter": "myplug:Fancy", "hub": "red", "confidence": 0.3,
++                    "crop_pad": 60, "imgsz": 640}, warn=warned.append)
++    assert len(warned) == 1 and "'confidence'" in warned[0] and "'conf'" in warned[0]
++
++
++def test_plugin_for_a_newer_contract_is_refused(plugdir):
++    C.add_plugin_paths([str(plugdir)])
++    with pytest.raises(SystemExit, match="plugin API 99"):
++        C.load_counter({"counter": "myplug:Future", "hub": "red"})
++
++
++def test_old_plugins_still_work_and_describe_themselves(plugdir):
++    C.add_plugin_paths([str(plugdir)])
++    cls = C.load_class("myplug:Old")
++    d = C.describe(cls)
++    assert d["name"] == "Old" and d["description"].startswith("A plugin written")
++    assert d["api"] == 1 and d["options"] == {}
++    assert C.load_counter({"counter": "myplug:Old", "hub": "red"}).process(None, 0) == 1
++    assert C.plugin_status(cls({})) == {}
++
++
++def test_status_is_filtered_and_a_broken_one_does_not_crash(plugdir):
++    C.add_plugin_paths([str(plugdir)])
++    assert C.plugin_status(C.load_class("myplug:Fancy")({})) == {"detail": "all good"}
++    st = C.plugin_status(C.load_class("myplug:Broken")({}))
++    assert "boom" in st["warning"]
++
++
++def test_list_shows_needs_and_options_and_survives_a_bad_plugin(plugdir):
++    C.add_plugin_paths([str(plugdir)])
++    out = C.list_counters({"fancy": "myplug:Fancy", "gone": "nosuchmodule:X"})
++    assert "a test counter  [needs gpu]" in out and "conf: confidence" in out
++    assert "gone" in out and "cannot load" in out
+diff --git a/vision/counters/__init__.py b/vision/counters/__init__.py
+index de229a7..d1ee01f 100644
+--- a/vision/counters/__init__.py
++++ b/vision/counters/__init__.py
+@@ -1,4 +1,40 @@
++"""Counter plugins: how vision finds, checks and loads a hub counter.
++
++A counter is any class with `__init__(cfg)` and `process(frame, t) -> int`
++(new fuel in that frame). That is still the whole required contract. See
++`base.Counter` for the optional parts a plugin can add.
++
++Where `counter:` in config/vision.yaml is looked up, in this order:
++
++1. Built-in short names: `zone`, `linecross`, `mock`.
++2. Installed plugins: any Python package that registers classes under the
++   entry-point group `watchtower.counters` (e.g. in its pyproject.toml:
++   `[project.entry-points."watchtower.counters"] my-counter = "pkg.mod:Class"`).
++   `pip install` the package into this venv and `counter: my-counter` works.
++   A folder in `plugin_paths:` that has such a pyproject.toml gets the same
++   short names without being installed.
++3. `plugins:` in config/vision.yaml: your own short names,
++   `plugins: {mine: "my_module:MyCounter"}`.
++4. A full `"module:Class"`, from anywhere on the path. `plugin_paths:` in
++   config/vision.yaml (folders, relative to that file) adds to the path, so a
++   checkout of another repo can be used without installing it or setting
++   PYTHONPATH.
++
++`python run_vision.py --list-counters` prints what is available.
++
++Nothing here imports cv2 or a model: the registry is tested, and the list
++printed, on machines without the vision stack.
++"""
++from __future__ import annotations
++
++import difflib
+ import importlib
++import os
++import pathlib
++import sys
++
++PLUGIN_API = 1                       # bump on a breaking change to the contract
++ENTRY_POINT_GROUP = "watchtower.counters"
+ 
+ BUILTIN = {
+     "zone": "counters.zone:ZoneCounter",
+@@ -6,8 +42,166 @@ BUILTIN = {
+     "mock": "counters.mock:MockCounter",
+ }
+ 
++# Keys the runner itself reads from a hub's config; never "unknown" to a plugin.
++RUNNER_KEYS = {"counter", "hub", "source", "enabled", "fps", "width", "height", "loop",
++               "roi", "weights", "plugins", "plugin_paths"}
++
++
++_PATH_PLUGINS: dict = {}           # short names read from plugin_paths' pyproject.toml
++
++
++def _pyproject_plugins(folder: pathlib.Path) -> dict:
++    """{name: spec} from a folder's pyproject.toml `watchtower.counters`."""
++    f = folder / "pyproject.toml"
++    if not f.is_file():
++        return {}
++    try:
++        import tomllib
++    except ImportError:                                  # Python < 3.11
++        return {}
++    try:
++        data = tomllib.loads(f.read_text())
++    except (OSError, ValueError):
++        return {}
++    eps = (data.get("project", {}).get("entry-points", {}) or {}).get(ENTRY_POINT_GROUP, {})
++    return {str(k): str(v) for k, v in eps.items()}
++
++
++def add_plugin_paths(paths, base=None) -> list:
++    """Put `plugin_paths:` folders on the import path; relative ones are taken
++    from `base` (the config file's folder). Returns the folders added."""
++    added = []
++    for p in paths or []:
++        q = pathlib.Path(os.path.expanduser(str(p)))
++        if not q.is_absolute() and base is not None:
++            q = pathlib.Path(base) / q
++        q = q.resolve()
++        if not q.is_dir():
++            raise SystemExit(f"plugin_paths: {p} is not a folder")
++        if str(q) not in sys.path:
++            sys.path.insert(0, str(q))
++        for name, spec in _pyproject_plugins(q).items():
++            _PATH_PLUGINS[name] = (spec, f"plugin_paths ({q.name})")
++        added.append(str(q))
++    return added
++
++
++def _entry_points() -> dict:
++    """{name: (spec, distribution)} for installed plugins."""
++    from importlib import metadata
++    try:
++        eps = metadata.entry_points(group=ENTRY_POINT_GROUP)
++    except TypeError:                                    # Python < 3.10
++        eps = metadata.entry_points().get(ENTRY_POINT_GROUP, [])
++    out = {}
++    for ep in eps:
++        dist = getattr(getattr(ep, "dist", None), "name", "") or "installed"
++        out[ep.name] = (ep.value, dist)
++    return out
++
++
++def available(plugins=None) -> dict:
++    """{short name: {"spec": "module:Class", "source": where it came from}}."""
++    out = {n: {"spec": s, "source": "built-in"} for n, s in BUILTIN.items()}
++    for n, (s, dist) in _entry_points().items():
++        out.setdefault(n, {"spec": s, "source": f"installed ({dist})"})
++    for n, (s, where) in _PATH_PLUGINS.items():
++        out.setdefault(n, {"spec": s, "source": where})
++    for n, s in (plugins or {}).items():
++        out[n] = {"spec": str(s), "source": "config plugins:"}
++    return out
++
++
++def resolve(name: str, plugins=None) -> str:
++    """The "module:Class" for a `counter:` value."""
++    known = available(plugins)
++    if name in known:
++        return known[name]["spec"]
++    if ":" in str(name):
++        return str(name)
++    close = difflib.get_close_matches(str(name), list(known), n=1)
++    hint = f" (did you mean {close[0]!r}?)" if close else ""
++    raise SystemExit(f"counter {name!r} not found{hint}. Known: {', '.join(sorted(known))}. "
++                     f"Run `python run_vision.py --list-counters`.")
++
++
++def load_class(spec: str):
++    mod, _, cls = spec.partition(":")
++    if not cls:
++        raise SystemExit(f"counter {spec!r} must be \"module:Class\"")
++    return getattr(importlib.import_module(mod), cls)
++
++
++def describe(cls) -> dict:
++    """A plugin's self-description; every field is optional on the class."""
++    doc = (cls.__doc__ or "").strip().splitlines()
++    return {"name": getattr(cls, "NAME", cls.__name__),
++            "description": getattr(cls, "DESCRIPTION", doc[0] if doc else ""),
++            "needs": list(getattr(cls, "NEEDS", ())),
++            "options": dict(getattr(cls, "OPTIONS", {}) or {}),
++            "api": int(getattr(cls, "PLUGIN_API", 1))}
++
++
++def check(cls, cfg: dict) -> list:
++    """Warnings for a hub's config against what the plugin declares. A plugin
++    written for a newer contract than this runner is refused outright."""
++    d = describe(cls)
++    if d["api"] > PLUGIN_API:
++        raise SystemExit(f"counter {d['name']} needs plugin API {d['api']}; this "
++                         f"vision supports {PLUGIN_API}. Update watchtower-fms.")
++    if not d["options"]:
++        return []                  # the plugin did not declare its keys
++    # Only keys that look like a misspelt option: the `defaults:` block is
++    # shared by every hub and counter, so another counter's keys there are
++    # normal, but `confidence` beside a declared `conf` is a typo that would
++    # otherwise silently keep the default.
++    known = set(d["options"]) | RUNNER_KEYS
++    out = []
++    for k in cfg:
++        if k in known:
++            continue
++        # A long form of a short option (`confidence` for `conf`) scores low
++        # on similarity, so a shared prefix counts too.
++        close = [o for o in d["options"] if len(o) >= 3 and len(k) >= 3
++                 and (k.startswith(o) or o.startswith(k))][:1] \
++            or difflib.get_close_matches(k, list(d["options"]), n=1, cutoff=0.75)
++        if close:
++            out.append(f"{cfg.get('hub', '?')}: {d['name']} has no option {k!r} "
++                       f"(did you mean {close[0]!r}?)")
++    return out
++
++
++def load_counter(cfg: dict, plugins=None, warn=print):
++    spec = resolve(cfg["counter"], plugins if plugins is not None else cfg.get("plugins"))
++    cls = load_class(spec)
++    for w in check(cls, cfg):
++        warn(f"warning: {w}")
++    return cls(cfg)
++
++
++def plugin_status(counter) -> dict:
++    """The plugin's own status line(s), if it reports any. A broken status()
++    must not take the counting thread down with it."""
++    fn = getattr(counter, "status", None)
++    if not callable(fn):
++        return {}
++    try:
++        st = fn() or {}
++        return {k: v for k, v in dict(st).items() if k in ("detail", "warning", "error")}
++    except Exception as e:                                # noqa: BLE001
++        return {"warning": f"status() failed: {e}"}
++
+ 
+-def load_counter(cfg: dict):
+-    spec = BUILTIN.get(cfg["counter"], cfg["counter"])
+-    mod, cls = spec.split(":")
+-    return getattr(importlib.import_module(mod), cls)(cfg)
++def list_counters(plugins=None) -> str:
++    """The text `run_vision.py --list-counters` prints."""
++    lines = []
++    for name, info in sorted(available(plugins).items()):
++        try:
++            d = describe(load_class(info["spec"]))
++            needs = f"  [needs {', '.join(d['needs'])}]" if d["needs"] else ""
++            lines.append(f"{name:<18} {d['description']}{needs}\n{'':<18} {info['spec']}  ({info['source']})")
++            for k, h in d["options"].items():
++                lines.append(f"{'':<20}{k}: {h}")
++        except Exception as e:                            # noqa: BLE001
++            lines.append(f"{name:<18} cannot load: {e}\n{'':<18} {info['spec']}  ({info['source']})")
++    return "\n".join(lines)
+diff --git a/vision/counters/base.py b/vision/counters/base.py
+index 7eb3cfe..acce27c 100644
+--- a/vision/counters/base.py
++++ b/vision/counters/base.py
+@@ -5,7 +5,18 @@ counted in that frame. That's the whole contract. The FMS never sees the model;
+ it only receives (timestamp, hub, n). Swap models/algorithms freely.
+ 
+ To add your own: write a class with this interface anywhere importable and set
+-`counter: "my_module:MyCounter"` in config/vision.yaml.
++`counter: "my_module:MyCounter"` in config/vision.yaml (or install it as a
++package with a `watchtower.counters` entry point; see counters/__init__.py).
++
++Optional, all read with defaults so older plugins keep working:
++  PLUGIN_API   the contract version it was written for (counters.PLUGIN_API)
++  NAME         short name shown in --list-counters and on /control
++  DESCRIPTION  one line for --list-counters
++  NEEDS        e.g. ("model", "gpu") -- shown, not enforced
++  OPTIONS      {config key: help text}; misspelt keys are then warned about
++  status()     -> {"detail": str, "warning": str, "error": str}, sent to the
++               FMS each second and shown in /control's Vision panel
++  close()      called once when vision stops (release models, threads)
+ """
+ from __future__ import annotations
+ 
+@@ -13,6 +24,10 @@ import cv2
+ 
+ 
+ class Counter:
++    PLUGIN_API = 1
++    NEEDS: tuple = ()
++    OPTIONS: dict = {}
++
+     def __init__(self, cfg: dict):
+         self.cfg = cfg
+         self.roi = cfg.get("roi")  # [x, y, w, h] in full-resolution pixels
+@@ -21,6 +36,12 @@ class Counter:
+     def process(self, frame, t: float) -> int:
+         raise NotImplementedError
+ 
++    def status(self) -> dict:
++        return {}
++
++    def close(self) -> None:
++        pass
++
+     def draw(self, frame):
+         if self.roi:
+             x, y, w, h = self.roi
+diff --git a/vision/counters/linecross.py b/vision/counters/linecross.py
+index fec6e00..f0f9675 100644
+--- a/vision/counters/linecross.py
++++ b/vision/counters/linecross.py
+@@ -12,6 +12,12 @@ from .base import Counter, load_yolo
+ 
+ 
+ class LineCrossCounter(Counter):
++    NAME = "linecross"
++    DESCRIPTION = "ByteTrack IDs crossing a line in the ROI, moving down"
++    NEEDS = ("model",)
++    OPTIONS = {"line_y": "full-frame y of the line (ROI middle)", "conf": "detection confidence (0.25)",
++               "imgsz": "inference size (960)", "tracker": "Ultralytics tracker yaml (bytetrack.yaml)"}
++
+     def __init__(self, cfg):
+         super().__init__(cfg)
+         self.model, self.device = load_yolo(cfg["weights"])
+diff --git a/vision/counters/mock.py b/vision/counters/mock.py
+index 891cb55..e80a246 100644
+--- a/vision/counters/mock.py
++++ b/vision/counters/mock.py
+@@ -9,6 +9,10 @@ from .base import Counter
+ 
+ 
+ class MockCounter(Counter):
++    NAME = "mock"
++    DESCRIPTION = "Random fuel for rehearsals; no model or camera (source: none)"
++    OPTIONS = {"rate_per_s": "average fuel per second (3.0)"}
++
+     def __init__(self, cfg):
+         super().__init__(cfg)
+         self.rate = float(cfg.get("rate_per_s", 3.0))
+diff --git a/vision/counters/zone.py b/vision/counters/zone.py
+index 1ec2fea..29aa348 100644
+--- a/vision/counters/zone.py
++++ b/vision/counters/zone.py
+@@ -39,6 +39,16 @@ def fuel_classes(names, cfg):
+ 
+ 
+ class ZoneCounter(Counter):
++    NAME = "zone"
++    DESCRIPTION = "Model detections inside the hub ROI, each short track counted once"
++    NEEDS = ("model",)
++    OPTIONS = {"conf": "detection confidence (0.25)", "imgsz": "inference size (640)",
++               "crop_pad": "px around the ROI (60)", "max_px": "max move per frame (60)",
++               "min_hits": "frames before a track counts (2)",
++               "max_missed": "frames a ball may vanish (3)",
++               "min_dy": "downward travel needed (0)",
++               "classes": "model class ids to count (the class named fuel)"}
++
+     def __init__(self, cfg):
+         super().__init__(cfg)
+         self.model, self.device = load_yolo(cfg["weights"])
+diff --git a/vision/rescore.py b/vision/rescore.py
+index 8927723..778c1aa 100644
+--- a/vision/rescore.py
++++ b/vision/rescore.py
+@@ -16,7 +16,7 @@ import cv2
+ import requests
+ 
+ import vconfig
+-from counters import load_counter
++from counters import add_plugin_paths, load_counter
+ 
+ 
+ def main():
+@@ -33,7 +33,8 @@ def main():
+     if a.weights:
+         hc["weights"] = a.weights
+     ts = [float(r["t"]) for r in csv.DictReader(open(pathlib.Path(a.video).with_suffix(".csv")))]
+-    counter = load_counter(hc)
++    add_plugin_paths(cfg.get("plugin_paths"), pathlib.Path(a.config).parent)
++    counter = load_counter(hc, cfg.get("plugins"))
+     cap = cv2.VideoCapture(a.video)
+     events, i = [], 0
+     while True:
+diff --git a/vision/run_vision.py b/vision/run_vision.py
+index 47da0c6..105b28d 100644
+--- a/vision/run_vision.py
++++ b/vision/run_vision.py
+@@ -27,7 +27,7 @@ import requests
+ 
+ import vconfig
+ from count_feed import CountFeed, targets
+-from counters import load_counter
++from counters import add_plugin_paths, list_counters, load_counter, plugin_status
+ 
+ STOP = threading.Event()
+ 
+@@ -104,8 +104,9 @@ class Recorder:
+ 
+ 
+ class HubWorker(threading.Thread):
+-    def __init__(self, hub, cfg, sender, rec_dir, preview):
++    def __init__(self, hub, cfg, sender, rec_dir, preview, plugins=None):
+         super().__init__(daemon=True)
++        self.plugins = plugins
+         self.hub, self.cfg, self.sender, self.preview = hub, {**cfg, "hub": hub}, sender, preview
+         self.recorder = Recorder(rec_dir, hub) if rec_dir else None
+         self.frame_out = None
+@@ -123,7 +124,15 @@ class HubWorker(threading.Thread):
+         return cap
+ 
+     def run(self):
+-        counter = load_counter(self.cfg)
++        try:
++            counter = load_counter(self.cfg, self.plugins)
++        except BaseException as e:      # SystemExit from a bad name, or the plugin's own error
++            # Before, a plugin that failed to load ended this thread silently and
++            # /control showed the hub as "never connected". Say why, there and here.
++            msg = f"counter {self.cfg.get('counter')!r} failed to load: {e}"
++            print(f"{self.hub}: {msg}")
++            self.sender.status[self.hub] = {"fps": 0, "error": msg, "counter": str(self.cfg.get("counter"))}
++            return
+         src = str(self.cfg["source"])
+         is_file = not src.isdigit() and src != "none" and not src.startswith(("rtsp", "http"))
+         cap = self.open()
+@@ -168,11 +177,18 @@ class HubWorker(threading.Thread):
+                 fps = n_frames / (time.time() - t_fps)
+                 n_frames, t_fps = 0, time.time()
+                 self.sender.status[self.hub] = {"fps": round(fps, 1), "counter": self.cfg["counter"],
+-                                                "session_total": counter.total}
++                                                "session_total": counter.total,
++                                                **plugin_status(counter)}
+             if self.preview:
+                 self.frame_out = counter.draw(frame.copy())
+         if self.recorder:
+             self.recorder.close()
++        close = getattr(counter, "close", None)
++        if callable(close):
++            try:
++                close()
++            except Exception as e:                        # noqa: BLE001
++                print(f"{self.hub}: counter close() failed: {e}")
+ 
+ 
+ def main():
+@@ -181,8 +197,18 @@ def main():
+     ap.add_argument("--preview", action="store_true")
+     ap.add_argument("--feed", action="append", metavar="HOST:PORT",
+                     help="also stream live counts to this field system (repeatable; adds to config feeds:)")
++    ap.add_argument("--list-counters", action="store_true",
++                    help="list every counter plugin available (built-in, installed, plugin_paths) and exit")
+     args = ap.parse_args()
++    if args.list_counters:
++        import yaml
++        p = pathlib.Path(args.config)
++        raw = (yaml.safe_load(p.read_text()) or {}) if p.exists() else {}
++        add_plugin_paths(raw.get("plugin_paths"), p.parent)
++        print(list_counters(raw.get("plugins")))
++        return
+     cfg = vconfig.load(args.config)
++    add_plugin_paths(cfg.get("plugin_paths"), pathlib.Path(args.config).parent)
+     feeds = [CountFeed.from_target(t) for t in targets(cfg, args.feed)]
+     for f in feeds:
+         f.start()
+@@ -194,7 +220,7 @@ def main():
+     for hub in ("red", "blue"):
+         if hub in cfg["hubs"] and cfg["hubs"][hub].get("enabled", True):
+             w = HubWorker(hub, {**defaults, **cfg["hubs"][hub]}, sender,
+-                          cfg.get("record_dir"), args.preview)
++                          cfg.get("record_dir"), args.preview, cfg.get("plugins"))
+             w.start()
+             workers.append(w)
+     print(f"vision running: {[w.hub for w in workers]} -> {cfg['fms_url']}  (Ctrl+C to stop)")
+-- 
+2.43.0
+

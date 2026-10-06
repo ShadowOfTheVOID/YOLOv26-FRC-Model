@@ -211,8 +211,10 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   <div class="brand"><span class="logo"><svg><use href="#i-hub"/></svg></span>Hub Counter</div>
   <div class="file"><span class="name" id="path">New setup</span><span class="pill dirty" id="savestate">Not saved</span></div>
   <a class="btn ghost" href="/board" target="_blank" rel="noopener" style="text-decoration:none" title="Full-screen live scoreboard for a TV or projector">Scoreboard ↗</a>
+  <button class="btn ghost" id="sharebtn" onclick="shareDialog()" title="Open this page on other devices on the Wi-Fi, behind a PIN"><svg><use href="#i-wifi"/></svg><span id="sharetxt">Share</span></button>
   <button class="btn ghost" onclick="openSetup()"><svg><use href="#i-open"/></svg>Open</button>
   <button class="btn" onclick="save()"><svg><use href="#i-save"/></svg>Save</button>
+  <button class="btn ghost" id="quitbtn" onclick="quitApp()" title="Stop the counter and close it">Quit</button>
 </div>
 
 <div class="wrap">
@@ -269,15 +271,15 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     <section class="card step" id="st2">
       <h2><span class="n">2</span>Where to count</h2>
       <div class="list" id="zones"></div>
-      <div class="muted" style="margin:2px 0 6px"><b style="color:var(--ink)">Exit lines</b> — recommended: every scored ball comes back out, and a ball that bounces off the rim never does.</div>
+      <div class="muted" style="margin:2px 0 6px"><b style="color:var(--ink)">Outline around the hub's opening</b> — recommended. Put its top edge 3-4 ball widths above the hood, where a falling ball is still clear of the hood's mesh.</div>
       <div class="row">
-        <button class="btn red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
-        <button class="btn blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
+        <button class="btn red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Red outline</button>
+        <button class="btn blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Blue outline</button>
       </div>
-      <div class="muted" style="margin:10px 0 6px">Or an outline around the hub's opening:</div>
+      <div class="muted" style="margin:10px 0 6px">Or an exit line — untested: balls pile up at the exit and stop crossing one by one. Only for a camera aimed right at the chute, and check it with 20 balls.</div>
       <div class="row">
-        <button class="btn sm red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Red outline</button>
-        <button class="btn sm blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Blue outline</button>
+        <button class="btn sm red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
+        <button class="btn sm blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
       </div>
       <div class="comb"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
       <div class="comb"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
@@ -355,7 +357,11 @@ function ask(t,label,val="",type="text"){return modal(t,`<label class="field"><s
 /* ---------- refresh ---------- */
 async function refresh(){
   let r;try{r=await fetch("/api/state?log="+logId);}catch(e){setStatus("bad","Lost the counter","Is run.py still running?");return;}
+  if(r.status===401){location.href="/";return;}
   S=await r.json();
+  // On a shared device: no Quit, no Share (only the counting computer has them).
+  $("quitbtn").style.display=S.remote?"none":"";$("sharebtn").style.display=S.remote?"none":"";
+  $("sharetxt").textContent=S.share&&S.share.on?"Sharing":"Share";
   for(const [id,t,m] of S.log){logId=id;const d=$("log");d.textContent+=t+"  "+m+"\n";d.scrollTop=d.scrollHeight;}
   if(savedCfg===null)savedCfg=JSON.stringify(S.cfg);
   $("path").textContent=S.path?S.path.split("/").pop():"New setup";$("path").title=S.path||"";
@@ -388,7 +394,7 @@ function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","f
   const m=c.model||null;$("modelstate").textContent=m?"("+m.weights.split("/").pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
   $("modeloff").style.display=m?"":"none";$("mwrow").style.display=m?"":"none";if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}}
 function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
-  if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an exit line across each hub's exit.</div>`;return;}
+  if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an outline around each hub's opening.</div>`;return;}
   for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";const ex=!!z.line;
     const pt=(S.live.parts||{})[z.name];const both=pt?` (colour ${pt.colour} · model ${pt.model})`:"";
     d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in")+both:(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
@@ -421,7 +427,7 @@ function handleJob(){const j=S.job;
   else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
     else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
   else if(j.name==="calibrate"&&j.result)showCalibration(j.result);
-  else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Red exit</b> or <b>Blue exit</b> and click across the hub's exit.":"");}}
+  else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Red outline</b> or <b>Blue outline</b> and click around the hub's opening, top edge a few balls above the hood.":"");}}
 async function chooseCamera(found){if(!found.length){modal("No camera found","<p>Check the camera is plugged in. On a Mac, the terminal needs permission: <b>System Settings → Privacy &amp; Security → Camera</b>.</p>",[{label:"OK",cls:"primary"}]);return;}
   const body=`<p>Numbers can change when cameras are re-plugged — check the picture after adding.</p><div class="pick">`+
     found.map(c=>`<div class="item" data-i="${c.index}"><span class="icon"><svg><use href="#i-cam"/></svg></span><span class="t">Camera ${c.index}</span><span class="s">${esc(c.size)}</span></div>`).join("")+"</div>";
@@ -522,6 +528,19 @@ async function removeCam(name){if(await confirmBox("Remove camera",`Remove <b>${
 async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked});
   hint("Running. Leave it on across matches — bioarena marks each match's start itself.");}catch(e){}}
 function stop(){api("stop");hint("");}
+async function shareDialog(){
+  const sh=S&&S.share||{on:false};
+  if(!sh.on){
+    const ok=await modal("Share on Wi-Fi",`<p>Open this page on a phone or another computer on the <b>same Wi-Fi</b>. They need a PIN that only this computer shows. The scoreboard (/board) opens without one.</p><p class="muted">Only this computer can quit or stop sharing.</p>`,[{label:"Cancel",value:false},{label:"Start sharing",cls:"primary",value:true}]);
+    if(!ok)return;try{await api("share_on",{});}catch(e){return;}await refresh();}
+  const s=S.share;if(!s||!s.on)return;
+  const stop=await modal("Sharing on Wi-Fi",`<p>On the other device, open</p><p style="font-size:22px;font-weight:700;user-select:all">${esc(s.url)}</p><p>and enter the PIN</p><p style="font-size:34px;font-weight:800;letter-spacing:6px">${esc(s.pin)}</p><p class="muted">Scoreboard for a TV: ${esc(s.url)}board (no PIN). If the other device cannot connect, the Wi-Fi may keep devices apart, or this computer's firewall blocks port 8791.</p>`,[{label:"Stop sharing",value:true},{label:"Done",cls:"primary",value:false}]);
+  if(stop){await api("share_off",{});toast("Stopped sharing");refresh();}}
+async function quitApp(){
+  const msg=(S&&S.running?"Counting stops and the feed goes OFFLINE. ":"")+(S&&savedCfg!==null&&JSON.stringify(S.cfg)!==savedCfg?"<b>The setup is not saved.</b> ":"")+"Quit the hub counter?";
+  if(!await confirmBox("Quit",msg,"Quit"))return;
+  try{await api("quit",{});}catch(e){}
+  document.body.innerHTML='<div style="padding:40px;font:16px system-ui;color:#aaa">The hub counter has quit. Open it again to keep counting.</div>';}
 async function save(){let p=null;if(!S.path){p=await ask("Save setup","File name","cams.json");if(p===null)return;}
   await api("save",{path:p});savedCfg=JSON.stringify(S.cfg);toast("Setup saved");refresh();}
 async function openSetup(){const p=await ask("Open setup","Setup file",S&&S.path||"cams.json");if(p){await api("load",{path:p});cur=null;lastPic="";savedCfg=null;refresh();}}
