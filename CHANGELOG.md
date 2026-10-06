@@ -9,6 +9,15 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Changed
+
+- **A release can be made from a phone.** Publishing it on GitHub
+  (Releases → Draft a new release → new tag on main → Publish) creates the
+  tag and the release together. `release.yml` now takes such a release over
+  instead of failing on "already exists": the CHANGELOG notes replace what
+  was typed, and the archives and models are attached. The app builds were
+  already attaching to an existing release.
+
 ## v0.4.4 — 2026-10-06
 
 Watchtower becomes a desktop app with its own windows and every setting
