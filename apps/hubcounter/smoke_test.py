@@ -77,8 +77,32 @@ def main(program: str) -> int:
     return 0
 
 
+def window_test(program: str) -> int:
+    """--window: the app's own window (WebKit on macOS, WebView2 on Windows)
+    opens and loads the page. Needs a desktop session, which GitHub's macOS
+    and Windows runners have."""
+    home = tempfile.mkdtemp(prefix="hubcounter-home-")
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
+    out = os.path.join(home, "window.json")
+    try:
+        code = subprocess.run([program, "--selftest-window", out], env=env, timeout=240).returncode
+    except subprocess.TimeoutExpired:
+        log = os.path.join(home, "Documents", "Hub Counter", "hubcounter.log")
+        tail = open(log, errors="replace").read().splitlines()[-25:] if os.path.exists(log) else []
+        fail("app window: no answer in 240 s | log: " + " / ".join(l.strip() for l in tail if l.strip())[-1500:])
+        return 1
+    res = json.load(open(out)) if os.path.exists(out) else {"ok": False, "error": f"no result (exit {code})"}
+    if not res.get("ok"):
+        fail(f"app window: {res}")
+        return 1
+    print(f"OK: app window loaded the page ({res.get('title')})")
+    return 0
+
+
 if __name__ == "__main__":
     try:
+        if sys.argv[1:2] == ["--window"]:
+            sys.exit(window_test(sys.argv[2]))
         sys.exit(main(sys.argv[1]))
     except (AssertionError, OSError, subprocess.TimeoutExpired) as e:
         fail(f"{type(e).__name__}: {e}")

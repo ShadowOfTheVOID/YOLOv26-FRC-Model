@@ -3575,6 +3575,17 @@ def test_watchtower_home_api():
     listed = set(re.findall(r'"(\w+)"', src[i:src.index(")", i)]))
     check("and the browser-mode list allows exactly the same calls", listed == methods)
     check("the window is given HomeApi, not the app", "js_api=HomeApi(app)" in src)
+    check("Watchtower's Home holds our camera setup page as its Hub cameras tab",
+          'id="tab_hub"' in page and 'id="hubframe"' in page
+          and 'HUB_URL="http://127.0.0.1:8790/"' in page and "show('hub')" in page)
+    hc = (root / "apps" / "hubcounter" / "main.py").read_text()
+    check("the Hub Counter app opens in its own window, closing it quits, the browser only without a toolkit",
+          "def run_window(" in hc and "win.events.closed += ctl.quit" in hc
+          and "webbrowser.open(URL)" in hc and "--selftest-window" in hc)
+    spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
+    check("and both apps bundle the window toolkit",
+          spec.index("WEBVIEW = collect_submodules") < spec.index('if APP == "watchtower":')
+          and "EXTRA_IMPORTS = WEBVIEW" in spec)
 
 
 def test_hub_scoreboard_view():

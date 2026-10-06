@@ -11,6 +11,27 @@ the build rather than publishing an empty release.
 
 ### Changed
 
+- **The Hub Counter app opens in its own window**, like Watchtower (Mac:
+  WebKit, Windows: WebView2), not a browser tab. Closing it quits. Linux
+  and the Pi keep the browser, and `--no-browser` stays headless for a Pi
+  with no screen. CI runs a window test on macOS and Windows
+  (`apps/hubcounter/smoke_test.py --window`).
+- **Watchtower's Home now contains our camera setup page** as its **Hub
+  cameras** tab, edge to edge, rather than a separate window. It loads once
+  and keeps counting behind the other tabs. Watchtower's own pages
+  (Scorekeeper, Field display) stay in their own windows, because a framed
+  page loses its login. Home opens at 1440x900 to fit it. Checked: the
+  window self-test loads the tab inside Home, and a screenshot shows the
+  page beside Watchtower's sidebar.
+
+### Added
+
+- **Watchtower patch 0007** (`deploy/frc-fms-patches/`): Watchtower's own
+  releases get the same Mac `.dmg`, Windows installer and desktop windows
+  as ours, built from v0.4.4 and checked the same way in its CI.
+
+### Changed
+
 - **A release can be made from a phone.** Publishing it on GitHub
   (Releases → Draft a new release → new tag on main → Publish) creates the
   tag and the release together. `release.yml` now takes such a release over

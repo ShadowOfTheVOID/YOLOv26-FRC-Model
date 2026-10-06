@@ -40,6 +40,13 @@ HEAVY = ["tkinter", "PyQt5", "PyQt6", "PySide6", "IPython", "jupyter",
          "tensorboard", "onnx", "onnxruntime", "openvino", "tensorrt"]
 
 APP = os.environ.get("HUBAPP", "hubcounter")
+# Both apps open in their own windows (pywebview): only this OS's backend,
+# or the bundler drags in Qt or GTK modules that are not installed and warns.
+WEBVIEW_OS = {"darwin": ("cocoa",), "win32": ("winforms", "edgechromium", "mshtml")}.get(
+    sys.platform, ("gtk", "qt"))
+WEBVIEW = collect_submodules(
+    "webview", filter=lambda m: not m.startswith("webview.platforms.")
+    or m.split(".")[2] in WEBVIEW_OS)
 if APP == "watchtower":
     WSRC = os.path.abspath(os.environ.get("WATCHTOWER_SRC") or os.path.join(ROOT, "watchtower-src"))
     if not os.path.isfile(os.path.join(WSRC, "fms", "server.py")):
@@ -48,13 +55,6 @@ if APP == "watchtower":
     NAME, ENTRY, BUNDLE_ID = "Watchtower", os.path.join(ROOT, "apps", "watchtower", "main.py"), "org.tbavid.watchtower"
     WAPP = os.path.join(ROOT, "apps", "watchtower")
     EXTRA_PATH = [WSRC, WAPP]
-    # The app's own windows (pywebview): only this OS's backend, or the
-    # bundler drags in Qt or GTK modules that are not installed and warns.
-    WEBVIEW_OS = {"darwin": ("cocoa",), "win32": ("winforms", "edgechromium", "mshtml")}.get(
-        sys.platform, ("gtk", "qt"))
-    WEBVIEW = collect_submodules(
-        "webview", filter=lambda m: not m.startswith("webview.platforms.")
-        or m.split(".")[2] in WEBVIEW_OS)
     EXTRA_DATAS = [(os.path.join(WAPP, "home.html"), "."),
                    (os.path.join(WSRC, "fms", "static"), "fms/static"),
                    (os.path.join(WSRC, "config", "event.example.yaml"), "config"),
@@ -66,7 +66,9 @@ if APP == "watchtower":
     EXTRA_DATAS += collect_data_files("webview")
 else:
     NAME, ENTRY, BUNDLE_ID = "Hub Counter", os.path.join(SPECPATH, "main.py"), "org.tbavid.hubcounter"
-    EXTRA_PATH, EXTRA_DATAS, EXTRA_IMPORTS = [], [], []
+    EXTRA_PATH = []
+    EXTRA_DATAS = collect_data_files("webview")
+    EXTRA_IMPORTS = WEBVIEW
 
 MODEL = os.path.join(ROOT, "models", "fuel_relabel.pt")
 if not os.path.isfile(MODEL) and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
