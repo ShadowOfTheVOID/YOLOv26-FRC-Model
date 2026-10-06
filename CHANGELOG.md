@@ -12,7 +12,7 @@ the build rather than publishing an empty release.
 ### Added
 
 - **A counter plugin system for frc-fms (watchtower-fms), and our counters as
-  plugins of it** (`deploy/frc-fms-patches/0003-0004`, `pyproject.toml`).
+  plugins of it** (`deploy/frc-fms-patches/0003-0005`, `pyproject.toml`).
   - **His side:** `counter:` finds plugins by short name, either installed
     packages registering `watchtower.counters` entry points or `plugin_paths:`
     folders. `--list-counters` lists them. A misspelt option is flagged
@@ -26,6 +26,13 @@ the build rather than publishing an empty release.
     `PYTHONPATH`.
   - **Checked** against a running watchtower-fms, both ways. Its tests pass
     with the patches (37).
+  - **Adding a plugin without editing config** (patch 0005). Drop a `.py`
+    into his `vision/plugins/` (copy the `_example.py` template), or run
+    `python run_vision.py --add-plugin ~/dev/TBACroppedOutVid` once. It
+    records the folder as a one-line `.path` file (no symlink, so it works on
+    Windows) and prints `tbavid-colour / tbavid-combo`. Files there are
+    parsed, not imported, so a broken one cannot stop vision from starting.
+    His tests: 42 pass.
 - **A slow model is now dropped after 10 s of wall time, not only after 300
   frames.** Inside frc-fms's runner on 4 CPU cores, the combo dragged the
   camera loop from 60 to 13 fps, so 300 frames took about 45 s to arrive.

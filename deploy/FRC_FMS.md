@@ -73,8 +73,10 @@ Fill in the marked lines: the model path (or switch to `tbavid-colour`
 for colour only, the better choice on wide, broadcast-like views), each
 hub's camera `source`, and the `setup:` path to `cams.json` with the camera
 names from step 2. Keep `fps` at the cameras' real rate (60 if they do 60).
-Its `plugin_paths:` line is how frc-fms finds this repository. Check that it
-does, then start everything:
+Its `plugin_paths:` line is how frc-fms finds this repository. With patch
+0005 there is a simpler way: delete that line and run
+`cd ~/dev/frc-fms/vision && python run_vision.py --add-plugin ~/dev/TBACroppedOutVid`
+once. Check that it finds the counters, then start everything:
 
 ```bash
 cd ~/dev/frc-fms/vision && python run_vision.py --config ../config/vision.yaml --list-counters
@@ -82,7 +84,7 @@ cd ~/dev/frc-fms && ./run.sh ../config/vision.yaml --preview
 ```
 
 `--list-counters` should show `tbavid-colour` and `tbavid-combo`. This
-needs frc-fms with the plugin system (`deploy/frc-fms-patches/0003-0004`,
+needs frc-fms with the plugin system (`deploy/frc-fms-patches/0003-0005`,
 not in its main yet). Without it, use the full names
 (`"tbavid.fms_counter:ColourCounter"`) and start with
 `PYTHONPATH=~/dev/TBACroppedOutVid ./run.sh ...`.
@@ -144,7 +146,7 @@ Drop `--dry-run` to replace that hub's events in frc-fms.
 
 | you see | it means / do |
 |---|---|
-| `counter 'tbavid-colour' not found` | `plugin_paths:` does not point at this repository (it is relative to `config/`), or frc-fms lacks the plugin-system patch |
+| `counter 'tbavid-colour' not found` | `plugin_paths:` does not point at this repository (it is relative to `config/`), or frc-fms lacks the plugin-system patch. Easiest fix: `python run_vision.py --add-plugin ~/dev/TBACroppedOutVid` (patch 0005) |
 | `has no option 'ball_aera' (did you mean 'ball_area'?)` | a misspelt key in `vision.yaml`; it was ignored |
 | `ComboCounter needs model:` | the `model:` line is missing; or use `tbavid-colour` |
 | `name the camera in cams.json` | `camera:` does not match a name saved in step 2 |
@@ -155,7 +157,7 @@ Drop `--dry-run` to replace that hub's events in frc-fms.
 
 ## A. Plugin: frc-fms runs our counter
 
-**With frc-fms's plugin system** (`deploy/frc-fms-patches/0003-0004`), use
+**With frc-fms's plugin system** (`deploy/frc-fms-patches/0003-0005`), use
 the short names `tbavid-colour` / `tbavid-combo` and a `plugin_paths:` line
 (or `pip install -e` this repository) instead of the full names and
 `PYTHONPATH` below. `python run_vision.py --list-counters` shows both, with

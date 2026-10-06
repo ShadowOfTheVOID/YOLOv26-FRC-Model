@@ -1,0 +1,425 @@
+From b7c1a002d2aadf6daf47ffe8ea64576bb91f4f4f Mon Sep 17 00:00:00 2001
+From: ShadowOfTheVOID <teddtony@outlook.com>
+Date: Tue, 6 Oct 2026 00:11:31 +0000
+Subject: [PATCH] Counter plugins: a drop-in folder and --add-plugin
+
+Adding a counter meant editing config/vision.yaml (plugin_paths:) or
+pip-installing a repo. Now:
+
+- vision/plugins/my_counter.py: a class with a NAME is available as
+  counter: <NAME>. Files are read with ast, never imported, so a broken
+  plugin cannot stop vision from starting or break --list-counters.
+- python run_vision.py --add-plugin ~/dev/YOLOv26-FRC-Model records the
+  folder as vision/plugins/<repo>.path (one line of text; no symlink, so
+  it works on Windows) and prints the counter names it provides.
+  --remove-plugin <repo> undoes it. A .path to a moved folder is listed
+  as missing, not fatal.
+- vision/plugins/_example.py: a working template with every optional
+  part commented. Built-in names still cannot be taken over.
+
+Verified with the YOLOv26-FRC-Model repo: --add-plugin found
+tbavid-colour / tbavid-combo and both load; the copied template counts.
+5 new tests; 42 pass.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01H8z93x3TYFuGBjjWb4pL17
+---
+ .gitignore                  |  3 ++
+ CLAUDE.md                   |  6 ++-
+ README.md                   | 13 +++--
+ config/vision.example.yaml  |  6 +--
+ tests/test_plugins.py       | 68 ++++++++++++++++++++++++++
+ vision/counters/__init__.py | 96 +++++++++++++++++++++++++++++++++++++
+ vision/plugins/README.md    | 20 ++++++++
+ vision/plugins/_example.py  | 38 +++++++++++++++
+ vision/run_vision.py        | 14 +++++-
+ 9 files changed, 256 insertions(+), 8 deletions(-)
+ create mode 100644 vision/plugins/README.md
+ create mode 100644 vision/plugins/_example.py
+
+diff --git a/.gitignore b/.gitignore
+index e3eb9d1..f438f32 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -7,3 +7,6 @@ tba_secrets.sh
+ config/event.yaml
+ config/vision.yaml
+ tba_secrets.sh
++vision/plugins/*
++!vision/plugins/_example.py
++!vision/plugins/README.md
+diff --git a/CLAUDE.md b/CLAUDE.md
+index cb55c0d..092fe50 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -59,7 +59,11 @@ pattern-kill `fms.server`/`run_vision.py` (it can hit the user's live processes)
+ ## Vision
+ - Counter plugins (`vision/counters/__init__.py`, plugin API 1): `counter:` is a built-in (`zone`, `linecross`,
+   `mock`), a short name registered under the `watchtower.counters` entry-point group (pip-installed, or a
+-  `plugin_paths:` folder's pyproject.toml), a `plugins:` alias, or `"module:Class"`. Required: `__init__(cfg)`,
++  `plugin_paths:` folder's pyproject.toml), a class in `vision/plugins/*.py` (its NAME; found by parsing the
++  source with ast, never importing it, so a broken file can't stop startup), a repo recorded there as
++  `<name>.path` by `--add-plugin` (plain text, not a symlink, for Windows), a `plugins:` alias, or
++  `"module:Class"`. `vision/plugins/` is gitignored except `_example.py` (a working template; `_` files are
++  skipped) and README.md. Required: `__init__(cfg)`,
+   `process(frame, t) -> int`. Optional, defaulted: PLUGIN_API, NAME, DESCRIPTION, NEEDS, OPTIONS (misspelt keys
+   warned), `status()` (detail/warning/error, shown in /control), `close()`. `--list-counters` prints them. Keep the
+   registry free of cv2 (tests run without it). `zone` counts only the class named `fuel` (or `classes:`). The
+diff --git a/README.md b/README.md
+index 1f9e39a..97524d2 100644
+--- a/README.md
++++ b/README.md
+@@ -427,7 +427,14 @@ Vision timestamps each count and batches it to the FMS 4× per second. If the FM
+ cd vision && python run_vision.py --list-counters
+ ```
+ 
+-**Using someone else's counter.** Either install it into this venv (`pip install -e path/to/their/repo`), or add its folder to `plugin_paths:` in `config/vision.yaml` (relative to that file, no install, no `PYTHONPATH`):
++**The easy way: `vision/plugins/`.** Nothing to edit but the `counter:` line.
++
++- *Your own counter:* copy `vision/plugins/_example.py` to `vision/plugins/my_counter.py`, change its `NAME`, and set `counter: <that NAME>`. The template is a working counter with every optional part commented.
++- *Someone else's repo:* `cd vision && python run_vision.py --add-plugin ~/dev/YOLOv26-FRC-Model`. It prints the counter names that repo provides. It writes a one-line `vision/plugins/<repo>.path` file holding the folder, which works the same on macOS, Windows and Linux. `--remove-plugin <repo>` undoes it.
++
++Files in `vision/plugins/` are read without being imported, so a broken one cannot stop vision from starting. They are gitignored except the template and its README. Built-in names cannot be taken over.
++
++**Other ways to use someone else's counter.** Either install it into this venv (`pip install -e path/to/their/repo`), or add its folder to `plugin_paths:` in `config/vision.yaml` (relative to that file, no install, no `PYTHONPATH`):
+ 
+ ```yaml
+ plugin_paths: [../../their-repo]
+@@ -513,7 +520,7 @@ These recordings are also your best training data, because they come from the re
+ 
+ ### External hub counter (YOLOv26-FRC-Model)
+ 
+-[YOLOv26-FRC-Model](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model) ships two counter plugins for this vision process, `tbavid-colour` and `tbavid-combo`. They are not part of this repo: clone it next to this one, then either `pip install -e ../YOLOv26-FRC-Model` in this venv or add it to `plugin_paths:` (see [Counter plugins](#counter-plugins)).
++[YOLOv26-FRC-Model](https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model) ships two counter plugins for this vision process, `tbavid-colour` and `tbavid-combo`. They are not part of this repo. Clone it, then run `cd vision && python run_vision.py --add-plugin ~/dev/YOLOv26-FRC-Model`. Alternatively, `pip install -e` it or add it to `plugin_paths:` (see [Counter plugins](#counter-plugins)).
+ 
+ - `tbavid-colour` counts yellow blobs crossing down into a hub outline. It needs no model or GPU. On four scored 2026 Einstein broadcasts it measured 10.1% mean error against the official counts at 60 fps, with the auto winner right on all four.
+ - `tbavid-combo` blends that with a fuel model (`model:`). On the same four it measured 6.8%, but three were in the model's training set; expect 7–9% on a new match. It needs Apple Silicon or a GPU. The model runs on its own thread; if it falls behind it turns itself off and the hub counts by colour.
+@@ -522,7 +529,7 @@ These recordings are also your best training data, because they come from the re
+ 
+ ```yaml
+ # config/vision.yaml
+-plugin_paths: [../../YOLOv26-FRC-Model]   # or pip install -e it and drop this line
++# after --add-plugin; or plugin_paths: [../../YOLOv26-FRC-Model]
+ defaults:
+   counter: tbavid-colour      # or tbavid-combo (needs model:)
+   model: /path/to/fuel_relabel.pt
+diff --git a/config/vision.example.yaml b/config/vision.example.yaml
+index 5da7abf..34eb149 100644
+--- a/config/vision.example.yaml
++++ b/config/vision.example.yaml
+@@ -20,9 +20,9 @@ record_dir: recordings           # raw hub video per match (for rescoring + trai
+ defaults:                        # applied to both hubs unless overridden
+   counter: zone                  # zone | linecross | mock | a plugin's name | "module:Class"
+   # `python run_vision.py --list-counters` shows what's available. External ones
+-  # (README "Counter plugins"): pip install -e them, or list their folder in
+-  # plugin_paths: at the top of this file. E.g. the YOLOv26-FRC-Model colour counter:
+-  #   plugin_paths: [../../YOLOv26-FRC-Model]
++  # (README "Counter plugins"): drop a .py into vision/plugins/, or add a repo
++  # with `python run_vision.py --add-plugin ~/dev/YOLOv26-FRC-Model` (or
++  # pip install -e it / list it in plugin_paths: above). Then e.g.:
+   #   counter: tbavid-colour     (or tbavid-combo + model: path/to/fuel_relabel.pt)
+   #   and per hub: setup: path/to/cams.json, camera: <name>
+   weights: models/fuel_best.pt   # drop new weights here, restart vision; FMS never needs to restart
+diff --git a/tests/test_plugins.py b/tests/test_plugins.py
+index b0a6f53..00b36d0 100644
+--- a/tests/test_plugins.py
++++ b/tests/test_plugins.py
+@@ -134,3 +134,71 @@ def test_list_shows_needs_and_options_and_survives_a_bad_plugin(plugdir):
+     out = C.list_counters({"fancy": "myplug:Fancy", "gone": "nosuchmodule:X"})
+     assert "a test counter  [needs gpu]" in out and "conf: confidence" in out
+     assert "gone" in out and "cannot load" in out
++
++
++def test_dropped_in_file_is_found_by_name_without_importing(tmp_path, monkeypatch):
++    drop = tmp_path / "plugins"
++    drop.mkdir()
++    (drop / "dropme.py").write_text(textwrap.dedent('''
++        class Mine:
++            NAME = "dropped"
++            def __init__(self, cfg): self.total = 0
++            def process(self, frame, t): return 3
++        class Helper:                  # no NAME, no process: not a counter
++            pass
++        raise RuntimeError("only runs if imported")
++    '''))
++    (drop / "_skipme.py").write_text("class X:\n    NAME = 'skipped'\n")
++    (drop / "broken.py").write_text("class (:\n")
++    monkeypatch.setattr(C, "PLUGINS_DIR", drop)
++    monkeypatch.setattr(C, "_entry_points", lambda: {})
++    found = C.available()
++    assert found["dropped"] == {"spec": "dropme:Mine", "source": "plugins/dropme.py"}
++    assert "skipped" not in found and "helper" not in found
++    sys.modules.pop("dropme", None)
++
++
++def test_dropped_in_file_loads_and_cannot_take_a_builtin(tmp_path, monkeypatch):
++    drop = tmp_path / "plugins"
++    drop.mkdir()
++    (drop / "dropok.py").write_text(
++        "class Z:\n    NAME = 'zone'\n    def process(self, f, t): return 0\n"
++        "class Ok:\n    def __init__(self, cfg): self.total = 0\n    def process(self, f, t): return 5\n")
++    monkeypatch.setattr(C, "PLUGINS_DIR", drop)
++    monkeypatch.setattr(C, "_entry_points", lambda: {})
++    assert C.resolve("zone") == "counters.zone:ZoneCounter"
++    assert C.load_counter({"counter": "ok", "hub": "red"}).process(None, 0) == 5
++    sys.modules.pop("dropok", None)
++    sys.path.remove(str(drop))
++
++
++def test_add_plugin_remembers_a_repo_and_remove_forgets_it(plugdir, tmp_path, monkeypatch):
++    drop = tmp_path / "plugins"
++    monkeypatch.setattr(C, "PLUGINS_DIR", drop)
++    monkeypatch.setattr(C, "_PATH_PLUGINS", {})
++    (plugdir / "pyproject.toml").write_text(
++        '[project]\nname = "x"\n[project.entry-points."watchtower.counters"]\n'
++        'repo-one = "myplug:Fancy"\n')
++    names = C.add_plugin(str(plugdir))
++    assert "repo-one" in names and "fancy" in names
++    assert (drop / f"{plugdir.name}.path").read_text().strip() == str(plugdir.resolve())
++    assert C.available()["repo-one"]["source"] == f"plugins/{plugdir.name}.path"
++    assert C.load_counter({"counter": "repo-one", "hub": "red"}).process(None, 0) == 0
++    assert C.remove_plugin(plugdir.name) and not C.remove_plugin(plugdir.name)
++    with pytest.raises(SystemExit, match="no counters"):
++        C.add_plugin(str(drop))
++
++
++def test_add_plugin_path_that_went_missing_is_listed_not_fatal(tmp_path, monkeypatch):
++    drop = tmp_path / "plugins"
++    drop.mkdir()
++    (drop / "gone.path").write_text(str(tmp_path / "nowhere") + "\n")
++    monkeypatch.setattr(C, "PLUGINS_DIR", drop)
++    monkeypatch.setattr(C, "_entry_points", lambda: {})
++    assert "not found" in C.available()["gone (missing)"]["source"]
++    assert C.resolve("zone") == "counters.zone:ZoneCounter"
++
++
++def test_the_template_is_a_valid_counter():
++    tpl = pathlib.Path(C.__file__).resolve().parent.parent / "plugins" / "_example.py"
++    assert C._named_classes(tpl) == {"my-counter": "MyCounter"}
+diff --git a/vision/counters/__init__.py b/vision/counters/__init__.py
+index d1ee01f..8b9f40d 100644
+--- a/vision/counters/__init__.py
++++ b/vision/counters/__init__.py
+@@ -20,6 +20,13 @@ Where `counter:` in config/vision.yaml is looked up, in this order:
+    checkout of another repo can be used without installing it or setting
+    PYTHONPATH.
+ 
++5. The `vision/plugins/` folder, the easy way. Drop in a `my_counter.py` whose
++   class has a `NAME`, and `counter: <that NAME>` works with nothing else to
++   edit. Or add a whole repo with
++   `python run_vision.py --add-plugin ~/dev/OtherRepo`. That writes
++   `plugins/OtherRepo.path`, a one-line file holding the folder, which works
++   the same on macOS, Windows and Linux (no symlinks).
++
+ `python run_vision.py --list-counters` prints what is available.
+ 
+ Nothing here imports cv2 or a model: the registry is tested, and the list
+@@ -48,6 +55,93 @@ RUNNER_KEYS = {"counter", "hub", "source", "enabled", "fps", "width", "height",
+ 
+ 
+ _PATH_PLUGINS: dict = {}           # short names read from plugin_paths' pyproject.toml
++PLUGINS_DIR = pathlib.Path(__file__).resolve().parent.parent / "plugins"
++
++
++def _named_classes(pyfile: pathlib.Path) -> dict:
++    """{NAME: class name} for the counter classes in a dropped-in file (ones
++    with a NAME or a process() method), read from its source without importing
++    it, so a broken or slow plugin file cannot stop vision from starting or
++    break --list-counters for the others. A class without a NAME is listed
++    under its class name in lower case."""
++    import ast
++    try:
++        tree = ast.parse(pyfile.read_text(encoding="utf-8"))
++    except (OSError, SyntaxError, ValueError):
++        return {}
++    out = {}
++    for node in tree.body:
++        if not isinstance(node, ast.ClassDef):
++            continue
++        methods = {b.name for b in node.body if isinstance(b, ast.FunctionDef)}
++        name = None
++        for b in node.body:
++            if (isinstance(b, ast.Assign) and any(getattr(t, "id", "") == "NAME" for t in b.targets)
++                    and isinstance(b.value, ast.Constant) and isinstance(b.value.value, str)):
++                name = b.value.value
++        if name or "process" in methods:      # a NAME alone: a subclass tweaking a built-in
++            out[name or node.name.lower()] = node.name
++    return out
++
++
++def scan_plugins_dir(folder: pathlib.Path = None) -> dict:
++    """{name: (spec, source)} from the drop-in folder: *.py files, *.path files
++    (a folder to add, one line), and sub-folders such as a cloned repo. Files
++    and folders starting with '_' or '.' are skipped (the _example.py template)."""
++    folder = pathlib.Path(folder or PLUGINS_DIR)
++    if not folder.is_dir():
++        return {}
++    found = {}
++    if str(folder) not in sys.path:
++        sys.path.insert(0, str(folder))
++    for f in sorted(folder.iterdir()):
++        if f.name.startswith(("_", ".")):
++            continue
++        if f.suffix == ".py":
++            for name, cls in _named_classes(f).items():
++                found[name] = (f"{f.stem}:{cls}", f"plugins/{f.name}")
++        elif f.suffix == ".path" or f.is_dir():
++            target = f.read_text(encoding="utf-8").strip() if f.suffix == ".path" else str(f)
++            try:
++                add_plugin_paths([target], base=folder)
++            except SystemExit:
++                found[f"{f.stem} (missing)"] = (f"{f.stem}:missing", f"plugins/{f.name} -> {target} not found")
++                continue
++            q = pathlib.Path(os.path.expanduser(target))
++            q = (q if q.is_absolute() else folder / q).resolve()
++            for name, spec in _pyproject_plugins(q).items():
++                found[name] = (spec, f"plugins/{f.name}")
++            for py in sorted(q.glob("*.py")) if f.is_dir() else []:
++                if not py.name.startswith(("_", ".")):
++                    for name, cls in _named_classes(py).items():
++                        found.setdefault(name, (f"{py.stem}:{cls}", f"plugins/{f.name}/{py.name}"))
++    return found
++
++
++def add_plugin(path: str, folder: pathlib.Path = None) -> list:
++    """--add-plugin: remember a folder (a repo with counters) in the drop-in
++    folder as <name>.path. Returns the counter names it provides."""
++    folder = pathlib.Path(folder or PLUGINS_DIR)
++    q = pathlib.Path(os.path.expanduser(path)).resolve()
++    if not q.is_dir():
++        raise SystemExit(f"--add-plugin: {path} is not a folder")
++    names = list(_pyproject_plugins(q)) + [n for py in q.glob("*.py")
++                                          if not py.name.startswith(("_", "."))
++                                          for n in _named_classes(py)]
++    if not names:
++        raise SystemExit(f"--add-plugin: no counters in {q} (no 'watchtower.counters' in its "
++                         f"pyproject.toml, and no .py with a counter class at its top)")
++    folder.mkdir(exist_ok=True)
++    (folder / f"{q.name}.path").write_text(str(q) + "\n", encoding="utf-8")
++    return names
++
++
++def remove_plugin(name: str, folder: pathlib.Path = None) -> bool:
++    f = pathlib.Path(folder or PLUGINS_DIR) / f"{name}.path"
++    if f.is_file():
++        f.unlink()
++        return True
++    return False
+ 
+ 
+ def _pyproject_plugins(folder: pathlib.Path) -> dict:
+@@ -107,6 +201,8 @@ def available(plugins=None) -> dict:
+         out.setdefault(n, {"spec": s, "source": f"installed ({dist})"})
+     for n, (s, where) in _PATH_PLUGINS.items():
+         out.setdefault(n, {"spec": s, "source": where})
++    for n, (s, where) in scan_plugins_dir().items():
++        out.setdefault(n, {"spec": s, "source": where})
+     for n, s in (plugins or {}).items():
+         out[n] = {"spec": str(s), "source": "config plugins:"}
+     return out
+diff --git a/vision/plugins/README.md b/vision/plugins/README.md
+new file mode 100644
+index 0000000..a7bd70a
+--- /dev/null
++++ b/vision/plugins/README.md
+@@ -0,0 +1,20 @@
++# Counter plugins
++
++Two ways to add a counter, neither needs any code or config edited:
++
++1. **One file:** copy `_example.py` to `my_counter.py` here, change its
++   `NAME`, and set `counter: <that NAME>` in `config/vision.yaml`.
++2. **A whole repo** (e.g. TBACroppedOutVid's colour/combo counters):
++
++   ```bash
++   python run_vision.py --add-plugin ~/dev/TBACroppedOutVid
++   ```
++
++   This writes `TBACroppedOutVid.path` here (one line: the folder) and prints
++   the counter names it found. `--remove-plugin TBACroppedOutVid` undoes it.
++   Copying or cloning a repo straight into this folder works too.
++
++`python run_vision.py --list-counters` shows every counter and where it came
++from. Built-in names (`zone`, `linecross`, `mock`) cannot be taken over.
++Everything here except this README and `_example.py` is ignored by git, so
++your own plugins stay local.
+diff --git a/vision/plugins/_example.py b/vision/plugins/_example.py
+new file mode 100644
+index 0000000..7fcbd5b
+--- /dev/null
++++ b/vision/plugins/_example.py
+@@ -0,0 +1,38 @@
++"""A counter plugin to copy. Save a copy here as e.g. `my_counter.py` (no
++leading underscore -- files starting with "_" are skipped), change NAME, and
++put `counter: my-counter` in config/vision.yaml. Nothing else to edit.
++
++Check it shows up:  python run_vision.py --list-counters
++Try it on a video:  python rescore.py <recording> (see README)
++
++The contract is one method: process(frame, t) returns how many NEW fuel went
++in during that frame. Everything else here is optional (counters/base.py).
++"""
++import cv2
++
++from counters.base import Counter
++
++
++class MyCounter(Counter):
++    NAME = "my-counter"                       # what `counter:` says in vision.yaml
++    DESCRIPTION = "Bright yellow pixels appearing inside the roi (an example, not a real counter)"
++    NEEDS = ()                                # e.g. ("model", "gpu"); shown, not enforced
++    OPTIONS = {"threshold": "fraction of the roi that must turn yellow to count one ball"}
++
++    def __init__(self, cfg):
++        super().__init__(cfg)                 # sets self.cfg, self.roi, self.total
++        self.threshold = float(cfg.get("threshold", 0.02))
++        self.was_on = False
++
++    def process(self, frame, t):
++        x, y, w, h = self.roi or (0, 0, frame.shape[1], frame.shape[0])
++        hsv = cv2.cvtColor(frame[y:y + h, x:x + w], cv2.COLOR_BGR2HSV)
++        yellow = cv2.inRange(hsv, (20, 120, 120), (35, 255, 255))
++        on = yellow.mean() / 255 > self.threshold
++        new = 1 if on and not self.was_on else 0
++        self.was_on = on
++        self.total += new
++        return new
++
++    def status(self):                         # optional: shown on /control
++        return {"detail": f"{self.total} counted"}
+diff --git a/vision/run_vision.py b/vision/run_vision.py
+index 105b28d..9f12b7d 100644
+--- a/vision/run_vision.py
++++ b/vision/run_vision.py
+@@ -27,7 +27,8 @@ import requests
+ 
+ import vconfig
+ from count_feed import CountFeed, targets
+-from counters import add_plugin_paths, list_counters, load_counter, plugin_status
++from counters import (add_plugin, add_plugin_paths, list_counters, load_counter,
++                      plugin_status, remove_plugin)
+ 
+ STOP = threading.Event()
+ 
+@@ -199,7 +200,18 @@ def main():
+                     help="also stream live counts to this field system (repeatable; adds to config feeds:)")
+     ap.add_argument("--list-counters", action="store_true",
+                     help="list every counter plugin available (built-in, installed, plugin_paths) and exit")
++    ap.add_argument("--add-plugin", metavar="FOLDER",
++                    help="add a folder of counters (e.g. another repo) to vision/plugins/ and exit")
++    ap.add_argument("--remove-plugin", metavar="NAME",
++                    help="remove a folder added with --add-plugin (its folder name) and exit")
+     args = ap.parse_args()
++    if args.add_plugin:
++        names = add_plugin(args.add_plugin)
++        print(f"added: counter: {' / '.join(names)} now works in config/vision.yaml")
++        return
++    if args.remove_plugin:
++        print("removed" if remove_plugin(args.remove_plugin) else f"no plugin {args.remove_plugin!r} in vision/plugins/")
++        return
+     if args.list_counters:
+         import yaml
+         p = pathlib.Path(args.config)
+-- 
+2.43.0
+

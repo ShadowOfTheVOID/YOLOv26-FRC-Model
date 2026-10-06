@@ -7,7 +7,9 @@ fms_url: http://127.0.0.1:8000
 record_dir: recordings           # raw hub video per match, for rescore.py and retraining
 # Where this repository is, relative to this file (frc-fms/config/). With the
 # plugin system (deploy/frc-fms-patches/0004) this replaces PYTHONPATH; or
-# `pip install -e ~/dev/TBACroppedOutVid` in frc-fms's venv and drop the line.
+# `pip install -e ~/dev/TBACroppedOutVid` in frc-fms's venv and drop the line;
+# or, with patch 0005, run `python run_vision.py --add-plugin ~/dev/TBACroppedOutVid`
+# once in frc-fms/vision and drop the line.
 plugin_paths: [../../TBACroppedOutVid]
 
 defaults:
