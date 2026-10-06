@@ -113,7 +113,13 @@ def window_test(program: str) -> int:
     home = tempfile.mkdtemp(prefix="watchtower-home-")
     env = dict(os.environ, HOME=home, USERPROFILE=home)
     out = os.path.join(home, "window.json")
-    code = subprocess.run([program, "--selftest-window", out], env=env, timeout=300).returncode
+    try:
+        code = subprocess.run([program, "--selftest-window", out], env=env, timeout=300).returncode
+    except subprocess.TimeoutExpired:
+        log = os.path.join(home, "Documents", "Watchtower", "watchtower.log")
+        tail = open(log, errors="replace").read().splitlines()[-25:] if os.path.exists(log) else []
+        fail("app windows: no answer in 300 s | log: " + " / ".join(l.strip() for l in tail if l.strip())[-1500:])
+        return 1
     res = json.load(open(out)) if os.path.exists(out) else {"ok": False, "error": f"no result (exit {code})"}
     for s in res.get("steps", []):
         print("  " + s)

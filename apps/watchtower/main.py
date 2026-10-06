@@ -272,6 +272,23 @@ def selftest_windows(app: "App", out: str) -> None:
     import json
     res = {"ok": False, "steps": []}
 
+    def log_tail() -> str:
+        try:
+            tail = (app.d / "watchtower.log").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+        return " / ".join(l.strip() for l in tail.splitlines()[-25:] if l.strip())[-1500:]
+
+    def watchdog():
+        # A window engine that never answers (evaluate_js blocks for good)
+        # must still produce a result: on CI it is the only report there is.
+        time.sleep(180)
+        res["error"] = "stuck after: " + " | ".join(res["steps"] or ["start"]) + " | log: " + log_tail()
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(res, f, indent=1)
+        os._exit(3)
+    threading.Thread(target=watchdog, daemon=True, name="selftest watchdog").start()
+
     last_err = []
 
     def until(fn, t=30.0):
@@ -310,12 +327,7 @@ def selftest_windows(app: "App", out: str) -> None:
         res["error"] = f"{type(e).__name__}: {e}"
         # What pywebview and the window engine said: on a CI machine the log
         # is the only place the real reason shows.
-        try:
-            tail = (app.d / "watchtower.log").read_text(encoding="utf-8", errors="replace")
-            res["error"] += " | log: " + " / ".join(
-                l.strip() for l in tail.splitlines()[-25:] if l.strip())[-1500:]
-        except OSError:
-            pass
+        res["error"] += " | log: " + log_tail()
     with open(out, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=1)
     app.quit()
