@@ -30,6 +30,14 @@ the build rather than publishing an empty release.
     and "FMS Display"; a save restarted the app serving the new name and
     teams; and Quit on the hub page closed it. CI runs the same window test
     on macOS and Windows (`smoke_test.py --window`).
+  - **Import teams from TBA:** a button on Event & schedule fills the team
+    list from the event on The Blue Alliance (the event key, e.g.
+    2026catstd), with a names preview to check before Save. It needs a free
+    TBA Read API key, entered on The Blue Alliance tab, or `$TBA_AUTH_KEY`.
+    It says plainly what is wrong: a refused key, an unknown event, no event
+    key, or no internet. The key is stored as `tba.read_key` in event.yaml,
+    added as one line, since fms.init's file never had it; Watchtower ignores
+    keys it does not read.
   - **Linux and the Pi** open the same Home page in the browser instead (no
     window toolkit is bundled there), so settings are never hand-edited
     there either. It is served on 127.0.0.1:8789, and every call needs a

@@ -142,7 +142,7 @@ const $=id=>document.getElementById(id);
 const api=()=>window.pywebview.api;
 const GROUPS={event:["event.name","event.date","event.utc_offset_hours","event.teams","event.qual_start","event.cycle_min","event.lunch"],
   pins:["server.pins.control","server.pins.ref","server.pins.emcee"],
-  tba:["event.tba_event_key","tba.enabled","tba.auth_id","tba.auth_secret","tba.send_score_breakdown"],
+  tba:["event.tba_event_key","tba.read_key","tba.enabled","tba.auth_id","tba.auth_secret","tba.send_score_breakdown"],
   rules:null};
 let FIELDS=[],saved={},dirty=false,last=null,qrFor="";
 
@@ -154,7 +154,9 @@ for(const b of document.querySelectorAll("nav [data-tab]"))b.onclick=()=>show(b.
 function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams"].includes(f.kind)||f.name==="event.name";
   let input;
   if(f.kind==="bool")return `<div class="f ${wide?"wide":""}"><label class="check"><input type="checkbox" id="${id}">${f.label}</label><div class="err" id="e_${id}"></div></div>`;
-  if(f.kind==="teams")input=`<textarea id="${id}" placeholder="254, 1678, 971, …"></textarea>`;
+  if(f.kind==="teams")input=`<textarea id="${id}" placeholder="254, 1678, 971, …"></textarea>
+    <div class="row" style="margin-top:8px"><button class="btn" type="button" id="tbaimport" onclick="importTeams()">Import from TBA</button>
+    <span class="msg" id="tbamsg"></span></div><div class="note" id="tbanames"></div>`;
   else if(f.kind==="date")input=`<input id="${id}" type="date">`;
   else if(f.kind==="time")input=`<input id="${id}" type="time">`;
   else if(f.kind==="secret")input=`<input id="${id}" type="password" autocomplete="off">`;
@@ -182,6 +184,14 @@ function collect(){const out={};for(const f of FIELDS){const e=el(f.name);if(!e)
 function countTeams(){const t=el("event.teams");if(!t)return;const n=(t.value.match(/\d+/g)||[]).length;$("tcount").textContent=n?`(${n})`:"";}
 function clearErrors(){for(const e of document.querySelectorAll(".err"))e.textContent="";}
 async function loadSettings(){const r=await api().get_settings();FIELDS=r.fields;saved=r.values;build();fill();}
+async function importTeams(){
+  const b=$("tbaimport");b.disabled=true;$("tbamsg").className="msg";$("tbamsg").textContent="Asking TBA…";$("tbanames").textContent="";
+  let r;try{r=await api().tba_teams(el("event.tba_event_key").value,el("tba.read_key").value);}catch(e){r={error:String(e)};}
+  b.disabled=false;
+  if(r.error){$("tbamsg").className="msg bad";$("tbamsg").textContent=r.error;return;}
+  el("event.teams").value=r.teams.join(", ");dirty=true;countTeams();
+  $("tbamsg").className="msg ok";$("tbamsg").textContent=`${r.teams.length} teams from TBA. Check them, then Save.`;
+  $("tbanames").textContent=r.teams.map(t=>r.names[t]?`${t} ${r.names[t]}`:String(t)).join(" · ");}
 async function useLocalOffset(){const o=await api().local_offset(el("event.date").value);el("event.utc_offset_hours").value=String(o);dirty=true;}
 async function regenPins(){const p=await api().new_pins();for(const r in p)el("server.pins."+r).value=p[r];dirty=true;
   $("msg").className="msg";$("msg").textContent="New PINs filled in. Save to use them.";}

@@ -181,6 +181,10 @@ class App:
         import settings
         return settings.new_pins()
 
+    def tba_teams(self, event_key: str, read_key: str) -> dict:
+        import settings
+        return settings.tba_teams(event_key, read_key)
+
     def save_settings(self, values: dict) -> dict:
         import settings
         try:
@@ -333,7 +337,7 @@ def selftest_windows(app: "App", out: str) -> None:
     app.quit()
 
 
-HOME_API = ("state", "qr", "get_settings", "local_offset", "new_pins", "save_settings",
+HOME_API = ("state", "qr", "get_settings", "local_offset", "new_pins", "save_settings", "tba_teams",
             "open_view", "fullscreen", "open_folder", "quit")
 
 

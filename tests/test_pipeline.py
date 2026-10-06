@@ -3483,6 +3483,47 @@ def test_watchtower_settings():
           not St._set_line(block, ("event", "teams"), "[1]") and block[1] == "  teams:\n")
     check("a missing field is reported",
           not St._set_line(['event:\n', '  name: "x"\n'], ("event", "date"), '""'))
+    lines = ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '\n', '# next\n', 'game:\n', '  auto_s: 20\n']
+    check("a field the file never had is added at the end of its section",
+          St._add_line(lines, ("tba", "read_key"), '"k"')
+          and lines[:4] == ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '  read_key: "k"\n']
+          and lines[5:] == ['# next\n', 'game:\n', '  auto_s: 20\n'])
+    check("but not into a section that is not there",
+          not St._add_line(['event:\n', '  name: "x"\n'], ("tba", "read_key"), '"k"'))
+
+    # Import teams from TBA, against a stand-in for TBA's read API.
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class TBA(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.headers.get("X-TBA-Auth-Key") != "goodkey":
+                self.send_response(401); self.end_headers(); return
+            if self.path != "/api/v3/event/2026catstd/teams/simple":
+                self.send_response(404); self.end_headers(); return
+            body = _json.dumps([{"team_number": 1678, "nickname": "Citrus Circuits"},
+                                {"team_number": 254, "nickname": "The Cheesy Poofs"}]).encode()
+            self.send_response(200); self.end_headers(); self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), TBA)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    St.TBA_API = f"http://127.0.0.1:{srv.server_address[1]}/api/v3"
+    try:
+        r = St.tba_teams("2026CATSTD", "goodkey")
+        check("TBA's teams come back sorted, with their names",
+              r.get("teams") == [254, 1678] and r["names"]["254"] == "The Cheesy Poofs")
+        check("a wrong key, an unknown event and a missing event key each say what to fix",
+              "refused" in St.tba_teams("2026catstd", "bad")["error"]
+              and "no event" in St.tba_teams("2026zzzz", "goodkey")["error"]
+              and "event key first" in St.tba_teams("", "goodkey")["error"])
+    finally:
+        srv.shutdown()
+    St.TBA_API = "http://127.0.0.1:1/api/v3"
+    check("no internet says so", "online" in St.tba_teams("2026catstd", "goodkey")["error"])
 
 
 def test_hub_scoreboard_view():

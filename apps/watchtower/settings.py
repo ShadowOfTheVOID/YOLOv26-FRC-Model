@@ -17,10 +17,16 @@ tests call them directly.
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+# TBA's read API; WATCHTOWER_TBA_API points the tests at a stand-in.
+TBA_API = os.environ.get("WATCHTOWER_TBA_API", "https://www.thebluealliance.com/api/v3")
 
 # (key path in event.yaml, kind, label). Order is the order on the page.
 FIELDS = [
@@ -42,6 +48,10 @@ FIELDS = [
     (("tba", "auth_id"), "text", "TBA auth ID"),
     (("tba", "auth_secret"), "secret", "TBA auth secret"),
     (("tba", "send_score_breakdown"), "bool", "Send score breakdowns (totals only is safer)"),
+    # Not Watchtower's (it reads only its own tba keys): the app's own, for
+    # "Import from TBA" on the Event tab. A TBA Read API key, from
+    # thebluealliance.com/account; $TBA_AUTH_KEY is used when this is empty.
+    (("tba", "read_key"), "secret", "TBA Read API key (to import teams)"),
     # Game rules
     (("game", "auto_s"), "int", "Auto (s)"),
     (("game", "auto_teleop_gap_s"), "int", "Pause after auto (s)"),
@@ -228,6 +238,36 @@ def _set_line(lines: list, path: tuple, rendered: str) -> bool:
     return False
 
 
+def _add_line(lines: list, path: tuple, rendered: str) -> bool:
+    """Add a field missing from its section (e.g. tba.read_key, which
+    fms.init's file never had) at the end of that section, so the rest of
+    the file and its comments stay as they are. False if the section
+    itself is missing or not block-shaped."""
+    lo, hi, end = 0, len(lines), None
+    for depth, key in enumerate(path[:-1]):
+        ind = "  " * depth
+        pat = re.compile(rf"^{ind}{re.escape(key)}:\s*(#.*)?\n?$")
+        for i in range(lo, hi):
+            if pat.match(lines[i]):
+                end = i + 1
+                while end < hi and (not lines[end].strip() or lines[end].lstrip().startswith("#")
+                                    or lines[end].startswith(ind + "  ")):
+                    end += 1
+                lo, hi = i + 1, end
+                break
+        else:
+            return False
+    # Before trailing blank lines and column-0 comments: those head the
+    # next section ("# ---- TBA trusted API"), and a line added after them
+    # reads as part of that section, though YAML still files it here.
+    while end > lo and (not lines[end - 1].strip() or lines[end - 1].startswith("#")):
+        end -= 1
+    if end and not lines[end - 1].endswith("\n"):
+        lines[end - 1] += "\n"
+    lines.insert(end, f"{'  ' * (len(path) - 1)}{path[-1]}: {rendered}\n")
+    return True
+
+
 def save(event_yaml: Path, values: dict) -> dict:
     """Write the changed fields. Returns {"changed": [...]} or raises
     ValueError with every problem, writing nothing."""
@@ -242,7 +282,8 @@ def save(event_yaml: Path, values: dict) -> dict:
         return {"changed": []}
     text = event_yaml.read_text(encoding="utf-8")
     lines = text.splitlines(keepends=True)
-    if all(_set_line(lines, KEY[k][0], _render(v)) for k, v in changed.items()):
+    if all(_set_line(lines, KEY[k][0], _render(v)) or _add_line(lines, KEY[k][0], _render(v))
+           for k, v in changed.items()):
         new = "".join(lines)
     else:
         data = yaml.safe_load(text) or {}
@@ -266,3 +307,35 @@ def save(event_yaml: Path, values: dict) -> dict:
         raise ValueError(str(e)) from None
     event_yaml.write_text(new, encoding="utf-8")
     return {"changed": sorted(changed)}
+
+
+def tba_teams(event_key: str, read_key: str = "") -> dict:
+    """The teams at a TBA event: {"teams": [254, ...], "names": {"254": "The
+    Cheesy Poofs"}} sorted by number, or {"error": why}, in words a
+    scorekeeper can act on. Needs internet; do it before the venue."""
+    key = (event_key or "").strip().lower()
+    if not re.fullmatch(r"\d{4}[a-z0-9]+", key):
+        return {"error": "Enter the TBA event key first (like 2026catstd), on The Blue Alliance tab."}
+    token = (read_key or "").strip() or os.environ.get("TBA_AUTH_KEY", "")
+    if not token:
+        return {"error": "Add a TBA Read API key on The Blue Alliance tab "
+                         "(free: thebluealliance.com/account, Read API Keys)."}
+    req = urllib.request.Request(f"{TBA_API}/event/{key}/teams/simple",
+                                 headers={"X-TBA-Auth-Key": token, "User-Agent": "Watchtower app"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            rows = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return {"error": "TBA refused the Read API key. Check it on The Blue Alliance tab."}
+        if e.code == 404:
+            return {"error": f"TBA has no event {key}. Check the event key."}
+        return {"error": f"TBA answered {e.code}. Try again in a minute."}
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return {"error": f"Could not reach TBA ({getattr(e, 'reason', e)}). Is this computer online?"}
+    teams = sorted({int(t["team_number"]) for t in rows or [] if t.get("team_number")})
+    if not teams:
+        return {"error": f"TBA lists no teams for {key} yet. Try again closer to the event."}
+    names = {str(int(t["team_number"])): t.get("nickname") or "" for t in rows if t.get("team_number")}
+    return {"teams": teams, "names": names}
+
