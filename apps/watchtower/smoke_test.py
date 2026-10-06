@@ -66,7 +66,19 @@ def main(program: str) -> int:
             return 1
         d = os.path.join(home, "Documents", "Watchtower")
         assert os.path.isfile(os.path.join(d, "config", "event.yaml")), "no event.yaml made"
-        assert os.path.isfile(os.path.join(d, "Watchtower - start here.html")), "no start page"
+        # Home (browser mode here: --no-browser): its address carries the
+        # launch token; the API refuses calls without it and answers with it.
+        link = os.path.join(d, "webview", "home-url.txt")
+        assert os.path.isfile(link), "no Home address written"
+        url = open(link).read().strip()
+        token = url.split("t=", 1)[1]
+        assert "Watchtower" in get(url), "Home page not served"
+        home_api = url.split("/?")[0] + "/api/state"
+        assert post(home_api, [], {"X-Home-Token": "wrong"}) == 403, "Home API answered without the token"
+        req = urllib.request.Request(home_api, data=b"[]", method="POST",
+                                     headers={"Content-Type": "application/json", "X-Home-Token": token})
+        state = json.loads(urllib.request.urlopen(req, timeout=5).read())["result"]
+        assert state["fms_ok"] and set(state["pins"]) == {"control", "ref", "emcee"}, "Home state wrong"
         target = json.loads(get(HUB + "/api/state"))["default_target"]
         assert target.startswith("http://") and target.endswith("@127.0.0.1:8000"), \
             "the hub counter is not set to this Watchtower"
