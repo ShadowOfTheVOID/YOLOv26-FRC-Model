@@ -287,6 +287,9 @@ def selftest_windows(app: "App", out: str) -> None:
         return None
 
     try:
+        # A cold first start (WebView2 setting up its profile on a fresh
+        # machine) can take longer than pywebview's own 20 s wait.
+        res["steps"].append(f"home loaded: {app.home.events.loaded.wait(90)}")
         js_pin = "document.getElementById('pin_control_t').textContent"
         pin = until(lambda: (lambda v: v if v and v != "——" else None)(app.home.evaluate_js(js_pin)))
         res["steps"].append(f"home filled by the API: control PIN shown = {pin == str(app.ev['pins'].get('control'))}")
@@ -305,6 +308,14 @@ def selftest_windows(app: "App", out: str) -> None:
         res["ok"] = True
     except Exception as e:                          # report anything, never hang
         res["error"] = f"{type(e).__name__}: {e}"
+        # What pywebview and the window engine said: on a CI machine the log
+        # is the only place the real reason shows.
+        try:
+            tail = (app.d / "watchtower.log").read_text(encoding="utf-8", errors="replace")
+            res["error"] += " | log: " + " / ".join(
+                l.strip() for l in tail.splitlines()[-25:] if l.strip())[-1500:]
+        except OSError:
+            pass
     with open(out, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=1)
     app.quit()
