@@ -122,6 +122,10 @@ jobs:
           HUBCOUNTER_REQUIRE_MODEL: "1"
         run: python apps/hubcounter/smoke_test.py "${{ matrix.program }}"
 
+      - name: Hub Counter's app window
+        if: runner.os != 'Linux'
+        run: python apps/hubcounter/smoke_test.py --window "${{ matrix.program }}"
+
       - name: Get Watchtower
         run: git clone --depth 1 --branch "$(cat .github/watchtower-release)" https://github.com/arnan-bajaj/watchtower-fms.git watchtower-src
 

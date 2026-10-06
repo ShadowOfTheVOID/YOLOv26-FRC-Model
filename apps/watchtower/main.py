@@ -370,7 +370,13 @@ def selftest_windows(app: "App", out: str) -> None:
         pin = until(lambda: (lambda v: v if v and v != "——" else None)(app.home.evaluate_js(js_pin)))
         res["steps"].append(f"home filled by the API: control PIN shown = {pin == str(app.ev['pins'].get('control'))}")
         assert pin == str(app.ev["pins"].get("control")), f"Home did not show the control PIN {last_err}"
-        for name, marker in (("control", "FMS Control"), ("hub", "Hub Counter"), ("display", "")):
+        # Our camera setup page, inside Home's Hub cameras tab.
+        app.home.evaluate_js("show('hub')")
+        tab = until(lambda: app.home.evaluate_js("window.__hubLoaded === true"))
+        res["steps"].append(f"hub cameras tab: setup page loaded inside Home = {bool(tab)}")
+        assert tab, f"the Hub cameras tab never loaded {last_err}"
+        app.home.evaluate_js("show('home')")
+        for name, marker in (("control", "FMS Control"), ("display", "")):
             app.open_view(name)
             w = until(lambda: app.windows.get(name), 10)
             assert w is not None, f"{name}: no window"
@@ -459,7 +465,8 @@ def run_windows(d: Path, ev: dict, ctl, stop_all, hub: threading.Thread,
     app = App(d, ev, ctl, stop_all)
     home_html = (Path(getattr(sys, "_MEIPASS", HERE)) / "home.html").read_text(encoding="utf-8")
     app.home = webview.create_window("Watchtower", html=home_html, js_api=HomeApi(app),
-                                     width=1040, height=800, min_size=(760, 600))
+                                     # Room for the camera setup page in the Hub cameras tab.
+                                     width=1440, height=900, min_size=(980, 640))
     app.home.events.closed += app._close_all     # closing Home quits the app
     # Quit on the Hub cameras page ends the hub server: close the windows too.
     threading.Thread(target=lambda: (hub.join(), app._close_all()), daemon=True,

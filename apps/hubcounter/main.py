@@ -17,9 +17,12 @@ Share button does (apps/hubcounter/README.md has a start-at-boot service).
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
 import sys
+import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -80,6 +83,50 @@ def selftest_model(out: str) -> int:
     return code
 
 
+def run_window(ctl, server, d: Path, selftest: str = "") -> bool:
+    """The page in the app's own window (pywebview: WebKit on macOS, WebView2
+    on Windows), so the Hub Counter is an app, not a browser tab. Closing
+    the window quits, as the page's Quit does; Quit on the page closes the
+    window. False when this computer has no window toolkit."""
+    try:
+        import webview
+    except ImportError:
+        return False
+    win = webview.create_window("Hub Counter", URL, width=1440, height=900, min_size=(980, 640))
+    win.events.closed += ctl.quit                       # stop counting, end the server
+
+    def close_when_server_ends():
+        server.join()
+        try:
+            win.destroy()
+        except Exception:
+            pass
+    threading.Thread(target=close_when_server_ends, daemon=True).start()
+
+    def check():
+        # --selftest-window: the window loads the page (CI, on macOS and Windows).
+        res = {"ok": False}
+        try:
+            loaded = win.events.loaded.wait(90)
+            title = win.evaluate_js("document.title") if loaded else None
+            res = {"ok": bool(loaded and title == "Hub Counter"), "loaded": loaded, "title": title}
+        except Exception as e:                          # report anything, never hang
+            res["error"] = f"{type(e).__name__}: {e}"
+        Path(selftest).write_text(json.dumps(res))
+        ctl.quit()
+
+    try:
+        (d / "webview").mkdir(exist_ok=True)
+        webview.start(func=check if selftest else None, private_mode=False,
+                      storage_path=str(d / "webview"))
+    except Exception as e:                              # no GTK / WebKit, no display
+        print(f"no app window here ({type(e).__name__}: {e}); using the browser")
+        return False
+    ctl.quit()
+    server.join(timeout=5)
+    return True
+
+
 def main() -> int:
     ultralytics_home()
     if len(sys.argv) == 3 and sys.argv[1] == "--selftest-model":
@@ -87,8 +134,9 @@ def main() -> int:
     import argparse
     ap = argparse.ArgumentParser(
         prog="Hub Counter",
-        description="The hub fuel counter's page. Double-clicked, it opens in "
-                    "the browser. On a Pi with no screen: --share --pin 4821 "
+        description="The hub fuel counter. Double-clicked, it opens in its own "
+                    "window (the browser where there is no window toolkit: Linux, the "
+                    "Pi). On a Pi with no screen: --share --pin 4821 "
                     "--no-browser, then open http://<pi-address>:8791 elsewhere.")
     ap.add_argument("--share", action="store_true",
                     help="open the page to the Wi-Fi from the start (port 8791, behind a PIN)")
@@ -96,7 +144,9 @@ def main() -> int:
                     help="the PIN for --share, 4-8 digits (default: a new random one, "
                          "written to hubcounter.log)")
     ap.add_argument("--no-browser", action="store_true",
-                    help="do not open a browser (a Pi with no screen, a start-at-boot service)")
+                    help="no window and no browser (a Pi with no screen, a start-at-boot service)")
+    ap.add_argument("--selftest-window", metavar="RESULT", default="",
+                    help="open the app window, check the page loaded, write RESULT (JSON) and quit (CI)")
     # macOS passes -psn_* when an app is opened from Finder on old systems.
     args, _ = ap.parse_known_args()
     if args.pin and not (args.pin.isdigit() and 4 <= len(args.pin) <= 8):
@@ -112,8 +162,29 @@ def main() -> int:
         log = open(d / "hubcounter.log", "a", buffering=1)
         sys.stdout = sys.stderr = log
     from tbavid import hubweb
-    return hubweb.main(str(d / "cams.json"), PORT, "127.0.0.1", not args.no_browser,
-                       args.share, args.pin)
+    from tbavid.hubapp import HubController
+    ctl = HubController(str(d / "cams.json"))
+    server = threading.Thread(target=hubweb.serve, args=(ctl, PORT, "127.0.0.1"),
+                              kwargs={"open_browser": False, "share": args.share, "pin": args.pin},
+                              daemon=True, name="hub counter page")
+    server.start()
+    for _ in range(50):              # the page answers before any window opens
+        if already_running():
+            break
+        time.sleep(0.1)
+    if args.no_browser:              # a Pi with no screen: serve until Quit
+        server.join()
+        return 0
+    if run_window(ctl, server, d, args.selftest_window):
+        return 0
+    if args.selftest_window:         # asked to test the window, and there is none
+        Path(args.selftest_window).write_text(json.dumps(
+            {"ok": False, "error": "no window toolkit here (see hubcounter.log)"}))
+        ctl.quit()
+        return 1
+    webbrowser.open(URL)             # no window toolkit (Linux, Pi): the browser, as before
+    server.join()
+    return 0
 
 
 if __name__ == "__main__":

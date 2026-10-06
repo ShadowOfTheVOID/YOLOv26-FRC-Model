@@ -42,8 +42,10 @@ None of the builds is signed, so each system warns once:
 - Your setup is `Documents/Hub Counter/cams.json` (in your home folder) and
   is opened again next time. Count logs (`hubfeed_*.csv`) and
   `hubcounter.log` go there too.
-- Closing the browser tab leaves the counter running; open the program again
-  to get the page back. **Quit** (top right) stops it.
+- It opens in **its own window**, like any app (Mac and Windows). Closing
+  the window, or **Quit** (top right), stops it. On Linux and the Pi it
+  opens in the browser instead: closing that tab leaves it running, so
+  open the program again to get the page back.
 - The page answers only on the computer it runs on until you press
   **Share** (below).
 

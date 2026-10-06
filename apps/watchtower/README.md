@@ -24,10 +24,16 @@ Security → **Open Anyway**; on Windows, **More info → Run anyway**.
 A desktop app with its own windows, like any other program: no browser, no
 address bar, no terminal, and no files to edit.
 
+Watchtower combines our camera setup with Watchtower's own parts:
+
 - **Home window** (opens on launch):
   - **Overview:** whether the field system, the network and the cameras are
     working, and what is still missing before the first match (teams, date,
     name).
+  - **Hub cameras:** our camera setup page itself, inside Home: cameras,
+    hub outlines, ball size, fuel model, Start. It is the same page as the
+    Hub Counter app, already sending its counts to this Watchtower, and it
+    keeps counting while you use the other tabs.
   - **Phones & PINs:** the address phones open, as text and as a QR code, and
     the scorekeeper, ref and emcee PINs, with a button for new PINs.
   - **Event & schedule:** name, date, time zone, teams, qualification start,
@@ -35,8 +41,9 @@ address bar, no terminal, and no files to edit.
   - **The Blue Alliance:** event key, auth ID and secret, sending on/off.
   - **Game rules:** period and shift lengths, points, fouls and
     ranking-point thresholds.
-- **Scorekeeper, Hub cameras and Field display** each open in their own
-  window from Overview. Drag Field display to the projector and press Full
+- **Scorekeeper and Field display**, Watchtower's own pages, each open in
+  their own window from Overview (Watchtower keeps their logins, which a
+  page framed inside Home would lose). Drag Field display to the projector and press Full
   screen.
 - **Saving settings** checks them first (the scorekeeper PIN must differ from
   the others, times must be HH:MM, ...), writes them, and restarts the app in
