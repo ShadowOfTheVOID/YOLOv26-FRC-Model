@@ -39,7 +39,7 @@ from .hubapp import HubController, encode, fit_scale, list_dir, probe_cameras
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 SHARE_PORT = 8791
 OPEN_PATHS = {"/board", "/api/board", "/login"}   # no PIN on the shared port
-HOST_ONLY = {"quit", "share_on", "share_off"}     # never from a shared device
+HOST_ONLY = {"quit", "share_on", "share_off", "update_install"}  # never from a shared device
 MAX_TRIES = 5                                     # wrong PINs per address ...
 LOCKOUT_S = 60.0                                  # ... before a minute's wait
 
@@ -283,6 +283,9 @@ ACTIONS = {
     "stop": lambda c, b: c.stop(),
     "save": lambda c, b: c.save(b.get("path") or None),
     "quit": lambda c, b: c.quit(),
+    # One-click update (the Hub Counter app sets c.updater; tbavid/appupdate.py).
+    "update_install": lambda c, b: (c.updater.install(c.running) if c.updater
+                                    else {"error": "updates come with the app, not a checkout"}),
     "share_on": lambda c, b: c.share.start(b.get("pin", "")),
     "share_off": lambda c, b: c.share.stop(),
     "load": lambda c, b: c.load(b["path"]),

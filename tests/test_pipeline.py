@@ -3588,6 +3588,104 @@ def test_watchtower_home_api():
           and "EXTRA_IMPORTS = WEBVIEW" in spec)
 
 
+def test_app_update():
+    """One-click updates: offered only when newer, never while counting.
+
+    The user chose an Update button over automatic updates, so an update
+    cannot close the app in the middle of a match: install() refuses while
+    the cameras run. Builds without a real version (0.0.0: pull-request
+    builds, runs from a checkout) never ask GitHub at all.
+    """
+    import http.server
+    import json as _json
+    import tempfile
+    import threading as _t
+    from tbavid import appupdate
+    from tbavid.hubweb import HOST_ONLY, ACTIONS
+
+    vt = appupdate.version_tuple
+    check("versions compare as numbers (0.4.10 is newer than 0.4.9)", vt("v0.4.10") > vt("0.4.9"))
+    check("an unparsable version is never newer", vt("latest") == () and vt("") == ())
+    an = appupdate.asset_name
+    check("each OS fetches its own release file",
+          an("Watchtower", "darwin") == "Watchtower-mac.dmg"
+          and an("HubCounter", "win32") == "HubCounter-Setup-windows.exe"
+          and an("Watchtower", "linux", "aarch64") == "Watchtower-linux-arm64.tar.gz"
+          and an("Watchtower", "linux", "x86_64") == "Watchtower-linux-x64.tar.gz")
+
+    rel = {"tag_name": "v0.5.0", "html_url": "https://example.invalid/r",
+           "assets": [{"name": "Watchtower-mac.dmg", "browser_download_url": "https://example.invalid/w.dmg"},
+                      {"name": "Watchtower-Setup-windows.exe", "browser_download_url": "https://example.invalid/w.exe"}]}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = _json.dumps(rel).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    _t.Thread(target=srv.serve_forever, daemon=True).start()
+    old = appupdate.API
+    appupdate.API = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        exits = []
+        u = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: exits.append(1), platform="win32")
+        u.check()
+        st = u.status()
+        check("a newer release is offered with its installer",
+              st["available"] and st["can_install"] and st["latest"] == "v0.5.0"
+              and u.asset_url.endswith("w.exe"))
+        check("refused while the cameras count", "error" in u.install(counting=True) and not exits)
+        same = appupdate.Updater("Watchtower", "0.5.0", on_exit=lambda: None, platform="darwin")
+        same.check()
+        check("the same version offers nothing", not same.status()["available"])
+        lin = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="linux")
+        lin.check()
+        check("Linux/Pi is told about it but gets a link, not an installer",
+              lin.status()["available"] and not lin.status()["can_install"]
+              and "error" in lin.install(counting=False))
+        dev = appupdate.Updater("Watchtower", "0.0.0", on_exit=lambda: None, platform="win32")
+        dev.check()
+        check("pull-request builds never look", dev.status()["latest"] == "")
+        appupdate.API = "http://127.0.0.1:9/"          # offline at the venue
+        off = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="win32")
+        off.check(timeout=2)
+        check("offline: no update, no error shown", not off.status()["available"] and not off.status()["error"])
+    finally:
+        appupdate.API = old
+        srv.shutdown()
+
+    work = Path(tempfile.mkdtemp())
+    w = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="win32")
+    cmd = w.write_helper(work / "W-Setup.exe", work, pid=4242,
+                         exe=r"C:\Users\a\AppData\Local\Programs\Watchtower\Watchtower.exe").read_text()
+    check("Windows: waits for the app, installs silently into the same folder, reopens",
+          'PID eq 4242' in cmd and "/VERYSILENT" in cmd
+          and r'/DIR="C:\Users\a\AppData\Local\Programs\Watchtower"' in cmd
+          and cmd.index("/VERYSILENT") < cmd.index('start ""'))
+    m = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="darwin")
+    sh = m.write_helper(work / "W.dmg", work, pid=4242,
+                        exe="/Applications/Watchtower.app/Contents/MacOS/Watchtower").read_text()
+    check("macOS: replaces the .app in place, puts the old one back if the copy fails",
+          "kill -0 4242" in sh and 'mv "/Applications/Watchtower.app" "/Applications/Watchtower.app.old"' in sh
+          and 'ditto "$new" "/Applications/Watchtower.app"' in sh and 'open "/Applications/Watchtower.app"' in sh
+          and "hdiutil detach" in sh)
+    check("only the computer the app runs on can start an update",
+          "update_install" in HOST_ONLY and "update_install" in ACTIONS)
+    root = Path(__file__).resolve().parent.parent
+    spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
+    check("builds carry their version (the release tag) for the comparison",
+          "app_version.txt" in spec and "HUBCOUNTER_VERSION" in spec)
+    for app in ("hubcounter", "watchtower"):
+        src = (root / "apps" / app / "main.py").read_text()
+        check(f"the {app} app checks at start", "Updater(" in src and "check_async()" in src)
+
+
 def test_hub_scoreboard_view():
     """The live scoreboard: bioarena's score when linked, the camera's otherwise.
 
@@ -3998,7 +4096,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
-               test_watchtower_home_api):
+               test_watchtower_home_api, test_app_update):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

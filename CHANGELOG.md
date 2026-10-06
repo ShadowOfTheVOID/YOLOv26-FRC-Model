@@ -9,6 +9,19 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **One-click updates in both apps.** Each app asks GitHub for the latest
+  release when it opens (public API, no key; silent when offline). If it is
+  newer, the Hub Counter page and Watchtower's Overview show "Update
+  available" with an **Update** button -- never automatic, and refused while
+  the cameras count, so a match cannot be interrupted. Mac and Windows:
+  download, close, install in place (Windows: the installer silently into
+  the same folder; Mac: the .app swapped, the old one put back if the copy
+  fails), reopen. Linux/Pi: a link to the release page. Builds now carry
+  their release tag (`app_version.txt`); pull-request builds (0.0.0) never
+  check. Only v0.4.4 -> next can be the first real test: tested here with a
+  stand-in for GitHub and the helper scripts' text, not yet on a real Mac or
+  Windows install.
+
 ## v0.4.4 — 2026-10-06
 
 Watchtower becomes a desktop app: our camera setup page plus Watchtower's

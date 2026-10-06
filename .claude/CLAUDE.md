@@ -301,6 +301,12 @@ settings relaunches the process (fms.server reads config at import and starts
 an unstoppable TBA thread). Linux/Pi fall back to the browser. Qt's engine
 (local testing only) hangs with a persistent profile and a second window:
 WATCHTOWER_WEBVIEW_PRIVATE=1.
+One-click updates (`tbavid/appupdate.py`, stdlib): both apps check GitHub's
+latest release at start against `app_version.txt` (the spec writes it from
+HUBCOUNTER_VERSION; 0.0.0 = never check). Update button only, refused while
+counting (the user chose that over automatic). Mac/Windows install via a
+helper script that waits for the app to exit; Linux/Pi get a link. Untested
+on real installs until the release after v0.4.4 exists.
 Training/droplet notes: the MI300X guide is `deploy/AMD_DEVCLOUD.md`; the
 scouting dataset recipe is `autolabel_fuel` -> `autolabel_robots` (fuel
 greyed before YOLOE; unknown-alliance robots painted out; `--min-robots` 2)

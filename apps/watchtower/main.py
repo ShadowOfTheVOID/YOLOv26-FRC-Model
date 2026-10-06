@@ -145,6 +145,11 @@ class App:
         self.windows: dict = {}
         self.home = None
         self.ip = lan_ip()
+        # One-click updates, shown on Overview. Updating quits like Quit does
+        # (closing the windows lets the installer replace the app).
+        from tbavid.appupdate import Updater, build_version
+        self.updater = Updater("Watchtower", build_version(), on_exit=self.quit)
+        self.updater.check_async()
 
     # -- called from home.html ----------------------------------------------
     def state(self) -> dict:
@@ -248,6 +253,18 @@ class App:
     def quit(self) -> None:
         threading.Thread(target=self._close_all, daemon=True).start()
 
+    def update_status(self) -> dict:
+        return self.updater.status()
+
+    def update_install(self) -> dict:
+        return self.updater.install(bool(self.ctl.state().get("running")))
+
+    def open_release(self) -> None:
+        """'What's new' in the real browser: a link followed inside the app
+        window would take Home away."""
+        if self.updater.release_url:
+            webbrowser.open(self.updater.release_url)
+
     # -- lifecycle ------------------------------------------------------------
     def restart(self) -> None:
         self.stop_all()
@@ -321,6 +338,15 @@ class HomeApi:
 
     def quit(self):
         return self._app.quit()
+
+    def update_status(self):
+        return self._app.update_status()
+
+    def update_install(self):
+        return self._app.update_install()
+
+    def open_release(self):
+        return self._app.open_release()
 
 
 def selftest_windows(app: "App", out: str) -> None:
@@ -400,7 +426,8 @@ def selftest_windows(app: "App", out: str) -> None:
 
 HOME_API = ("state", "qr", "get_settings", "local_offset", "new_pins", "save_settings", "tba_teams",
             "parse_team_text",
-            "open_view", "fullscreen", "open_folder", "quit")
+            "open_view", "fullscreen", "open_folder", "quit", "update_status", "update_install",
+            "open_release")
 
 
 def serve_home(app: "App", token: str):

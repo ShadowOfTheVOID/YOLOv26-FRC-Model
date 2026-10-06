@@ -21,6 +21,14 @@ The Windows installer installs for your user only, so it needs no admin
 rights. On Linux keep the folder whole: the program needs the `_internal`
 folder beside it.
 
+**Updates** (from the release after v0.4.4): when a newer release is out,
+the page shows "Update available" with an **Update** button. Nothing
+installs by itself, and the button is greyed out while the cameras count.
+On Mac and Windows, Update downloads the new version, closes the app,
+installs it in place and opens it again (about a minute; cameras and
+settings are kept). On Linux and the Pi it only links to the release page.
+Offline it says nothing.
+
 ## First launch
 
 None of the builds is signed, so each system warns once:

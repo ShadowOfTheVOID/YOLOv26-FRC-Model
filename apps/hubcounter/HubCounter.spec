@@ -70,6 +70,15 @@ else:
     EXTRA_DATAS = collect_data_files("webview")
     EXTRA_IMPORTS = WEBVIEW
 
+# The build's version, read at run time by tbavid/appupdate.py to offer
+# one-click updates (0.0.0 for pull-request builds, which offer none).
+import tempfile
+_VDIR = tempfile.mkdtemp(prefix="appversion-")
+with open(os.path.join(_VDIR, "app_version.txt"), "w") as _f:
+    _f.write(os.environ.get("HUBCOUNTER_VERSION", "0.0.0").lstrip("v"))
+EXTRA_DATAS = EXTRA_DATAS + [(os.path.join(_VDIR, "app_version.txt"), ".")]
+EXTRA_IMPORTS = EXTRA_IMPORTS + ["tbavid.appupdate"]
+
 MODEL = os.path.join(ROOT, "models", "fuel_relabel.pt")
 if not os.path.isfile(MODEL) and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
     raise SystemExit(f"{MODEL} is missing (hub-app.yml downloads it from the release)")

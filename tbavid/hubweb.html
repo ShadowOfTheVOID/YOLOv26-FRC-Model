@@ -41,6 +41,10 @@ button,input,select{font:inherit;color:inherit}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;
   background:var(--panel2);border:1px solid var(--line);color:var(--ink2);white-space:nowrap}
 .pill.saved{color:var(--ok)} .pill.dirty{color:var(--warn)}
+/* One-click update (the Hub Counter app only: S.update is null elsewhere). */
+.updbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;border-radius:12px;
+  background:color-mix(in srgb,var(--accent) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line))}
+.updbar b{font-weight:650} .updbar .grow{flex:1} .updbar a{color:var(--accent)}
 
 /* ---------- buttons ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;
@@ -219,6 +223,10 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
 <div class="wrap">
   <div class="main">
+    <div class="updbar" id="updbar" style="display:none"><span>Update available: <b id="updver"></b>
+      <span class="muted" id="updnote"></span></span><span class="grow"></span>
+      <a id="updnotes" target="_blank" rel="noopener">What's new</a>
+      <button class="btn sm primary" id="updbtn" onclick="installUpdate()">Update</button></div>
     <div class="board">
       <div class="score red"><div class="lbl">RED HUB</div><div class="num tnum" id="red">0</div></div>
       <div class="score blue"><div class="lbl">BLUE HUB</div><div class="num tnum" id="blue">0</div></div>
@@ -370,7 +378,7 @@ async function refresh(){
   const dirty=JSON.stringify(S.cfg)!==savedCfg||!S.path;
   $("savestate").className="pill "+(dirty?"dirty":"saved");$("savestate").textContent=dirty?"Not saved":"Saved";
   if(!cam()&&S.cfg.cameras.length)cur=S.cfg.cameras[0].name;
-  renderCams();renderZones();renderSteps();renderLive();renderModel();handleJob();
+  renderCams();renderZones();renderSteps();renderLive();renderModel();renderUpdate();handleJob();
   const pic=cur&&S.pictures[cur];
   if(pic){const key=cur+":"+pic+":"+(S.running?Date.now():S.job.id);if(S.running||key!==lastPic){lastPic=key;loadImg();}}
   else{$("pic").style.display="none";$("empty").style.display="";}
@@ -415,6 +423,16 @@ function setStatus(kind,text,sub){$("sdot").className="dot "+kind;$("stext").tex
    take http://KEY@host:8000, bioarena a UDP host:port. Inside the Watchtower
    app this page said "Connected to bioarena" while sending to Watchtower. */
 function fieldName(){const t=(S.running?S.live.target:$("target").value)||"";return /^https?:/i.test(t.trim())?"Watchtower":"bioarena";}
+function renderUpdate(){const u=S.update,bar=$("updbar");
+  if(!u||!u.available){bar.style.display="none";return;}
+  bar.style.display="";$("updver").textContent=u.latest;$("updnotes").href=u.release_url||"#";
+  const busy=u.state==="downloading"||u.state==="installing",b=$("updbtn");
+  b.style.display=u.can_install?"":"none";b.disabled=busy||S.running;
+  $("updnote").textContent=u.state==="downloading"?`(downloading ${Math.round(u.progress*100)}%)`:
+    u.state==="installing"?"(installing, the app will reopen)":u.error?`(${u.error})`:
+    S.running?"(stop the cameras to update)":u.can_install?`(you have ${u.current})`:`(you have ${u.current}; download it from the release page)`;}
+async function installUpdate(){if(!confirm("Update now? The app closes, installs the new version and opens again (about a minute)."))return;
+  try{const r=await api("update_install",{});if(r&&r.error)toast(r.error,"bad");}catch(e){}refresh();}
 function renderLive(){const v=S.live,F=fieldName();
   for(const h of["red","blue"]){const e=$(h);if(v.counts[h]!==lastCounts[h]){e.textContent=v.counts[h];e.classList.remove("bump");void e.offsetWidth;if(v.counts[h]>lastCounts[h])e.classList.add("bump");lastCounts[h]=v.counts[h];}}
   if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:`Ready. Press Start to send counts to ${F}.`);
