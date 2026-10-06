@@ -4,6 +4,10 @@ name: release
 #
 #   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
 #
+# or, with no computer: GitHub (web or app) -> Releases -> Draft a new
+# release -> new tag vX.Y.Z on main -> Publish. That makes the release too;
+# this takes it over (CHANGELOG notes, archives, models).
+#
 # workflow_dispatch builds the same artifacts without publishing, so a
 # release can be rehearsed before the tag exists.
 on:
@@ -89,12 +93,19 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
+        # A release published from GitHub's web page or phone app creates the
+        # tag and the release together, so the release may already exist:
+        # then take it over -- the CHANGELOG notes replace whatever was typed,
+        # and the archives are attached -- rather than fail on "already exists".
         run: |
-          gh release create "${{ steps.v.outputs.version }}" \
-            --title "${{ steps.v.outputs.version }}" \
-            --notes-file notes.md \
-            dist/tbavid-*.zip dist/tbavid-*.tar.gz dist/tbavid-*.tar.xz \
-            dist/SHA256SUMS
+          v="${{ steps.v.outputs.version }}"
+          files="dist/tbavid-*.zip dist/tbavid-*.tar.gz dist/tbavid-*.tar.xz dist/SHA256SUMS"
+          if gh release view "$v" >/dev/null 2>&1; then
+            gh release edit "$v" --title "$v" --notes-file notes.md --draft=false
+            gh release upload "$v" $files --clobber
+          else
+            gh release create "$v" --title "$v" --notes-file notes.md $files
+          fi
 
       # Models are not in git (20 MB each, retrained rarely). Every release
       # carries the current pair, so one release page has everything; they
