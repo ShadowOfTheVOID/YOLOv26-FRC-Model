@@ -309,7 +309,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
     <section class="card step" id="st4">
       <h2><span class="n">4</span>Run</h2>
-      <label class="field"><span>bioarena address</span><input class="input tnum" id="target" value="10.0.100.5:8411"></label>
+      <label class="field"><span>Send counts to <span class="muted">(bioarena host:port, or Watchtower http://KEY@host:8000)</span></span><input class="input tnum" id="target" value="10.0.100.5:8411" oninput="this.dataset.edited=1"></label>
       <label class="switch"><span>Practice with a test receiver</span><input type="checkbox" id="practice"><i></i></label>
       <label class="switch"><span>Play recordings at real speed</span><input type="checkbox" id="realtime" checked><i></i></label>
       <label class="switch"><span>Save a CSV log of every count</span><input type="checkbox" id="csv" checked><i></i></label>
@@ -365,6 +365,7 @@ async function refresh(){
   $("sharetxt").textContent=S.share&&S.share.on?"Sharing":"Share";
   for(const [id,t,m] of S.log){logId=id;const d=$("log");d.textContent+=t+"  "+m+"\n";d.scrollTop=d.scrollHeight;}
   if(savedCfg===null)savedCfg=JSON.stringify(S.cfg);
+  if(S.default_target&&!$("target").dataset.edited&&$("target").value!==S.default_target)$("target").value=S.default_target;
   $("path").textContent=S.path?S.path.split("/").pop():"New setup";$("path").title=S.path||"";
   const dirty=JSON.stringify(S.cfg)!==savedCfg||!S.path;
   $("savestate").className="pill "+(dirty?"dirty":"saved");$("savestate").textContent=dirty?"Not saved":"Saved";

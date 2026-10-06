@@ -9,6 +9,27 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Added
+
+- **A Watchtower app: the FMS and the hub counter set up and started with a
+  double-click** (`apps/watchtower/`, `Watchtower-*.zip` / `.tar.gz` on every
+  release, all four OSes). Running Watchtower used to mean cloning it, a
+  venv, `python -m fms.init`, `./run.sh`, then typing
+  `http://<vision key>@host:8000` into the counter.
+  - **First launch:** the app makes `event.yaml` with PINs and a vision key.
+  - **Every launch:** it starts the FMS on :8000 for phones and the hub
+    counter already pointed at it, and opens a start page with every link
+    and PIN.
+  - **Inside:** the bundled Watchtower is its v0.1.0 tag
+    (`.github/watchtower-release`).
+  - **Checked here:** a packaged linux-x64 build counted Einstein 1 into its
+    own Watchtower live (59.9 fps, both hubs), the live page updates
+    (WebSocket) worked, a wrong vision key was refused (401), and Quit
+    stopped both. CI's smoke test repeats this on every OS.
+- **The hub counter's address box can be preset by the app that starts it**,
+  and its label now names both targets: bioarena `host:port`, or Watchtower
+  `http://KEY@host:8000`.
+
 ## v0.4.2 — 2026-10-06
 
 Every Hub Counter app can now run the colour + fuel-model blend, with

@@ -15,6 +15,12 @@
 # download, pipeline, ...) is never imported by them and is excluded.
 # HUBCOUNTER_REQUIRE_MODEL=1 makes a build without the model fail instead of
 # shipping one whose "Use built-in model" button is missing.
+#
+# The same spec builds the Watchtower app (apps/watchtower/) with
+# HUBAPP=watchtower: the hub counter plus the Watchtower FMS from a clone of
+# arnan-bajaj/watchtower-fms at WATCHTOWER_SRC (hub-app.yml clones the tag
+# in .github/watchtower-release). One spec, so the model, torchvision and
+# page fixes above apply to both.
 import os
 import sys
 
@@ -33,6 +39,24 @@ SCRAPER = ["tbavid.tba", "tbavid.download", "tbavid.pipeline", "tbavid.stream",
 HEAVY = ["tkinter", "PyQt5", "PyQt6", "PySide6", "IPython", "jupyter",
          "tensorboard", "onnx", "onnxruntime", "openvino", "tensorrt"]
 
+APP = os.environ.get("HUBAPP", "hubcounter")
+if APP == "watchtower":
+    WSRC = os.path.abspath(os.environ.get("WATCHTOWER_SRC") or os.path.join(ROOT, "watchtower-src"))
+    if not os.path.isfile(os.path.join(WSRC, "fms", "server.py")):
+        raise SystemExit(f"no Watchtower at {WSRC}: clone arnan-bajaj/watchtower-fms there")
+    sys.path.insert(0, WSRC)
+    NAME, ENTRY, BUNDLE_ID = "Watchtower", os.path.join(ROOT, "apps", "watchtower", "main.py"), "org.tbavid.watchtower"
+    EXTRA_PATH = [WSRC]
+    EXTRA_DATAS = [(os.path.join(WSRC, "fms", "static"), "fms/static"),
+                   (os.path.join(WSRC, "config", "event.example.yaml"), "config"),
+                   (os.path.join(WSRC, "config", "vision.example.yaml"), "config")]
+    # uvicorn picks its loop, protocols and lifespan by name at start.
+    EXTRA_IMPORTS = (collect_submodules("fms") + collect_submodules("uvicorn")
+                     + ["fastapi", "starlette", "websockets", "yaml", "requests"])
+else:
+    NAME, ENTRY, BUNDLE_ID = "Hub Counter", os.path.join(SPECPATH, "main.py"), "org.tbavid.hubcounter"
+    EXTRA_PATH, EXTRA_DATAS, EXTRA_IMPORTS = [], [], []
+
 MODEL = os.path.join(ROOT, "models", "fuel_relabel.pt")
 if not os.path.isfile(MODEL) and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
     raise SystemExit(f"{MODEL} is missing (hub-app.yml downloads it from the release)")
@@ -50,40 +74,42 @@ def torchvision_ops():
     return [(f, "torchvision") for f in found]
 
 a = Analysis(
-    [os.path.join(SPECPATH, "main.py")],
-    pathex=[ROOT],
+    [ENTRY],
+    pathex=[ROOT] + EXTRA_PATH,
     binaries=torchvision_ops(),
     datas=[(os.path.join(TB, "hubweb.html"), "tbavid"),
            (os.path.join(TB, "hubboard.html"), "tbavid")] + MODELS
           # Ultralytics reads its default.yaml and tracker yamls at import
           # and builds layers by name, so all of it goes in.
-          + collect_data_files("ultralytics"),
+          + collect_data_files("ultralytics") + EXTRA_DATAS,
     hiddenimports=["tbavid.hubweb", "tbavid.hubapp", "tbavid.hubcount",
                    "tbavid.hubfeed", "tbavid.fmslink", "tbavid.hubmodel",
                    "tbavid.count", "tbavid.trackvis", "cv2", "numpy", "yt_dlp",
-                   "torch", "torchvision"] + collect_submodules("ultralytics"),
+                   "torch", "torchvision"] + collect_submodules("ultralytics") + EXTRA_IMPORTS,
     excludes=SCRAPER + HEAVY,
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Hub Counter",
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name=NAME,
           console=False, upx=False)
-coll = COLLECT(exe, a.binaries, a.datas, name="Hub Counter", upx=False)
+coll = COLLECT(exe, a.binaries, a.datas, name=NAME, upx=False)
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="Hub Counter.app",
-        bundle_identifier="org.tbavid.hubcounter",
+        name=f"{NAME}.app",
+        bundle_identifier=BUNDLE_ID,
         info_plist={
             "CFBundleShortVersionString": os.environ.get("HUBCOUNTER_VERSION", "0.0.0"),
             # Without these macOS refuses the camera, and since macOS 15 the
             # local network (UDP to bioarena, HTTP to frc-fms), without asking.
             # The combo runs the model on Apple silicon's GPU (MPS).
             "NSCameraUsageDescription":
-                "Hub Counter counts fuel from the hub cameras.",
+                f"{NAME} counts fuel from the hub cameras.",
             "NSLocalNetworkUsageDescription":
-                "Hub Counter sends counts to the field system (bioarena or frc-fms) "
-                "and reads Wi-Fi cameras on this network.",
+                ("Watchtower serves the ref, emcee and field pages to phones on this "
+                 "network, and reads Wi-Fi cameras." if APP == "watchtower" else
+                 "Hub Counter sends counts to the field system (bioarena or frc-fms) "
+                 "and reads Wi-Fi cameras on this network."),
             "LSMinimumSystemVersion": "12.0",
             "NSHighResolutionCapable": True,
         },

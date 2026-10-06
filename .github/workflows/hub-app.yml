@@ -12,6 +12,11 @@ name: hub-app
 #   Linux x64              HubCounter-linux-x64.tar.gz   Hub Counter/Hub Counter
 #   Linux arm64 (Pi 4/5)   HubCounter-linux-arm64.tar.gz Hub Counter/Hub Counter
 #
+# Each job also builds the Watchtower app (apps/watchtower/, Watchtower-*.zip /
+# .tar.gz): the same hub counter plus the Watchtower FMS (arnan-bajaj/
+# watchtower-fms at the tag in .github/watchtower-release), set up and
+# started together on a double-click.
+#
 #   pull request touching the app or the hub code: build + smoke test each,
 #     kept as workflow artifacts (Actions tab -> the run -> Artifacts)
 #   "Run workflow" button: the same, on demand
@@ -22,6 +27,8 @@ on:
   pull_request:
     paths:
       - "apps/hubcounter/**"
+      - "apps/watchtower/**"
+      - ".github/watchtower-release"
       - "tbavid/hub*"
       - "tbavid/fmslink.py"
       - "tbavid/count.py"
@@ -42,17 +49,25 @@ jobs:
           - os: macos-14
             asset: HubCounter-mac.zip
             program: dist/Hub Counter.app/Contents/MacOS/Hub Counter
+            wasset: Watchtower-mac.zip
+            wprogram: dist/Watchtower.app/Contents/MacOS/Watchtower
           - os: windows-latest
             asset: HubCounter-windows.zip
             program: dist/Hub Counter/Hub Counter.exe
+            wasset: Watchtower-windows.zip
+            wprogram: dist/Watchtower/Watchtower.exe
           # 22.04's older glibc so the Linux builds also run on newer
           # Ubuntu / Debian and on Raspberry Pi OS (bookworm).
           - os: ubuntu-22.04
             asset: HubCounter-linux-x64.tar.gz
             program: dist/Hub Counter/Hub Counter
+            wasset: Watchtower-linux-x64.tar.gz
+            wprogram: dist/Watchtower/Watchtower
           - os: ubuntu-22.04-arm
             asset: HubCounter-linux-arm64.tar.gz
             program: dist/Hub Counter/Hub Counter
+            wasset: Watchtower-linux-arm64.tar.gz
+            wprogram: dist/Watchtower/Watchtower
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -79,6 +94,7 @@ jobs:
           pip install pyinstaller opencv-python-headless numpy yt-dlp
           pip install --no-deps ultralytics ultralytics-thop
           pip install matplotlib pillow pyyaml requests psutil polars
+          pip install fastapi uvicorn websockets      # Watchtower's server
 
       - name: The built-in fuel model, checked against CHANGELOG's checksum
         env:
@@ -105,22 +121,43 @@ jobs:
           HUBCOUNTER_REQUIRE_MODEL: "1"
         run: python apps/hubcounter/smoke_test.py "${{ matrix.program }}"
 
+      - name: Get Watchtower
+        run: git clone --depth 1 --branch "$(cat .github/watchtower-release)" https://github.com/arnan-bajaj/watchtower-fms.git watchtower-src
+
+      - name: Build Watchtower
+        env:
+          HUBAPP: watchtower
+          HUBCOUNTER_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
+          HUBCOUNTER_REQUIRE_MODEL: "1"
+        run: pyinstaller --noconfirm --workpath build/watchtower apps/hubcounter/HubCounter.spec
+
+      - name: Smoke test Watchtower (setup, FMS, counter preset to it, vision key, Quit)
+        run: python apps/watchtower/smoke_test.py "${{ matrix.wprogram }}"
+
       - name: Package
         run: |
-          case "${{ matrix.asset }}" in
-            *mac.zip)  ditto -c -k --keepParent "dist/Hub Counter.app" "${{ matrix.asset }}" ;;
-            *.zip)     python -c "import shutil; shutil.make_archive('${{ matrix.asset }}'[:-4], 'zip', 'dist', 'Hub Counter')" ;;
-            *.tar.gz)  tar -czf "${{ matrix.asset }}" -C dist "Hub Counter" ;;
-          esac
-          ls -l "${{ matrix.asset }}"
-          # A release asset over 2 GB is refused at upload, after the release
-          # is already public; stop here instead.
-          python -c "import os,sys; n=os.path.getsize('${{ matrix.asset }}'); print(n>>20,'MB'); sys.exit(n > 1900*2**20)"
+          pack() {   # folder name in dist/, asset file
+            case "$2" in
+              *mac.zip)  ditto -c -k --keepParent "dist/$1.app" "$2" ;;
+              *.zip)     python -c "import shutil,sys; shutil.make_archive(sys.argv[2][:-4], 'zip', 'dist', sys.argv[1])" "$1" "$2" ;;
+              *.tar.gz)  tar -czf "$2" -C dist "$1" ;;
+            esac
+            # A release asset over 2 GB is refused at upload, after the
+            # release is already public; stop here instead.
+            python -c "import os,sys; n=os.path.getsize(sys.argv[1]); print(sys.argv[1], n>>20,'MB'); sys.exit(n > 1900*2**20)" "$2"
+          }
+          pack "Hub Counter" "${{ matrix.asset }}"
+          pack "Watchtower" "${{ matrix.wasset }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.wasset }}
+          path: ${{ matrix.wasset }}
 
       # release.yml creates the release from the same tag; wait for it.
       - name: Attach to the release
@@ -132,4 +169,4 @@ jobs:
             gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
             sleep 15
           done
-          gh release upload "${{ github.ref_name }}" "${{ matrix.asset }}" --clobber
+          gh release upload "${{ github.ref_name }}" "${{ matrix.asset }}" "${{ matrix.wasset }}" --clobber

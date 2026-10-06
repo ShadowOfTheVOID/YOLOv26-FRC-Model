@@ -254,6 +254,10 @@ class HubController:
         self.stop_evt: Optional[threading.Event] = None
         self.listen_stop: Optional[threading.Event] = None
         self.feed_target = ""
+        # What the page's address box starts with. The Watchtower app sets
+        # it to its own server (http://KEY@127.0.0.1:8000), so counts go
+        # there without anyone typing the vision key.
+        self.default_target = ""
         if setup_path and os.path.exists(setup_path):
             self.load(setup_path)
 
@@ -614,6 +618,7 @@ class HubController:
                "wireless_warning": WIRELESS_WARNING,
                "problems": problems(cfg), "pictures": pictures,
                "builtin_model": bundled_model() is not None,
+               "default_target": self.default_target,
                "log": self.messages_since(last_log)}
         s = self.sender
         live = {"counts": {"red": 0, "blue": 0}, "linked": False, "reply": None,
