@@ -224,7 +224,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <div class="score blue"><div class="lbl">BLUE HUB</div><div class="num tnum" id="blue">0</div></div>
       <div class="card status">
         <div class="state"><span class="dot" id="sdot"></span><span id="stext">Stopped</span></div>
-        <div class="sub" id="ssub">Counts are sent to bioarena once you press Start.</div>
+        <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
         <div class="chips" id="schips"></div>
       </div>
     </div>
@@ -411,16 +411,21 @@ let behindSeen={},behindAt={};
 function modelBehind(v){const now=Date.now();for(const[n,k]of Object.entries(v.model_behind||{})){if(k>(behindSeen[n]||0))behindAt[n]=now;behindSeen[n]=k;}
   return Object.keys(behindAt).filter(n=>now-behindAt[n]<5000);}
 function setStatus(kind,text,sub){$("sdot").className="dot "+kind;$("stext").textContent=text;$("ssub").textContent=sub||"";}
-function renderLive(){const v=S.live;
+/* Which field system the counts go to, by its address: Watchtower / frc-fms
+   take http://KEY@host:8000, bioarena a UDP host:port. Inside the Watchtower
+   app this page said "Connected to bioarena" while sending to Watchtower. */
+function fieldName(){const t=(S.running?S.live.target:$("target").value)||"";return /^https?:/i.test(t.trim())?"Watchtower":"bioarena";}
+function renderLive(){const v=S.live,F=fieldName();
   for(const h of["red","blue"]){const e=$(h);if(v.counts[h]!==lastCounts[h]){e.textContent=v.counts[h];e.classList.remove("bump");void e.offsetWidth;if(v.counts[h]>lastCounts[h])e.classList.add("bump");lastCounts[h]=v.counts[h];}}
-  if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:"Ready. Press Start to send counts to bioarena.");
-  else if(v.stale.length)setStatus("bad","No picture",`${v.stale.join(", ")} stopped sending frames — bioarena shows OFFLINE.`);
+  if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:`Ready. Press Start to send counts to ${F}.`);
+  else if(v.stale.length)setStatus("bad","No picture",`${v.stale.join(", ")} stopped sending frames — ${F} shows it OFFLINE.`);
   else if((v.model_off||[]).length)setStatus("warn","Fuel model turned off",v.model_off.join(", ")+" — too slow to keep up, so it was dropped for this run. Counting by colour only.");
   else if(modelBehind(v).length)setStatus("warn","Model falling behind",modelBehind(v).join(", ")+" — the model is skipping frames, so its half of the count runs low. Use Apple silicon or a GPU, or turn the model off.");
   else if(Object.keys(v.slow||{}).length)setStatus("warn","Camera too slow",Object.entries(v.slow).map(([n,f])=>`${n} ${Math.round(f)} fps`).join(", ")+" — counts run low under 30 fps. Add light or lower the resolution.");
   else if(v.linked){const r=v.reply||{};const delayed=Object.values(S.kinds).includes("stream");
     // a Wi-Fi camera is not flagged here: its delay is small and shown as fps
-    setStatus(delayed?"warn":"ok","Connected to bioarena",`${(r.match_state||"").replace(/_/g," ").toLowerCase()} · ${r.shift||""} · ${v.rtt_ms} ms`+(delayed?" · counting from a delayed stream":""));}
+    const parts=[(r.match_state||"").replace(/_/g," ").toLowerCase(),r.shift||"",`${v.rtt_ms} ms`].filter(Boolean);
+    setStatus(delayed?"warn":"ok",`Connected to ${F}`,parts.join(" · ")+(delayed?" · counting from a delayed stream":""));}
   else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
   $("schips").innerHTML=Object.entries(v.cameras).map(([n,c])=>`<span class="chip">${esc(n)} <b class="tnum">${Math.round(c.fps)}</b> fps</span>`).join("");}
 function handleJob(){const j=S.job;
@@ -531,7 +536,7 @@ async function addStream(){
   try{const c=await api("add_camera",{source:url});cur=c.name;lastPic="";hint("Connecting to the stream…");grab();}catch(e){}}
 async function removeCam(name){if(await confirmBox("Remove camera",`Remove <b>${esc(name)}</b> and its outlines?`,"Remove")){await api("remove_camera",{name});if(cur===name)cur=null;lastPic="";refresh();}}
 async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked});
-  hint("Running. Leave it on across matches — bioarena marks each match's start itself.");}catch(e){}}
+  hint(`Running. Leave it on across matches — ${fieldName()} marks each match's start itself.`);}catch(e){}}
 function stop(){api("stop");hint("");}
 async function shareDialog(){
   const sh=S&&S.share||{on:false};
