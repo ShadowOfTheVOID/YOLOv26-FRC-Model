@@ -299,8 +299,9 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <button class="btn sm" onclick="pickFile('calibrate')"><svg><use href="#i-tune"/></svg>Calibrate from a hand-counted recording</button>
       </details>
       <details class="adv" id="modelbox"><summary>Fuel model <span class="muted" id="modelstate">(off)</span></summary>
-        <p class="muted" style="margin:10px 0 8px">Blends a trained model's count with the colour count. On four Einstein matches: 6.8% error against 10.1% for colour alone. Needs Apple silicon or a GPU.</p>
-        <div class="row"><button class="btn sm" onclick="pickFile('model')"><svg><use href="#i-open"/></svg><span id="modelpick">Choose model (.pt)</span></button>
+        <p class="muted" style="margin:10px 0 8px">Blends a trained model's count with the colour count. On four Einstein matches: 6.8% error against 10.1% for colour alone; on the Central Valley broadcast it was worse (34.5%), so check it on your camera. Fast enough on Apple silicon or an NVIDIA GPU; on a slower computer it turns itself off after about 10 s and counts by colour.</p>
+        <div class="row"><button class="btn sm" id="modelbuiltin" onclick="setModel('built-in')"><svg><use href="#i-tune"/></svg>Use built-in model</button>
+          <button class="btn sm" onclick="pickFile('model')"><svg><use href="#i-open"/></svg><span id="modelpick">Choose model (.pt)</span></button>
           <button class="btn sm" id="modeloff" onclick="setModel('')">Turn off</button></div>
         <div class="slider" id="mwrow" style="margin-top:10px"><span class="muted" style="width:92px">Model's share</span><input type="range" id="f_model_weight" min="0" max="1" step="0.1"><b class="tnum" id="mwv">0.5</b></div>
       </details>
@@ -368,7 +369,7 @@ async function refresh(){
   const dirty=JSON.stringify(S.cfg)!==savedCfg||!S.path;
   $("savestate").className="pill "+(dirty?"dirty":"saved");$("savestate").textContent=dirty?"Not saved":"Saved";
   if(!cam()&&S.cfg.cameras.length)cur=S.cfg.cameras[0].name;
-  renderCams();renderZones();renderSteps();renderLive();handleJob();
+  renderCams();renderZones();renderSteps();renderLive();renderModel();handleJob();
   const pic=cur&&S.pictures[cur];
   if(pic){const key=cur+":"+pic+":"+(S.running?Date.now():S.job.id);if(S.running||key!==lastPic){lastPic=key;loadImg();}}
   else{$("pic").style.display="none";$("empty").style.display="";}
@@ -391,8 +392,11 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";}
 function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
   $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;
-  const m=c.model||null;$("modelstate").textContent=m?"("+m.weights.split("/").pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
-  $("modeloff").style.display=m?"":"none";$("mwrow").style.display=m?"":"none";if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}}
+  renderModel();const m=c.model;if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}}
+/* On every refresh, not only in fillForm: turning the model on or off left
+   the label at "(off)" until another camera was picked. */
+function renderModel(){const c=cam();const m=c&&c.model||null;$("modelstate").textContent=m?"("+m.weights.split(/[\/\\]/).pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
+  $("modelbuiltin").style.display=S.builtin_model&&!(m&&m.weights==="built-in")?"":"none";$("modeloff").style.display=m?"":"none";$("mwrow").style.display=m?"":"none";}
 function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
   if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an outline around each hub's opening.</div>`;return;}
   for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";const ex=!!z.line;

@@ -25,6 +25,8 @@ model; `ModelEye` runs the network and needs requirements-detect.txt.
 from __future__ import annotations
 
 import math
+import os
+import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .count import REACQUIRE_PX, BallCounter
@@ -74,6 +76,36 @@ DEFAULT_MODEL = {"min_track": 2, "vanish": 2, "reacquire": 2,
 # 4.2% against 4.9% at 0.7) and the fits were flat from 0.5 to 0.7 (6.9 /
 # 6.6 / 6.7%), so the plain mean -- the least trust in the model.
 DEFAULT_WEIGHT = 0.5
+
+# `model: built-in` (cams.json, the page's "Use built-in model", frc-fms's
+# vision.yaml) is fuel_relabel.pt shipped inside the Hub Counter app, or
+# models/fuel_relabel.pt in a checkout. A name rather than the file's path,
+# because the path inside an app changes when the app is moved or updated
+# and the saved setup would then point at nothing.
+BUILTIN = "built-in"
+BUILTIN_FILE = "fuel_relabel.pt"
+_CHECKOUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def bundled_model() -> Optional[str]:
+    """Path of the built-in model, or None in a build or checkout without it."""
+    roots = [getattr(sys, "_MEIPASS", None), _CHECKOUT]
+    for r in roots:
+        p = os.path.join(r, "models", BUILTIN_FILE) if r else ""
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def resolve_weights(weights: str) -> str:
+    """A weights path as given, or the built-in model's real path."""
+    if weights == BUILTIN:
+        p = bundled_model()
+        if p is None:
+            raise FileNotFoundError(f"no built-in fuel model here: put {BUILTIN_FILE} "
+                                    f"in models/ or choose the .pt file")
+        return p
+    return weights
 REF_OUTLINE_PX = 194.0  # the broadcast outline width REACQUIRE_PX was set on
 
 
@@ -166,7 +198,7 @@ class ModelEye:
     def __init__(self, weights: str, polys: Dict[str, Sequence[Point]],
                  device: str = ""):
         from ultralytics import YOLO
-        self.model = YOLO(weights)
+        self.model = YOLO(resolve_weights(weights))
         self.device = device or pick_device()
         self.polys = dict(polys)
         self.crops: Dict[str, Tuple[int, int, int, int]] = {}

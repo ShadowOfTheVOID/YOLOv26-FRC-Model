@@ -126,8 +126,9 @@ Linux or Raspberry Pi. Download yours from the release, unzip it, and
 double-click. It opens
 this page in your browser with nothing to install and no terminal. The
 setup and count logs go to `Documents/Hub Counter/`. Stop it with the
-page's **Quit** button. It counts by colour; the fuel-model blend still
-needs the terminal version below.
+page's **Quit** button. The fuel model is built in (**Fuel model -> Use
+built-in model**); it keeps up on Apple silicon, and on a CPU-only PC or Pi
+it turns itself off and counts by colour.
 
 ```bash
 .venv/bin/python run.py hubgui --setup cams.json            # opens in your browser
