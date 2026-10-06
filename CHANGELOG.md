@@ -11,6 +11,22 @@ the build rather than publishing an empty release.
 
 ### Changed
 
+- **Proper installers instead of zips** for both apps:
+  - **Mac:** `Watchtower-mac.dmg` / `HubCounter-mac.dmg`. Open it and drag
+    the app onto Applications.
+  - **Windows:** `Watchtower-Setup-windows.exe` /
+    `HubCounter-Setup-windows.exe`, an Inno Setup installer
+    (`apps/installer/windows.iss`). It installs per user, so no admin
+    rights are needed, adds a Start-menu shortcut (desktop optional) and an
+    uninstaller, and a newer one upgrades in place.
+  - **Why:** the zip had to be extracted whole and run from wherever it
+    landed. Not one self-extracting exe: with PyTorch inside, it would
+    unpack ~1 GB on every start.
+  - **CI tests what people download:** on Mac, the app is run out of the
+    mounted .dmg; on Windows, the installer runs silently and the
+    installed apps are smoke-tested.
+  - Linux and the Pi keep the `.tar.gz`.
+
 - **The Watchtower app is a desktop app with its own windows**, not pages in
   the browser. It is built on pywebview: WebKit on macOS, WebView2 on
   Windows.

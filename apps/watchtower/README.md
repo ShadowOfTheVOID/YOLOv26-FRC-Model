@@ -8,15 +8,16 @@ no vision key to type.
 
 From the repository's **Releases**, download the one for your computer:
 
-| computer | download |
-|---|---|
-| Mac (Apple silicon) | `Watchtower-mac.zip` |
-| Windows 10/11 | `Watchtower-windows.zip` |
-| Linux PC | `Watchtower-linux-x64.tar.gz` |
-| Raspberry Pi 4/5 (64-bit Pi OS) | `Watchtower-linux-arm64.tar.gz` |
+| computer | download | install |
+|---|---|---|
+| Mac (Apple silicon) | `Watchtower-mac.dmg` | open it, drag **Watchtower** onto **Applications** |
+| Windows 10/11 | `Watchtower-Setup-windows.exe` | run it: Start-menu shortcut (desktop optional) and an uninstaller, no admin needed |
+| Linux PC | `Watchtower-linux-x64.tar.gz` | extract, run **Watchtower** |
+| Raspberry Pi 4/5 (64-bit Pi OS) | `Watchtower-linux-arm64.tar.gz` | same as Linux |
 
-Unzip and open it as for the Hub Counter app (`apps/hubcounter/README.md`,
-including the one-time "unverified app" warning on Mac and Windows).
+The first open shows the same one-time "unverified app" warning as the Hub
+Counter app (`apps/hubcounter/README.md`): on Mac, System Settings → Privacy &
+Security → **Open Anyway**; on Windows, **More info → Run anyway**.
 
 ## What it is
 

@@ -7,8 +7,8 @@ name: hub-app
 # so every build can run the colour+model blend; the smoke test runs the
 # model once inside each build.
 #
-#   macOS (Apple silicon)  HubCounter-mac.zip            Hub Counter.app
-#   Windows                HubCounter-windows.zip        Hub Counter\Hub Counter.exe
+#   macOS (Apple silicon)  HubCounter-mac.dmg            drag Hub Counter.app to Applications
+#   Windows                HubCounter-Setup-windows.exe  installer (Start menu, uninstaller)
 #   Linux x64              HubCounter-linux-x64.tar.gz   Hub Counter/Hub Counter
 #   Linux arm64 (Pi 4/5)   HubCounter-linux-arm64.tar.gz Hub Counter/Hub Counter
 #
@@ -47,14 +47,14 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            asset: HubCounter-mac.zip
+            asset: HubCounter-mac.dmg
             program: dist/Hub Counter.app/Contents/MacOS/Hub Counter
-            wasset: Watchtower-mac.zip
+            wasset: Watchtower-mac.dmg
             wprogram: dist/Watchtower.app/Contents/MacOS/Watchtower
           - os: windows-latest
-            asset: HubCounter-windows.zip
+            asset: HubCounter-Setup-windows.exe
             program: dist/Hub Counter/Hub Counter.exe
-            wasset: Watchtower-windows.zip
+            wasset: Watchtower-Setup-windows.exe
             wprogram: dist/Watchtower/Watchtower.exe
           # 22.04's older glibc so the Linux builds also run on newer
           # Ubuntu / Debian and on Raspberry Pi OS (bookworm).
@@ -141,12 +141,30 @@ jobs:
         if: runner.os != 'Linux'
         run: python apps/watchtower/smoke_test.py --window "${{ matrix.wprogram }}"
 
+      # Mac: a .dmg holding the app and an Applications link to drag it onto.
+      # Windows: an Inno Setup installer (apps/installer/windows.iss), per
+      # user, with Start-menu shortcut and uninstaller. Linux: tar.gz.
+      - name: Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || choco install innosetup -y --no-progress
+
       - name: Package
+        env:
+          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
         run: |
           pack() {   # folder name in dist/, asset file
             case "$2" in
-              *mac.zip)  ditto -c -k --keepParent "dist/$1.app" "$2" ;;
-              *.zip)     python -c "import shutil,sys; shutil.make_archive(sys.argv[2][:-4], 'zip', 'dist', sys.argv[1])" "$1" "$2" ;;
+              *.dmg)
+                stage=$(mktemp -d)
+                cp -R "dist/$1.app" "$stage/"
+                ln -s /Applications "$stage/Applications"
+                hdiutil create -volname "$1" -srcfolder "$stage" -ov -format UDZO "$2" ;;
+              *Setup-windows.exe)
+                # Absolute paths: Inno resolves relative ones from the .iss's folder.
+                "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" -Q "-DAppName=$1" "-DAppExe=$1.exe" \
+                  "-DSrcDir=$(cygpath -w "$PWD/dist/$1")" "-DOutFile=${2%.exe}" \
+                  "-DAppVersion=${APP_VERSION#v}" "-O$(cygpath -w "$PWD")" apps/installer/windows.iss ;;
               *.tar.gz)  tar -czf "$2" -C dist "$1" ;;
             esac
             # A release asset over 2 GB is refused at upload, after the
@@ -155,6 +173,30 @@ jobs:
           }
           pack "Hub Counter" "${{ matrix.asset }}"
           pack "Watchtower" "${{ matrix.wasset }}"
+
+      # What people download is what gets checked: the app run out of the
+      # mounted .dmg, and the apps the installer put in place.
+      - name: Check the downloads (mounted .dmg / installed apps)
+        if: runner.os != 'Linux'
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            mnt=$(mktemp -d)
+            hdiutil attach "${{ matrix.wasset }}" -nobrowse -readonly -mountpoint "$mnt"
+            ls "$mnt"
+            [ -L "$mnt/Applications" ] || { echo "::error::no Applications link in the dmg"; exit 1; }
+            python apps/watchtower/smoke_test.py "$mnt/Watchtower.app/Contents/MacOS/Watchtower"
+            hdiutil detach "$mnt"
+          else
+            for app in "Watchtower" "Hub Counter"; do
+              setup="${{ matrix.wasset }}"; [ "$app" = "Hub Counter" ] && setup="${{ matrix.asset }}"
+              dir="$RUNNER_TEMP/installed/$app"
+              ./"$setup" //VERYSILENT //SUPPRESSMSGBOXES //CURRENTUSER //NORESTART "//DIR=$(cygpath -w "$dir")"
+              for i in $(seq 1 60); do [ -f "$dir/$app.exe" ] && break; sleep 2; done
+              ls "$dir" | head
+            done
+            python apps/watchtower/smoke_test.py "$RUNNER_TEMP/installed/Watchtower/Watchtower.exe"
+            python apps/hubcounter/smoke_test.py "$RUNNER_TEMP/installed/Hub Counter/Hub Counter.exe"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

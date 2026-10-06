@@ -124,7 +124,8 @@ tag `v0.1.0`, paste `watchtower-v0.1.0.md`, Publish.
 
 ## 0006: the Watchtower app in Watchtower's own releases
 
-Watchtower's own releases then carry `Watchtower-mac.zip`, `-windows.zip`,
+Watchtower's own releases then carry `Watchtower-mac.zip`, `-windows.zip`
+(0006 predates this repository's .dmg and Windows installer, from v0.4.4),
 `-linux-x64.tar.gz` and `-linux-arm64.tar.gz`. These are the same app as on
 YOLOv26-FRC-Model's releases, built with Watchtower's own code. The
 launcher, spec and smoke test stay in this repository; its workflow checks

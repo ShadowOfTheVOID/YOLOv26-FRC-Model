@@ -3362,6 +3362,11 @@ def test_hub_counter_app():
               "HUBCOUNTER_REQUIRE_MODEL" in wf and "fuel_relabel.pt" in wf)
         check("CI builds and smoke-tests the Watchtower app beside the Hub Counter",
               "apps/watchtower/smoke_test.py" in wf and "matrix.wasset" in wf)
+        iss = (root / "apps" / "installer" / "windows.iss").read_text()
+        check("Mac gets a .dmg and Windows an installer, and CI runs what they install",
+              "Watchtower-mac.dmg" in wf and "Watchtower-Setup-windows.exe" in wf
+              and "hdiutil attach" in wf and "//VERYSILENT" in wf
+              and "PrivilegesRequired=lowest" in iss and "{autoprograms}" in iss)
     check("and asks macOS for the camera and the local network, or it gets neither",
           "NSCameraUsageDescription" in spec and "NSLocalNetworkUsageDescription" in spec)
 
