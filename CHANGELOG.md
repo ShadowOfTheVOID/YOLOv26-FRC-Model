@@ -22,7 +22,10 @@ the build rather than publishing an empty release.
     GitHub's 2 GB asset limit. On a CPU the model turns itself off after
     ~10 s and the hub counts by colour. A linux-x64 build tried here, on 4
     cores, did exactly that on Einstein 1.
-  - **Size:** each download is ~400 MB (linux-x64 412 MB) instead of 60-100 MB.
+  - **Size:** each download is 300-400 MB (Windows 288 MB, linux-x64 398 MB)
+    instead of 60-100 MB. Both Linux builds take PyTorch's CPU wheels: PyPI's
+    arm64 torch carries CUDA, and the Pi build came out at 3049 MB, which a
+    release would refuse (2 GB per file). A build over 1.9 GB now fails CI.
   - **The smoke test now runs the model inside each build.** The first build
     passed every page check, yet failed on the first prediction:
     torchvision's `_C_stable` ops (`nms`) are loaded by path, so neither the

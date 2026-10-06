@@ -5,8 +5,9 @@
 #   pip install --no-deps ultralytics ultralytics-thop
 #   pip install matplotlib pillow pyyaml requests psutil polars
 #   pyinstaller apps/hubcounter/HubCounter.spec      (from the repo root)
-# (hub-app.yml does exactly this; on Linux x64 it takes torch from PyTorch's
-# CPU index, since PyPI's Linux torch carries CUDA and would be ~3 GB.)
+# (hub-app.yml does exactly this; on Linux, x64 and arm64, it takes torch from
+# PyTorch's CPU index: PyPI's Linux torch carries CUDA, and the arm64 build
+# came out at 3049 MB, over GitHub's 2 GB asset limit.)
 #
 # What goes in: tbavid's hub modules and the two pages they serve, OpenCV,
 # PyTorch + Ultralytics for the colour+model blend, and models/fuel_relabel.pt

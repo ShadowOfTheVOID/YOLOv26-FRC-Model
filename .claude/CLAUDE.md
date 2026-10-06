@@ -279,7 +279,7 @@ against 60 fps video).
 Hub Counter app (`apps/hubcounter/`, hub-app.yml, all four OSes): bundles
 torch + Ultralytics + fuel_relabel.pt (`model: built-in`, hubmodel.bundled_model;
 the source release is `.github/models-release`, and release.yml copies both .pt
-files onto every release). Linux x64 must take CPU torch (CUDA wheel ~3 GB >
+files onto every release). Both Linux builds take CPU torch (PyPI's carries CUDA: arm64 3 GB >
 2 GB asset limit). torchvision's `_C_stable` ops are loaded by path, so the
 spec lists them by hand; the smoke test's `--selftest-model` is what catches
 that, since every page check passed without them.

@@ -63,14 +63,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      # PyPI's Linux x64 torch carries CUDA (~3 GB, over GitHub's 2 GB asset
-      # limit); PyTorch's CPU index has the same torch without it. Mac (MPS),
-      # Windows and Linux arm64 wheels on PyPI are already the right ones.
+      # PyPI's Linux torch carries CUDA on both x64 and arm64: the arm64 build
+      # came out at 3049 MB, over GitHub's 2 GB asset limit. PyTorch's CPU
+      # index has the same torch without it. Mac (MPS) and Windows wheels on
+      # PyPI are CPU/MPS already (Windows 288 MB, Linux x64 CPU 398 MB).
       # Ultralytics --no-deps, or it pulls opencv-python beside the headless
       # one (116 MB twice) and SciPy, which counting never imports.
       - name: Install the build tools, OpenCV, PyTorch and Ultralytics
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+          if [ "${{ runner.os }}" = "Linux" ]; then
             pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           else
             pip install torch torchvision
@@ -112,6 +113,9 @@ jobs:
             *.tar.gz)  tar -czf "${{ matrix.asset }}" -C dist "Hub Counter" ;;
           esac
           ls -l "${{ matrix.asset }}"
+          # A release asset over 2 GB is refused at upload, after the release
+          # is already public; stop here instead.
+          python -c "import os,sys; n=os.path.getsize('${{ matrix.asset }}'); print(n>>20,'MB'); sys.exit(n > 1900*2**20)"
 
       - uses: actions/upload-artifact@v4
         with:

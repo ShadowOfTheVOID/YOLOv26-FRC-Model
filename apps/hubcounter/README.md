@@ -76,7 +76,7 @@ lets you set it up from your laptop's browser at `http://<pi-address>:8791`.
 ## The fuel model (colour + model blend)
 
 Every build has PyTorch and the fuel model (`fuel_relabel.pt`) inside, so
-each download is about 400 MB. Open **Fuel model** on the page and press
+each download is 300-400 MB. Open **Fuel model** on the page and press
 **Use built-in model**; or pick another `.pt` with **Choose model**.
 
 | computer | runs the model on | in practice |
@@ -96,7 +96,7 @@ On the Central Valley broadcast the blend was worse than colour alone
 ## Build it yourself (on the OS you want it for)
 
 ```bash
-pip install torch torchvision     # Linux x64: add --index-url https://download.pytorch.org/whl/cpu
+pip install torch torchvision     # Linux (x64 or Pi): add --index-url https://download.pytorch.org/whl/cpu
 pip install pyinstaller opencv-python-headless numpy yt-dlp
 pip install --no-deps ultralytics ultralytics-thop
 pip install matplotlib pillow pyyaml requests psutil polars
