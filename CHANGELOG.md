@@ -9,6 +9,22 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.4.4 — 2026-10-06
+
+Watchtower becomes a desktop app with its own windows and every setting
+edited inside it (event, teams, PINs, schedule, TBA, game rules), with
+the team list imported from The Blue Alliance in one click and no key.
+Both apps now install like other apps: a .dmg on Mac and an installer on
+Windows.
+
+| app | Mac | Windows | Linux PC | Raspberry Pi |
+|---|---|---|---|---|
+| Watchtower (FMS + hub counter) | `Watchtower-mac.dmg` | `Watchtower-Setup-windows.exe` | `Watchtower-linux-x64.tar.gz` | `Watchtower-linux-arm64.tar.gz` |
+| Hub Counter | `HubCounter-mac.dmg` | `HubCounter-Setup-windows.exe` | `HubCounter-linux-x64.tar.gz` | `HubCounter-linux-arm64.tar.gz` |
+
+None is signed: the first open asks once (Mac: System Settings → Privacy
+& Security → Open Anyway; Windows: More info → Run anyway).
+
 ### Changed
 
 - **Proper installers instead of zips** for both apps:
