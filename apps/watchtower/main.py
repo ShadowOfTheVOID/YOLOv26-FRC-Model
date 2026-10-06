@@ -272,6 +272,57 @@ class App:
                 pass
 
 
+class HomeApi:
+    """What home.html may call (window.pywebview.api), and nothing else.
+
+    pywebview builds the page's API by walking every public attribute of
+    this object, recursively. Handed App itself, it walked into App.home --
+    the window -- and on Windows read WebView2's controller from a
+    background thread: "CoreWebView2Controller members can only be accessed
+    from the UI thread", and the window never finished loading (macOS's
+    WebKit let it pass). So only methods here, and the app behind an
+    underscore name, which pywebview skips."""
+
+    def __init__(self, app: "App"):
+        self._app = app
+
+    def state(self):
+        return self._app.state()
+
+    def qr(self, text):
+        return self._app.qr(text)
+
+    def get_settings(self):
+        return self._app.get_settings()
+
+    def local_offset(self, date):
+        return self._app.local_offset(date)
+
+    def new_pins(self):
+        return self._app.new_pins()
+
+    def save_settings(self, values):
+        return self._app.save_settings(values)
+
+    def tba_teams(self, event_key, read_key):
+        return self._app.tba_teams(event_key, read_key)
+
+    def parse_team_text(self, text):
+        return self._app.parse_team_text(text)
+
+    def open_view(self, name):
+        return self._app.open_view(name)
+
+    def fullscreen(self, name):
+        return self._app.fullscreen(name)
+
+    def open_folder(self):
+        return self._app.open_folder()
+
+    def quit(self):
+        return self._app.quit()
+
+
 def selftest_windows(app: "App", out: str) -> None:
     """--selftest-window: what CI can check of the real windows on each OS.
     Home loads and fills itself through the Python API; Scorekeeper, Hub
@@ -407,7 +458,7 @@ def run_windows(d: Path, ev: dict, ctl, stop_all, hub: threading.Thread,
         return False
     app = App(d, ev, ctl, stop_all)
     home_html = (Path(getattr(sys, "_MEIPASS", HERE)) / "home.html").read_text(encoding="utf-8")
-    app.home = webview.create_window("Watchtower", html=home_html, js_api=app,
+    app.home = webview.create_window("Watchtower", html=home_html, js_api=HomeApi(app),
                                      width=1040, height=800, min_size=(760, 600))
     app.home.events.closed += app._close_all     # closing Home quits the app
     # Quit on the Hub cameras page ends the hub server: close the windows too.

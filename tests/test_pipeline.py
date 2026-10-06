@@ -3543,6 +3543,35 @@ def test_watchtower_settings():
     check("no internet says so", "online" in St.tba_teams("2026catstd", "goodkey")["error"])
 
 
+def test_watchtower_home_api():
+    """The Home window's API object holds methods and nothing pywebview could walk into.
+
+    pywebview exposes a js_api object by walking every public attribute,
+    recursively. Given the app object, it walked into the window and, on
+    Windows, read WebView2's controller off the UI thread: the window never
+    loaded. HomeApi has only methods, and every call home.html makes must be
+    one of them (and of the browser-mode list, HOME_API).
+    """
+    import ast
+    import re
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "apps" / "watchtower" / "main.py").read_text()
+    tree = ast.parse(src)
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HomeApi")
+    methods = {f.name for f in cls.body if isinstance(f, ast.FunctionDef) and not f.name.startswith("_")}
+    stores = [t.attr for f in cls.body if isinstance(f, ast.FunctionDef) for n in ast.walk(f)
+              if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Attribute)]
+    check("HomeApi keeps only private attributes (pywebview skips '_' names)",
+          stores and all(a.startswith("_") for a in stores))
+    page = (root / "apps" / "watchtower" / "home.html").read_text()
+    calls = set(re.findall(r"api\(\)\.(\w+)\(", page))
+    check("every call home.html makes is on HomeApi", calls and calls <= methods)
+    i = src.index("HOME_API = (")
+    listed = set(re.findall(r'"(\w+)"', src[i:src.index(")", i)]))
+    check("and the browser-mode list allows exactly the same calls", listed == methods)
+    check("the window is given HomeApi, not the app", "js_api=HomeApi(app)" in src)
+
+
 def test_hub_scoreboard_view():
     """The live scoreboard: bioarena's score when linked, the camera's otherwise.
 
@@ -3952,7 +3981,8 @@ def main() -> int:
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
-               test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings):
+               test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
+               test_watchtower_home_api):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
