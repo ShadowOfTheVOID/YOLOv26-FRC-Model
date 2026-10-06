@@ -9,6 +9,22 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.4.2 — 2026-10-06
+
+Every Hub Counter app can now run the colour + fuel-model blend, with
+`fuel_relabel.pt` built in, and every release carries both models. On a Mac
+(Apple silicon) the model runs on the GPU; on Windows, Linux and the Pi it
+runs on the CPU, where it usually cannot keep up and turns itself off. A Pi
+can host the page on Wi-Fi with no screen (`--share --pin N --no-browser`,
+start at boot).
+
+| app | download |
+|---|---|
+| Mac (Apple silicon) | `HubCounter-mac.zip` |
+| Windows 10/11 | `HubCounter-windows.zip` |
+| Linux PC | `HubCounter-linux-x64.tar.gz` |
+| Raspberry Pi 4/5 (64-bit Pi OS) | `HubCounter-linux-arm64.tar.gz` |
+
 ### Added
 
 - **Every Hub Counter app can run the colour + model blend.** The builds
