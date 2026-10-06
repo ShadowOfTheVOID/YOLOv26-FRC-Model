@@ -21,7 +21,7 @@
   #define AppExe AppName + ".exe"
 #endif
 #ifndef SrcDir
-  #define SrcDir "dist\" + AppName
+  #define SrcDir AddBackslash("dist") + AppName
 #endif
 #ifndef OutFile
   #define OutFile AppName + "-Setup-windows"
@@ -32,7 +32,9 @@
 
 [Setup]
 ; A fixed id per app, so a newer installer upgrades the old install in place.
-AppId={{#AppName}-ShadowOfTheVOID-YOLOv26-FRC-Model}
+; Not in braces: "{{#AppName}..." became "{Hub Counter-...}" after the
+; preprocessor, which Inno then read as an unknown {constant}.
+AppId={#AppName}-ShadowOfTheVOID-YOLOv26-FRC-Model
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=ShadowOfTheVOID / YOLOv26-FRC-Model
@@ -42,8 +44,9 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; "x64", not 6.3's "x64compatible": the runner's preinstalled Inno may be older.
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
 OutputDir=.
 OutputBaseFilename={#OutFile}
 Compression=lzma2/normal
