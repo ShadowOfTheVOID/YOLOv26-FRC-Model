@@ -9,6 +9,15 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.4.1 — 2026-10-06
+
+The hub counter as a double-click app for Mac, Windows, Linux and Raspberry
+Pi, shareable on Wi-Fi with a PIN; a counter plugin system for frc-fms with
+our colour and combo counters as plugins; and outline guidance from the
+Central Valley broadcast (top edge 3-4 balls above the hood: 38.9% -> 6.4%).
+The fuel models are unchanged; use v0.4.0's `fuel_relabel.pt`. The app
+builds are attached by the hub-app workflow.
+
 ### Added
 
 - **A counter plugin system for frc-fms (watchtower-fms), and our counters as
