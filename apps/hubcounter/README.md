@@ -58,6 +58,53 @@ If the other device cannot connect, the network may keep devices apart
 (common on venue and school Wi-Fi; use your own router), or the firewall
 blocks port 8791 (allow Hub Counter when asked).
 
+## Raspberry Pi as the Wi-Fi host (no screen)
+
+Download **`HubCounter-linux-arm64.tar.gz`** (64-bit Pi OS, Pi 4 or 5). Once,
+over SSH:
+
+```bash
+tar -xzf HubCounter-linux-arm64.tar.gz          # makes ~/Hub Counter/
+"$HOME/Hub Counter/Hub Counter" --share --pin 482193 --no-browser
+```
+
+Then on a laptop or phone on the same Wi-Fi, open
+`http://<pi-name>.local:8791` (e.g. `http://hubpi.local:8791`; or the Pi's
+address) and enter the PIN. Set the cameras up from there. The scoreboard is
+at `/board` with no PIN. Ctrl-C stops it.
+
+To start it whenever the Pi boots, save this as
+`/etc/systemd/system/hubcounter.service` (change `pi` to your user name,
+and the PIN):
+
+```ini
+[Unit]
+Description=Hub Counter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+ExecStart="/home/pi/Hub Counter/Hub Counter" --share --pin 482193 --no-browser
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now hubcounter
+```
+
+- The setup and logs are in `~/Documents/Hub Counter/` on the Pi, and the
+  setup is opened again after every reboot.
+- **Leave the fuel model off on a Pi.** It cannot keep up on the Pi's CPU,
+  and turns itself off after ~10 s anyway.
+- Give the Pi a fixed address on your router, so the link and bioarena /
+  frc-fms settings stay the same between boots.
+- Quit and stopping the share work only on the Pi itself. From another
+  device, stop it with `sudo systemctl stop hubcounter` over SSH.
+
 ## No app: run it as a website
 
 The app is the same page as the terminal version, so you can skip it. From
@@ -69,9 +116,7 @@ python3 run.py hubgui --setup cams.json --share  # also on Wi-Fi; prints the add
 ```
 
 On a Mac, double-clicking `hubfeed.command` does the first one and installs
-what it needs. On a Pi with no screen,
-`python3 run.py hubgui --setup cams.json --share --pin 4821 --no-browser`
-lets you set it up from your laptop's browser at `http://<pi-address>:8791`.
+what it needs.
 
 ## The fuel model (colour + model blend)
 

@@ -37,6 +37,11 @@ the build rather than publishing an empty release.
   the apps. Training new models means attaching them to that release by hand
   once and changing that file.
 
+- **The app runs headless on a Pi:** `Hub Counter --share --pin N --no-browser`
+  shares the page on Wi-Fi from the start. Before, a Pi with no screen could
+  share only via someone pressing Share on the Pi's own page. The app README
+  has a systemd service to start it at boot.
+
 ### Fixed
 
 - **The Fuel model label on the page stayed "(off)" after turning the model

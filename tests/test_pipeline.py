@@ -3334,6 +3334,11 @@ def test_hub_counter_app():
           "binaries=torchvision_ops()" in spec)
     check("and the built-in model, required in CI so no build ships without it",
           '"fuel_relabel.pt"' in spec and "HUBCOUNTER_REQUIRE_MODEL" in spec)
+    launcher = (root / "apps" / "hubcounter" / "main.py").read_text()
+    readme = (root / "apps" / "hubcounter" / "README.md").read_text()
+    check("a Pi with no screen can share from the command line, and start at boot",
+          all(f in launcher for f in ('"--share"', '"--pin"', '"--no-browser"'))
+          and "systemctl enable" in readme and "linux-arm64" in readme)
     wf = (root / ".github" / "workflows" / "hub-app.yml").read_text()
     check("CI runs the built-in model inside every build",
           "HUBCOUNTER_REQUIRE_MODEL" in wf and "fuel_relabel.pt" in wf)

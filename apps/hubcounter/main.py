@@ -10,6 +10,10 @@ read-only and a user looks in Documents.
 
 Opening the app while it already runs (the browser tab was closed, say) opens
 the page again instead of failing on the taken port.
+
+A Pi used as the Wi-Fi host has no screen to press Share on, so
+`--share --pin N --no-browser` does from the command line what the page's
+Share button does (apps/hubcounter/README.md has a start-at-boot service).
 """
 from __future__ import annotations
 
@@ -80,8 +84,26 @@ def main() -> int:
     ultralytics_home()
     if len(sys.argv) == 3 and sys.argv[1] == "--selftest-model":
         return selftest_model(sys.argv[2])
+    import argparse
+    ap = argparse.ArgumentParser(
+        prog="Hub Counter",
+        description="The hub fuel counter's page. Double-clicked, it opens in "
+                    "the browser. On a Pi with no screen: --share --pin 4821 "
+                    "--no-browser, then open http://<pi-address>:8791 elsewhere.")
+    ap.add_argument("--share", action="store_true",
+                    help="open the page to the Wi-Fi from the start (port 8791, behind a PIN)")
+    ap.add_argument("--pin", default="",
+                    help="the PIN for --share, 4-8 digits (default: a new random one, "
+                         "written to hubcounter.log)")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="do not open a browser (a Pi with no screen, a start-at-boot service)")
+    # macOS passes -psn_* when an app is opened from Finder on old systems.
+    args, _ = ap.parse_known_args()
+    if args.pin and not (args.pin.isdigit() and 4 <= len(args.pin) <= 8):
+        ap.error("--pin must be 4 to 8 digits")
     if already_running():
-        webbrowser.open(URL)
+        if not args.no_browser:
+            webbrowser.open(URL)
         return 0
     d = data_dir()
     os.chdir(d)                     # file pickers and logs start here
@@ -90,7 +112,8 @@ def main() -> int:
         log = open(d / "hubcounter.log", "a", buffering=1)
         sys.stdout = sys.stderr = log
     from tbavid import hubweb
-    return hubweb.main(str(d / "cams.json"), PORT, "127.0.0.1", True)
+    return hubweb.main(str(d / "cams.json"), PORT, "127.0.0.1", not args.no_browser,
+                       args.share, args.pin)
 
 
 if __name__ == "__main__":
