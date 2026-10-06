@@ -62,6 +62,16 @@ v0.4.2 or later, cloned next to this repository and added with
   Watchtower places it in the right shift when it applies the inactive-hub
   rule (3 s grace).
 
+## Downloads
+
+The hub counter apps (Mac, Windows, Linux, Raspberry Pi) and the fuel models
+are on the YOLOv26-FRC-Model v0.4.2 release:
+https://github.com/ShadowOfTheVOID/YOLOv26-FRC-Model/releases/tag/v0.4.2
+
+- `HubCounter-mac.zip` / `-windows.zip` / `-linux-x64.tar.gz` /
+  `-linux-arm64.tar.gz` (Raspberry Pi)
+- `fuel_relabel.pt`: put it in `TBACroppedOutVid/models/` for `model: built-in`
+
 ## Checked
 
 - **Tests:** 42 pass (`python -m pytest -q`).

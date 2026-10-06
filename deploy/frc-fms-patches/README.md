@@ -86,19 +86,37 @@ Watchtower has no tags or release workflow yet, so this is its first
 release. The notes are `watchtower-v0.1.0.md` beside this file. Checked:
 0003-0005 apply to its main at 77199c9 and its tests pass (42).
 
+The changes go in as a pull request, not straight onto Arnan's main. With
+the GitHub CLI (`brew install gh`, then `gh auth login`) it is two blocks.
+
+1. Branch, apply, test, open the pull request:
+
+```bash
+cd ~/dev/TBACroppedOutVid
+git pull
+cd ~/dev/watchtower-fms
+git checkout main
+git pull
+git checkout -b release-v0.1.0
+git am ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0003-*.patch ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0004-*.patch ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0005-*.patch
+source .venv/bin/activate
+python -m pytest -q
+git push -u origin release-v0.1.0
+gh pr create --repo arnan-bajaj/watchtower-fms --base main --head release-v0.1.0 --title "Counter plugins: drop-in folder, --add-plugin, /control status (v0.1.0)" --body-file ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/watchtower-v0.1.0.md
+```
+
+2. After the pull request is merged, tag and publish:
+
 ```bash
 cd ~/dev/watchtower-fms
 git checkout main
 git pull
-git am ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0003-*.patch ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0004-*.patch ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0005-*.patch
-source .venv/bin/activate
-python -m pytest -q
-git push origin main
 git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
+gh release create v0.1.0 --repo arnan-bajaj/watchtower-fms --title "v0.1.0" --notes-file ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/watchtower-v0.1.0.md
 ```
 
-Then on GitHub: watchtower-fms -> **Releases** -> **Draft a new release** ->
-choose tag `v0.1.0`, title `v0.1.0`, paste `watchtower-v0.1.0.md`, and
-**Publish release**.
-
+Without the GitHub CLI: after `git push -u origin release-v0.1.0`, open
+https://github.com/arnan-bajaj/watchtower-fms/compare/main...release-v0.1.0
+to make the pull request; after the tag, Releases -> Draft a new release ->
+tag `v0.1.0`, paste `watchtower-v0.1.0.md`, Publish.
