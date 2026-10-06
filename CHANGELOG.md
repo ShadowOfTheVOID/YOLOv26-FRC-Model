@@ -30,14 +30,17 @@ the build rather than publishing an empty release.
     and "FMS Display"; a save restarted the app serving the new name and
     teams; and Quit on the hub page closed it. CI runs the same window test
     on macOS and Windows (`smoke_test.py --window`).
-  - **Import teams from TBA:** a button on Event & schedule fills the team
-    list from the event on The Blue Alliance (the event key, e.g.
-    2026catstd), with a names preview to check before Save. It needs a free
-    TBA Read API key, entered on The Blue Alliance tab, or `$TBA_AUTH_KEY`.
-    It says plainly what is wrong: a refused key, an unknown event, no event
-    key, or no internet. The key is stored as `tba.read_key` in event.yaml,
-    added as one line, since fms.init's file never had it; Watchtower ignores
-    keys it does not read.
+  - **Import teams from TBA, no key needed.** A button on Event &
+    schedule reads the team list from the event page's public **Scouting**
+    tab on The Blue Alliance (`team_number,team_name,city,...` CSV; 11
+    teams for 2026catstd today, with names) and fills the Teams box, with a
+    names preview to check before Save. The Read API is only a fallback,
+    for an event page with no list yet; its key goes on The Blue Alliance
+    tab, or comes from `$TBA_AUTH_KEY`, and is stored as `tba.read_key`.
+    Watchtower ignores that key; it is added as one line at the end of its
+    section. Pasting the Scouting CSV (Copy to Clipboard) or TBA's JSON
+    into the Teams box also turns it into a clean list. Only the
+    team_number column counts, so the "75" in a photo URL is not a team.
   - **Linux and the Pi** open the same Home page in the browser instead (no
     window toolkit is bundled there), so settings are never hand-edited
     there either. It is served on 127.0.0.1:8789, and every call needs a

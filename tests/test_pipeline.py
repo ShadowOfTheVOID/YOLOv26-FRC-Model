@@ -3501,9 +3501,18 @@ def test_watchtower_settings():
             pass
 
         def do_GET(self):
+            if self.path == "/event/2026catstd":        # the public page's Scouting tab
+                body = ('<h2>Scouting</h2><textarea id="team-list-csv" readonly>'
+                        "team_number,team_name,city,state_prov,country,robot_image_url\n"
+                        "8033,Highlander Robotics,Piedmont,California,USA,https://i.imgur.com/1FI8W7pm.jpg\n"
+                        "114,Eaglestrike,Los Altos,California,USA,\n"
+                        "2035,The Rockin&#39; Bots,Carmel,California,USA,</textarea>").encode()
+                self.send_response(200); self.end_headers(); self.wfile.write(body); return
+            if self.path.startswith("/event/"):              # a page with no team list yet
+                self.send_response(200); self.end_headers(); self.wfile.write(b"<html></html>"); return
             if self.headers.get("X-TBA-Auth-Key") != "goodkey":
                 self.send_response(401); self.end_headers(); return
-            if self.path != "/api/v3/event/2026catstd/teams/simple":
+            if self.path != "/api/v3/event/2026later/teams/simple":
                 self.send_response(404); self.end_headers(); return
             body = _json.dumps([{"team_number": 1678, "nickname": "Citrus Circuits"},
                                 {"team_number": 254, "nickname": "The Cheesy Poofs"}]).encode()
@@ -3511,18 +3520,26 @@ def test_watchtower_settings():
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), TBA)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    St.TBA_API = f"http://127.0.0.1:{srv.server_address[1]}/api/v3"
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    St.TBA_API, St.TBA_WEB = base + "/api/v3", base
     try:
-        r = St.tba_teams("2026CATSTD", "goodkey")
-        check("TBA's teams come back sorted, with their names",
+        r = St.tba_teams("2026CATSTD", "")
+        check("the event page's Scouting list is read with no key: only team_number, names kept",
+              r.get("teams") == [114, 2035, 8033] and r["names"]["2035"] == "The Rockin' Bots")
+        r = St.tba_teams("2026later", "goodkey")
+        check("a page with no list yet falls back to the Read API",
               r.get("teams") == [254, 1678] and r["names"]["254"] == "The Cheesy Poofs")
-        check("a wrong key, an unknown event and a missing event key each say what to fix",
-              "refused" in St.tba_teams("2026catstd", "bad")["error"]
-              and "no event" in St.tba_teams("2026zzzz", "goodkey")["error"]
+        check("a wrong key and a missing event key each say what to fix",
+              "refused" in St.tba_teams("2026later", "bad")["error"]
               and "event key first" in St.tba_teams("", "goodkey")["error"])
     finally:
         srv.shutdown()
-    St.TBA_API = "http://127.0.0.1:1/api/v3"
+    pasted = St.parse_team_text("team_number,team_name,city,state_prov,country,robot_image_url\n"
+                                "114,Eaglestrike,Los Altos,California,USA,https://i.imgur.com/Xt75qTWm.jpg\n")
+    check("pasted TBA CSV gives the team, not the 75 in its photo URL", pasted["teams"] == [114])
+    check("JSON from TBA's API pastes too",
+          St.parse_team_text('[{"key":"frc254","team_number":254,"nickname":"Poofs"},"frc971"]')["teams"] == [254, 971])
+    St.TBA_API = St.TBA_WEB = "http://127.0.0.1:1"
     check("no internet says so", "online" in St.tba_teams("2026catstd", "goodkey")["error"])
 
 

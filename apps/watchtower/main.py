@@ -181,6 +181,10 @@ class App:
         import settings
         return settings.new_pins()
 
+    def parse_team_text(self, text: str) -> dict:
+        import settings
+        return settings.parse_team_text(text)
+
     def tba_teams(self, event_key: str, read_key: str) -> dict:
         import settings
         return settings.tba_teams(event_key, read_key)
@@ -338,6 +342,7 @@ def selftest_windows(app: "App", out: str) -> None:
 
 
 HOME_API = ("state", "qr", "get_settings", "local_offset", "new_pins", "save_settings", "tba_teams",
+            "parse_team_text",
             "open_view", "fullscreen", "open_folder", "quit")
 
 

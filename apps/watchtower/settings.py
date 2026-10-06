@@ -27,6 +27,9 @@ from pathlib import Path
 
 # TBA's read API; WATCHTOWER_TBA_API points the tests at a stand-in.
 TBA_API = os.environ.get("WATCHTOWER_TBA_API", "https://www.thebluealliance.com/api/v3")
+# The public event page, whose Scouting tab lists the teams as CSV (in a
+# <textarea id="team-list-csv">): no API key needed for that.
+TBA_WEB = os.environ.get("WATCHTOWER_TBA_WEB", "https://www.thebluealliance.com")
 
 # (key path in event.yaml, kind, label). Order is the order on the page.
 FIELDS = [
@@ -48,10 +51,11 @@ FIELDS = [
     (("tba", "auth_id"), "text", "TBA auth ID"),
     (("tba", "auth_secret"), "secret", "TBA auth secret"),
     (("tba", "send_score_breakdown"), "bool", "Send score breakdowns (totals only is safer)"),
-    # Not Watchtower's (it reads only its own tba keys): the app's own, for
-    # "Import from TBA" on the Event tab. A TBA Read API key, from
-    # thebluealliance.com/account; $TBA_AUTH_KEY is used when this is empty.
-    (("tba", "read_key"), "secret", "TBA Read API key (to import teams)"),
+    # Not Watchtower's (it reads only its own tba keys): the app's own, a
+    # fallback for "Import from TBA", which reads the event page's public
+    # Scouting list first. From thebluealliance.com/account; $TBA_AUTH_KEY
+    # is used when this is empty.
+    (("tba", "read_key"), "secret", "TBA Read API key (optional: only if the event page has no team list)"),
     # Game rules
     (("game", "auto_s"), "int", "Auto (s)"),
     (("game", "auto_teleop_gap_s"), "int", "Pause after auto (s)"),
@@ -116,15 +120,61 @@ def new_pins() -> dict:
     return pins
 
 
+def parse_team_text(text: str) -> dict:
+    """Team numbers (and names when given) from whatever was pasted:
+    TBA's Scouting CSV (team_number,team_name,city,...), JSON (a list of
+    numbers, "frc254" keys, or objects with team_number / key / nickname),
+    or plain numbers. In the CSV only the team_number column counts: a
+    plain digit search would take '75' out of a photo URL as a team."""
+    import csv
+    import io
+    text = (text or "").strip()
+    nums, names = [], {}
+
+    def add(n, name=""):
+        try:
+            n = int(str(n).lower().replace("frc", "").strip())
+        except ValueError:
+            return
+        if 0 < n < 100000 and n not in nums:
+            nums.append(n)
+            if name:
+                names[str(n)] = str(name)
+
+    if text[:1] in "[{":
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+        if data is not None:
+            if isinstance(data, dict):
+                items = data.get("teams") or list(data.values())
+            else:
+                items = data
+            for it in items:
+                if isinstance(it, dict):
+                    add(it.get("team_number") or it.get("key") or it.get("team") or "",
+                        it.get("nickname") or it.get("team_name") or it.get("name") or "")
+                else:
+                    add(it)
+            return {"teams": nums, "names": names}
+    first = text.splitlines()[0].lower() if text else ""
+    if "team_number" in first:
+        for r in csv.DictReader(io.StringIO(text)):
+            r = {(k or "").strip().lower(): (v or "").strip() for k, v in r.items()}
+            add(r.get("team_number", ""), r.get("team_name") or r.get("nickname") or "")
+        return {"teams": nums, "names": names}
+    for t in re.findall(r"(?:frc)?(\d+)", text, re.I):
+        add(t)
+    return {"teams": nums, "names": names}
+
+
 def parse_teams(v) -> list:
-    """'254, 1678 971\\n604' or [254, ...] -> [254, 1678, 971, 604], no repeats."""
-    items = re.findall(r"\d+", v) if isinstance(v, str) else list(v or [])
-    out = []
-    for t in items:
-        n = int(t)
-        if 0 < n < 100000 and n not in out:
-            out.append(n)
-    return out
+    """'254, 1678 971' (any separators), TBA's CSV, JSON, or [254, ...] ->
+    [254, 1678, 971], in order, no repeats."""
+    if isinstance(v, str):
+        return parse_team_text(v)["teams"]
+    return parse_team_text(json.dumps(list(v or [])))["teams"]
 
 
 def check(values: dict) -> tuple:
@@ -309,17 +359,43 @@ def save(event_yaml: Path, values: dict) -> dict:
     return {"changed": sorted(changed)}
 
 
+def _tba_page_teams(key: str) -> dict:
+    """The teams from the event page's Scouting tab (public, no key)."""
+    import html
+    req = urllib.request.Request(f"{TBA_WEB}/event/{key}", headers={"User-Agent": "Watchtower app"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            page = r.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return {"error": f"TBA has no event {key}. Check the event key." if e.code == 404
+                else f"TBA answered {e.code}. Try again in a minute."}
+    except (urllib.error.URLError, OSError) as e:
+        return {"error": f"Could not reach TBA ({getattr(e, 'reason', e)}). Is this computer online?"}
+    m = re.search(r'<textarea[^>]*id="team-list-csv"[^>]*>(.*?)</textarea>', page, re.S)
+    if not m:
+        return {"error": "no team list on TBA's event page"}
+    got = parse_team_text(html.unescape(m.group(1)))
+    if not got["teams"]:
+        return {"error": f"TBA lists no teams for {key} yet. Try again closer to the event."}
+    got["teams"].sort()
+    return got
+
+
 def tba_teams(event_key: str, read_key: str = "") -> dict:
     """The teams at a TBA event: {"teams": [254, ...], "names": {"254": "The
     Cheesy Poofs"}} sorted by number, or {"error": why}, in words a
-    scorekeeper can act on. Needs internet; do it before the venue."""
+    scorekeeper can act on. Reads the event page's public Scouting list;
+    the Read API (key) only when the page has none. Needs internet."""
     key = (event_key or "").strip().lower()
     if not re.fullmatch(r"\d{4}[a-z0-9]+", key):
         return {"error": "Enter the TBA event key first (like 2026catstd), on The Blue Alliance tab."}
+    # The event page's Scouting tab first: public, so no key is needed.
+    page = _tba_page_teams(key)
+    if "teams" in page or "no event" in page["error"] or "online" in page["error"]:
+        return page
     token = (read_key or "").strip() or os.environ.get("TBA_AUTH_KEY", "")
     if not token:
-        return {"error": "Add a TBA Read API key on The Blue Alliance tab "
-                         "(free: thebluealliance.com/account, Read API Keys)."}
+        return page
     req = urllib.request.Request(f"{TBA_API}/event/{key}/teams/simple",
                                  headers={"X-TBA-Auth-Key": token, "User-Agent": "Watchtower app"})
     try:
