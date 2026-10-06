@@ -9,6 +9,12 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Added
+
+- **Watchtower patch 0007** (`deploy/frc-fms-patches/`): Watchtower's own
+  releases get the same Mac `.dmg`, Windows installer and desktop windows
+  as ours, built from v0.4.4 and checked the same way in its CI.
+
 ### Changed
 
 - **A release can be made from a phone.** Publishing it on GitHub

@@ -1,0 +1,175 @@
+From 71353ad26436a8b565b5db2a7f85f7bf0b26583f Mon Sep 17 00:00:00 2001
+From: ShadowOfTheVOID <teddtony@outlook.com>
+Date: Tue, 6 Oct 2026 17:15:53 +0000
+Subject: [PATCH] The Watchtower app as a Mac .dmg and a Windows installer,
+ with its own windows
+
+Builds from YOLOv26-FRC-Model v0.4.4 (.github/hubcounter-release), where
+the app became a desktop app: its own windows on macOS and Windows,
+every event.yaml setting edited on its Home window, and teams imported
+from TBA's public Scouting list with no key.
+
+- Mac: Watchtower-mac.dmg (drag onto Applications) instead of a zip.
+- Windows: Watchtower-Setup-windows.exe, an Inno Setup installer from
+  that repository's apps/installer/windows.iss: per user (no admin), a
+  Start-menu shortcut and an uninstaller.
+- CI also runs the real-window test on macOS and Windows, then checks
+  the download itself: the app run out of the mounted .dmg, and the
+  installed app on Windows.
+
+The same steps passed in YOLOv26-FRC-Model's CI on its v0.4.4 code:
+macOS and Windows windows, the .dmg, and the installed Windows app.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01H8z93x3TYFuGBjjWb4pL17
+---
+ .github/hubcounter-release |  2 +-
+ .github/workflows/app.yml  | 60 ++++++++++++++++++++++++++++++++++----
+ README.md                  | 14 +++++----
+ 3 files changed, 64 insertions(+), 12 deletions(-)
+
+diff --git a/.github/hubcounter-release b/.github/hubcounter-release
+index f87d474..79b0815 100644
+--- a/.github/hubcounter-release
++++ b/.github/hubcounter-release
+@@ -1 +1 @@
+-v0.4.3
++v0.4.4
+diff --git a/.github/workflows/app.yml b/.github/workflows/app.yml
+index e6ad9a3..620cf52 100644
+--- a/.github/workflows/app.yml
++++ b/.github/workflows/app.yml
+@@ -3,8 +3,8 @@ name: app
+ # Builds the Watchtower app -- this FMS plus the YOLOv26-FRC-Model hub
+ # counter, set up and started on a double-click -- on each OS:
+ #
+-#   macOS (Apple silicon)  Watchtower-mac.zip            Watchtower.app
+-#   Windows                Watchtower-windows.zip        Watchtower\Watchtower.exe
++#   macOS (Apple silicon)  Watchtower-mac.dmg            drag Watchtower.app to Applications
++#   Windows                Watchtower-Setup-windows.exe  installer (Start menu, uninstaller)
+ #   Linux x64              Watchtower-linux-x64.tar.gz   Watchtower/Watchtower
+ #   Linux arm64 (Pi 4/5)   Watchtower-linux-arm64.tar.gz Watchtower/Watchtower
+ #
+@@ -37,10 +37,10 @@ jobs:
+       matrix:
+         include:
+           - os: macos-14
+-            asset: Watchtower-mac.zip
++            asset: Watchtower-mac.dmg
+             program: dist/Watchtower.app/Contents/MacOS/Watchtower
+           - os: windows-latest
+-            asset: Watchtower-windows.zip
++            asset: Watchtower-Setup-windows.exe
+             program: dist/Watchtower/Watchtower.exe
+           - os: ubuntu-22.04
+             asset: Watchtower-linux-x64.tar.gz
+@@ -85,6 +85,7 @@ jobs:
+           pip install --no-deps ultralytics ultralytics-thop
+           pip install matplotlib pillow pyyaml requests psutil polars
+           pip install fastapi uvicorn websockets
++          pip install pywebview qrcode     # the app's own windows (macOS, Windows), phone QR code
+ 
+       - name: The fuel model, checked against YOLOv26-FRC-Model's CHANGELOG
+         env:
+@@ -114,17 +115,64 @@ jobs:
+         working-directory: hub
+         run: python apps/watchtower/smoke_test.py "${{ matrix.program }}"
+ 
++      # The real windows (WebKit on macOS, WebView2 on Windows): Home fills
++      # itself, Scorekeeper / Hub cameras / Field display each open. Linux
++      # builds use the browser (no window toolkit bundled).
++      - name: The app's windows
++        if: runner.os != 'Linux'
++        working-directory: hub
++        run: python apps/watchtower/smoke_test.py --window "${{ matrix.program }}"
++
++      - name: Inno Setup (Windows)
++        if: runner.os == 'Windows'
++        run: |
++          [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || choco install innosetup -y --no-progress
++
++      # Mac: a .dmg to drag onto Applications. Windows: an installer from
++      # YOLOv26-FRC-Model's apps/installer/windows.iss (per user, Start menu,
++      # uninstaller; paths absolute because Inno reads relative ones from the
++      # .iss's folder). Linux: tar.gz.
+       - name: Package
+         working-directory: hub
++        env:
++          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
+         run: |
+           case "${{ matrix.asset }}" in
+-            *mac.zip)  ditto -c -k --keepParent "dist/Watchtower.app" "${{ matrix.asset }}" ;;
+-            *.zip)     python -c "import shutil; shutil.make_archive('${{ matrix.asset }}'[:-4], 'zip', 'dist', 'Watchtower')" ;;
++            *.dmg)
++              stage=$(mktemp -d)
++              cp -R "dist/Watchtower.app" "$stage/"
++              ln -s /Applications "$stage/Applications"
++              hdiutil create -volname Watchtower -srcfolder "$stage" -ov -format UDZO "${{ matrix.asset }}" ;;
++            *Setup-windows.exe)
++              if ! "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "-DAppName=Watchtower" "-DAppExe=Watchtower.exe" \
++                  "-DSrcDir=$(cygpath -w "$PWD/dist/Watchtower")" "-DOutFile=Watchtower-Setup-windows" \
++                  "-DAppVersion=${APP_VERSION#v}" "-O$(cygpath -w "$PWD")" apps/installer/windows.iss > iscc.log 2>&1; then
++                echo "::error title=Inno Setup::$(grep -iE 'error|line [0-9]+' iscc.log | tail -5 | tr '\n' ' ')"
++                tail -30 iscc.log; exit 1
++              fi ;;
+             *.tar.gz)  tar -czf "${{ matrix.asset }}" -C dist Watchtower ;;
+           esac
+           # A release asset over 2 GB is refused at upload; stop here instead.
+           python -c "import os,sys; n=os.path.getsize('${{ matrix.asset }}'); print(n>>20,'MB'); sys.exit(n > 1900*2**20)"
+ 
++      # What people download is what gets checked.
++      - name: Check the download (mounted .dmg / installed app)
++        if: runner.os != 'Linux'
++        working-directory: hub
++        run: |
++          if [ "${{ runner.os }}" = "macOS" ]; then
++            mnt=$(mktemp -d)
++            hdiutil attach "${{ matrix.asset }}" -nobrowse -readonly -mountpoint "$mnt"
++            [ -L "$mnt/Applications" ] || { echo "::error::no Applications link in the dmg"; exit 1; }
++            python apps/watchtower/smoke_test.py "$mnt/Watchtower.app/Contents/MacOS/Watchtower"
++            hdiutil detach "$mnt"
++          else
++            dir="$RUNNER_TEMP/installed/Watchtower"
++            ./"${{ matrix.asset }}" //VERYSILENT //SUPPRESSMSGBOXES //CURRENTUSER //NORESTART "//DIR=$(cygpath -w "$dir")"
++            for i in $(seq 1 60); do [ -f "$dir/Watchtower.exe" ] && break; sleep 2; done
++            python apps/watchtower/smoke_test.py "$dir/Watchtower.exe"
++          fi
++
+       - uses: actions/upload-artifact@v4
+         with:
+           name: ${{ matrix.asset }}
+diff --git a/README.md b/README.md
+index 522a2bd..3a30b0c 100644
+--- a/README.md
++++ b/README.md
+@@ -31,8 +31,8 @@ built in:
+ 
+ | computer | download |
+ |---|---|
+-| Mac (Apple silicon) | `Watchtower-mac.zip` |
+-| Windows 10/11 | `Watchtower-windows.zip` |
++| Mac (Apple silicon) | `Watchtower-mac.dmg`: open it, drag Watchtower onto Applications |
++| Windows 10/11 | `Watchtower-Setup-windows.exe`: run it (Start menu, uninstaller, no admin needed) |
+ | Linux PC | `Watchtower-linux-x64.tar.gz` |
+ | Raspberry Pi 4/5 (64-bit Pi OS) | `Watchtower-linux-arm64.tar.gz` |
+ 
+@@ -41,9 +41,13 @@ built in:
+ - **Every launch:**
+   - starts the FMS on port 8000 for phones on the Wi-Fi;
+   - starts the hub counter already sending to it;
+-  - opens a start page with every link and PIN.
+-- **Event name, date and teams:** set them in that `event.yaml`, then Quit
+-  (on the hub camera page) and reopen.
++  - opens the **Home window** (its own window on Mac and Windows; the
++    browser on Linux and the Pi): status, a QR code and PINs for phones,
++    and Scorekeeper, Hub cameras and Field display each in their own window.
++- **Settings in the app, not in files:** event name, date, time zone,
++  teams, schedule, PINs, TBA and game rules are all edited on Home. Save
++  restarts it. **Import from TBA** fills the teams from the event page's
++  public Scouting list, with no key.
+ - **First open:** the apps are unsigned. On a Mac: System Settings → Privacy
+   & Security → Open Anyway. On Windows: More info → Run anyway.
+ 
+-- 
+2.43.0
+

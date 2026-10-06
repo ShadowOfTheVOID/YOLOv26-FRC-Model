@@ -10,6 +10,7 @@ there. Apply them in a checkout of it with `git am`.
 | 0002 | README docs for this repo's counter plugin | **in its main** (77199c9) |
 | 0003 | `/control` shows a counter's own status line (detail / warning) | new |
 | 0004 | A counter plugin system: plugin lookup by short name, `plugin_paths:`, `--list-counters`, option checks, `status()`, `close()` | new |
+| 0007 | Watchtower's own releases get the Mac `.dmg` and Windows installer, the app's own windows (window test in CI) and the download checks; builds from YOLOv26-FRC-Model v0.4.4 | new (needs 0006, and v0.4.4 tagged here) |
 | 0006 | The Watchtower app: `.github/workflows/app.yml` builds it on each tag for Mac, Windows, Linux and Pi, from YOLOv26-FRC-Model's `apps/watchtower/` at the tag in `.github/hubcounter-release` (v0.4.3) | new |
 | 0005 | Easier plugins: drop a `.py` into `vision/plugins/`, or `run_vision.py --add-plugin <repo folder>` | new (needs 0004) |
 
@@ -153,4 +154,31 @@ git tag -a v0.1.1 -m "v0.1.1"
 git push origin v0.1.1
 gh release create v0.1.1 --repo arnan-bajaj/watchtower-fms --title "v0.1.1" --notes "The Watchtower app: double-click Watchtower for Mac, Windows, Linux and Raspberry Pi, with the hub counter built in. Downloads below (attached by the app workflow in about 20 minutes)."
 ```
+
+## 0007: installers in Watchtower's own releases
+
+0006's workflow still packs zips and builds from v0.4.3. 0007 moves it to
+v0.4.4: the desktop app with its own windows, settings edited in the app,
+and TBA team import. It ships `Watchtower-mac.dmg` and
+`Watchtower-Setup-windows.exe`, runs the real-window test on macOS and
+Windows, and checks the downloads themselves (the app run out of the
+mounted `.dmg`, and the installed Windows app). It applies to its main
+(4af4b00) and its 42 tests pass.
+
+**Order matters:** this repository's `v0.4.4` must be published first,
+because the workflow checks out that tag.
+
+```bash
+cd ~/dev/watchtower-fms
+git checkout main
+git pull
+git checkout -b app-installers
+git am ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0007-*.patch
+git push -u origin app-installers
+gh pr create --repo arnan-bajaj/watchtower-fms --base main --head app-installers --title "The Watchtower app as a Mac .dmg and a Windows installer" --body "Builds from YOLOv26-FRC-Model v0.4.4: its own windows, settings in the app, TBA team import, .dmg and Windows installer."
+```
+
+After that PR is merged, a new Watchtower tag (e.g. `v0.1.2`) builds and
+attaches the four apps. Without a computer: GitHub → watchtower-fms →
+Releases → Draft a new release → new tag `v0.1.2` on main → Publish.
 
