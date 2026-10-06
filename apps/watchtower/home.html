@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Watchtower</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#15181d;--mute:#5f6875;--line:#e2e5ea;--acc:#2563eb;--acc-fg:#fff;
+  --ok:#16a34a;--warn:#b45309;--bad:#dc2626;--red:#dc2626;--blue:#2563eb;--chip:#eef1f5;--side:#eceef2}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a20;--fg:#e7eaef;--mute:#9aa3b0;--line:#262b33;
+  --acc:#5b8cff;--acc-fg:#fff;--chip:#20252d;--red:#f87171;--blue:#7aa2ff;--side:#13161b;--warn:#f59e0b}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  -webkit-user-select:none;user-select:none;display:flex}
+nav{width:212px;flex:none;background:var(--side);border-right:1px solid var(--line);padding:18px 10px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px 16px}
+.logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#2563eb,#7c3aed);display:grid;place-items:center;flex:none}
+.brand b{font-size:15px}
+nav button{all:unset;display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--fg);font-weight:500}
+nav button:hover{background:var(--chip)} nav button.on{background:var(--acc);color:var(--acc-fg)}
+nav svg{flex:none;opacity:.85}
+nav .sp{flex:1} nav .quit{color:var(--mute)}
+main{flex:1;overflow:auto;padding:24px 28px 40px}
+section.tab{display:none;max-width:860px} section.tab.on{display:block}
+h1{font-size:22px;margin:0 0 2px} h2{font-size:15px;margin:0 0 10px} .sub{color:var(--mute);font-size:13px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 18px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border-radius:999px;padding:5px 11px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mute)} .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+.tile{all:unset;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
+.tile:hover{border-color:var(--acc)}
+.tile b{font-size:16px} .tile .sub{min-height:38px}
+.tile .ico{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:var(--chip);margin-bottom:4px}
+.tile .foot{display:flex;gap:8px;align-items:center;margin-top:auto;font-size:13px;color:var(--mute)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+.pin{font:600 16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:1.5px;color:var(--fg);-webkit-user-select:text;user-select:text}
+.url{font:600 17px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;-webkit-user-select:text;user-select:text;word-break:break-all}
+.phone{display:flex;gap:18px;align-items:center}
+.qr{width:150px;height:150px;flex:none;background:#fff;border-radius:10px;padding:6px}
+.qr svg{width:100%;height:100%}
+table{width:100%;border-collapse:collapse;margin-top:8px} td{padding:7px 0;border-top:1px solid var(--line)} td:last-child{text-align:right}
+.warnbox{background:color-mix(in srgb,var(--warn) 14%,transparent);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13.5px}
+.form{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 16px}
+.form .wide{grid-column:1/-1}
+.f label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px;font-weight:600}
+.f .err{color:var(--bad);font-size:12px;margin-top:3px;min-height:0}
+input,textarea,select{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;-webkit-user-select:text;user-select:text}
+input[type=checkbox]{width:auto;margin:0 8px 0 0;accent-color:var(--acc)}
+.check{display:flex;align-items:center;padding:8px 0;font-size:14px;margin-top:10px}
+textarea{min-height:80px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+input:focus,textarea:focus,select:focus{outline:2px solid var(--acc);outline-offset:-1px;border-color:transparent}
+.inrow{display:flex;gap:8px} .inrow>*:first-child{flex:1}
+.bar{position:sticky;bottom:-40px;margin:16px -28px -40px;padding:12px 28px;background:var(--bg);border-top:1px solid var(--line);display:flex;gap:10px;align-items:center}
+button.btn{font:inherit;font-weight:600;border-radius:9px;padding:8px 14px;border:1px solid var(--line);background:var(--chip);color:var(--fg);cursor:pointer;white-space:nowrap}
+button.btn.primary{background:var(--acc);border-color:var(--acc);color:var(--acc-fg)}
+button.btn:disabled{opacity:.5;cursor:default}
+.msg{font-size:13px} .msg.bad{color:var(--bad);white-space:pre-line} .msg.ok{color:var(--ok)}
+.note{font-size:12.5px;color:var(--mute);margin:8px 0 0}
+.red{color:var(--red)} .blue{color:var(--blue)}
+code{-webkit-user-select:text;user-select:text}
+@media (max-width:820px){nav{width:62px} nav span.t,.brand b{display:none} .tiles,.form{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="brand"><div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 6h5l-4 4 2 7-6-4-6 4 2-7-4-4h5z"/></svg></div><b>Watchtower</b></div>
+  <button data-tab="home" class="on"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8v10H3z"/></svg><span class="t">Overview</span></button>
+  <button data-tab="phones"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg><span class="t">Phones &amp; PINs</span></button>
+  <button data-tab="event"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span class="t">Event &amp; schedule</span></button>
+  <button data-tab="tba"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6 4 4 6-8"/></svg><span class="t">The Blue Alliance</span></button>
+  <button data-tab="rules"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg><span class="t">Game rules</span></button>
+  <span class="sp"></span>
+  <button onclick="api().open_folder()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v10H3z"/></svg><span class="t">Data folder</span></button>
+  <button class="quit" onclick="quitApp()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v9M6.3 7.3a8 8 0 1 0 11.4 0"/></svg><span class="t">Quit</span></button>
+</nav>
+
+<main>
+<!-- ============================================================ Overview -->
+<section class="tab on" id="tab_home">
+  <h1 id="ename">Watchtower</h1><div class="sub" id="esub">Starting…</div>
+  <div class="chips"><span class="chip"><span class="dot" id="fmsdot"></span><span id="fmstxt">Field system</span></span>
+    <span class="chip"><span class="dot" id="netdot"></span><span id="nettxt">Wi-Fi</span></span>
+    <span class="chip"><span class="dot" id="camdot"></span><span id="camtxt">Cameras</span></span></div>
+  <div class="warnbox" id="setupwarn" style="display:none"></div>
+  <div class="tiles">
+    <button class="tile" onclick="openView('control')">
+      <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></span>
+      <b>Scorekeeper</b><span class="sub">Run matches, review and commit scores, schedule, alliance selection.</span>
+      <span class="foot">PIN <span class="pin" id="pin_control_t">——</span></span></button>
+    <button class="tile" onclick="openView('hub')">
+      <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></span>
+      <b>Hub cameras</b><span class="sub">Draw each hub's outline, measure a ball, Start. Counts go to the scorekeeper.</span>
+      <span class="foot" id="hubfoot">Not counting</span></button>
+    <button class="tile" onclick="openView('display')">
+      <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M7 21h10"/></svg></span>
+      <b>Field display</b><span class="sub">Audience scoreboard. Drag its window to the projector, then Full screen.</span>
+      <span class="foot"><span style="color:var(--acc)" onclick="event.stopPropagation();fullscreen('display')">Full screen</span></span></button>
+  </div>
+  <div class="card"><h2>Refs and emcee</h2><div class="sub">Phones on the same Wi-Fi: see <a href="#" onclick="show('phones');return false" style="color:var(--acc)">Phones &amp; PINs</a> for the address, a QR code and their PINs.</div></div>
+</section>
+
+<!-- ============================================================ Phones -->
+<section class="tab" id="tab_phones">
+  <h1>Phones &amp; PINs</h1><div class="sub">Refs log fouls and the emcee calls the hub lights from their phones.</div>
+  <div class="warnbox" id="netwarn" style="display:none;margin-top:14px">This computer is not on a network, so phones cannot reach it. Join the event Wi-Fi (or your own router), then reopen this tab.</div>
+  <div class="card" style="margin-top:14px"><div class="phone"><div class="qr" id="qr"></div>
+    <div><div class="sub">On the same Wi-Fi, scan or open</div><div class="url" id="phoneurl">—</div>
+      <p class="note">Can't connect? Allow Watchtower when the firewall asks (Windows: tick Private networks), and use your own router: venue and school Wi-Fi often keep devices apart.</p></div></div></div>
+  <div class="card"><h2>PINs</h2>
+    <div class="form" id="form_pins"></div>
+    <div class="row" style="margin-top:12px"><button class="btn" onclick="regenPins()">Make new PINs</button></div>
+    <p class="note">Each role logs in with its own PIN. The scorekeeper's must differ from the others. Changing PINs logs everyone out.</p></div>
+</section>
+
+<!-- ============================================================ Event -->
+<section class="tab" id="tab_event">
+  <h1>Event &amp; schedule</h1><div class="sub">Used for the schedule, the field display and The Blue Alliance.</div>
+  <div class="card" style="margin-top:14px"><div class="form" id="form_event"></div></div>
+</section>
+
+<!-- ============================================================ TBA -->
+<section class="tab" id="tab_tba">
+  <h1>The Blue Alliance</h1><div class="sub">Optional. Pushes the schedule, scores, rankings and alliances while there is internet, and queues them while there is none.</div>
+  <div class="card" style="margin-top:14px"><div class="form" id="form_tba"></div>
+    <p class="note">The auth ID and secret come from your event's page on TBA (Account → event admin → API keys). Test with one match before turning sending on for the day.</p></div>
+</section>
+
+<!-- ============================================================ Rules -->
+<section class="tab" id="tab_rules">
+  <h1>Game rules</h1><div class="sub">Every score is computed from these. Check them against the 2026 Game Manual (section 6) before the event.</div>
+  <div class="card" style="margin-top:14px"><div class="form" id="form_rules"></div></div>
+</section>
+
+<div class="bar" id="savebar" style="display:none"><button class="btn primary" id="save" onclick="save()">Save changes</button>
+  <button class="btn" onclick="revert()">Undo changes</button><span class="msg" id="msg"></span>
+  <span class="sub" style="margin-left:auto">Saving restarts Watchtower (a few seconds). Matches are kept.</span></div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const api=()=>window.pywebview.api;
+const GROUPS={event:["event.name","event.date","event.utc_offset_hours","event.teams","event.qual_start","event.cycle_min","event.lunch"],
+  pins:["server.pins.control","server.pins.ref","server.pins.emcee"],
+  tba:["event.tba_event_key","tba.enabled","tba.auth_id","tba.auth_secret","tba.send_score_breakdown"],
+  rules:null};
+let FIELDS=[],saved={},dirty=false,last=null,qrFor="";
+
+function show(t){for(const b of document.querySelectorAll("nav [data-tab]"))b.classList.toggle("on",b.dataset.tab===t);
+  for(const s of document.querySelectorAll("section.tab"))s.classList.toggle("on",s.id==="tab_"+t);
+  $("savebar").style.display=(t==="home")?"none":"";}
+for(const b of document.querySelectorAll("nav [data-tab]"))b.onclick=()=>show(b.dataset.tab);
+
+function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams"].includes(f.kind)||f.name==="event.name";
+  let input;
+  if(f.kind==="bool")return `<div class="f ${wide?"wide":""}"><label class="check"><input type="checkbox" id="${id}">${f.label}</label><div class="err" id="e_${id}"></div></div>`;
+  if(f.kind==="teams")input=`<textarea id="${id}" placeholder="254, 1678, 971, …"></textarea>`;
+  else if(f.kind==="date")input=`<input id="${id}" type="date">`;
+  else if(f.kind==="time")input=`<input id="${id}" type="time">`;
+  else if(f.kind==="secret")input=`<input id="${id}" type="password" autocomplete="off">`;
+  else if(f.kind==="offset"){let o="";for(let h=-12;h<=14;h+=0.5)o+=`<option value="${h}">UTC ${h>=0?"+":""}${h}</option>`;
+    input=`<div class="inrow"><select id="${id}">${o}</select><button class="btn" type="button" onclick="useLocalOffset()">This computer's</button></div>`;}
+  else if(f.kind==="int"||f.kind==="pin")input=`<input id="${id}" inputmode="numeric">`;
+  else input=`<input id="${id}">`;
+  const extra=f.kind==="teams"?` <span id="tcount" style="font-weight:400"></span>`:"";
+  return `<div class="f ${wide?"wide":""}"><label for="${id}">${f.label}${extra}</label>${input}<div class="err" id="e_${id}"></div></div>`;}
+function build(){const used=new Set([...GROUPS.event,...GROUPS.pins,...GROUPS.tba]);
+  const by=n=>FIELDS.find(f=>f.name===n);
+  $("form_event").innerHTML=GROUPS.event.map(n=>fieldHTML(by(n))).join("");
+  $("form_pins").innerHTML=GROUPS.pins.map(n=>fieldHTML(by(n))).join("");
+  $("form_tba").innerHTML=GROUPS.tba.map(n=>fieldHTML(by(n))).join("");
+  $("form_rules").innerHTML=FIELDS.filter(f=>!used.has(f.name)).map(fieldHTML).join("");
+  for(const el of document.querySelectorAll("main input,main textarea,main select"))
+    el.addEventListener("input",()=>{dirty=true;countTeams();$("msg").textContent="";});}
+const el=n=>$("v_"+n.replace(/\./g,"_"));
+function fmt(f,v){if(f.kind==="teams")return (v||[]).join(", ");if(f.kind==="points4")return Object.values(v||{}).join(" ");
+  if(f.kind==="fouls")return Object.values(v||{}).join(" ");return v==null?"":String(v);}
+function fill(){for(const f of FIELDS){const e=el(f.name);if(!e)continue;
+    if(f.kind==="bool")e.checked=!!saved[f.name];else e.value=fmt(f,saved[f.name]);}
+  dirty=false;countTeams();clearErrors();}
+function collect(){const out={};for(const f of FIELDS){const e=el(f.name);if(!e)continue;out[f.name]=f.kind==="bool"?e.checked:e.value;}return out;}
+function countTeams(){const t=el("event.teams");if(!t)return;const n=(t.value.match(/\d+/g)||[]).length;$("tcount").textContent=n?`(${n})`:"";}
+function clearErrors(){for(const e of document.querySelectorAll(".err"))e.textContent="";}
+async function loadSettings(){const r=await api().get_settings();FIELDS=r.fields;saved=r.values;build();fill();}
+async function useLocalOffset(){const o=await api().local_offset(el("event.date").value);el("event.utc_offset_hours").value=String(o);dirty=true;}
+async function regenPins(){const p=await api().new_pins();for(const r in p)el("server.pins."+r).value=p[r];dirty=true;
+  $("msg").className="msg";$("msg").textContent="New PINs filled in. Save to use them.";}
+function revert(){fill();$("msg").textContent="";}
+async function save(){
+  if(last&&last.hub.running&&!confirm("Saving restarts Watchtower and stops the cameras counting. Save now?"))return;
+  $("save").disabled=true;clearErrors();$("msg").className="msg";$("msg").textContent="Saving…";
+  let r;try{r=await api().save_settings(collect());}catch(e){r={error:String(e)};}
+  $("save").disabled=false;
+  if(r.error){$("msg").className="msg bad";$("msg").textContent=r.error;return;}
+  if(!r.changed.length){$("msg").className="msg ok";$("msg").textContent="Nothing changed.";dirty=false;return;}
+  $("msg").className="msg ok";$("msg").textContent="Saved. Restarting Watchtower…";dirty=false;}
+
+function chip(dot,txt,cls,t){$(dot).className="dot "+cls;$(txt).textContent=t;}
+async function refresh(){
+  let s;try{s=await api().state();}catch(e){return;}
+  last=s;
+  $("ename").textContent=s.name||"Watchtower";
+  $("esub").textContent=[s.date||"no date set",s.teams.length?`${s.teams.length} teams`:"no teams yet"].join(" · ");
+  chip("fmsdot","fmstxt",s.fms_ok?"ok":"bad",s.fms_ok?"Field system running":"Field system stopped");
+  chip("netdot","nettxt",s.on_network?"ok":"bad",s.on_network?"On the network":"Not on a network");
+  const h=s.hub;
+  if(h.running)chip("camdot","camtxt",h.linked?"ok":"warn",h.linked?"Cameras counting":"Cameras: no reply");
+  else chip("camdot","camtxt","","Cameras idle");
+  $("hubfoot").innerHTML=h.running?`Counting · <span class="red">red ${h.counts.red}</span> · <span class="blue">blue ${h.counts.blue}</span>`:(h.cameras?`${h.cameras} camera${h.cameras>1?"s":""} set up · not counting`:"No cameras set up yet");
+  $("pin_control_t").textContent=s.pins.control||"——";
+  const todo=[];if(!s.teams.length)todo.push("add the teams");if(!s.date)todo.push("set the date");
+  if((s.name||"").startsWith("My Offseason"))todo.push("name the event");
+  $("setupwarn").style.display=todo.length?"":"none";
+  $("setupwarn").innerHTML=todo.length?`Before the first match: ${todo.join(", ")} in <a href="#" style="color:var(--acc)" onclick="show('event');return false">Event &amp; schedule</a>.`:"";
+  $("netwarn").style.display=s.on_network?"none":"";
+  $("phoneurl").textContent=s.phone_url;
+  if(s.phone_url!==qrFor){qrFor=s.phone_url;try{$("qr").innerHTML=await api().qr(s.phone_url);}catch(e){}}
+}
+async function openView(n){try{await api().open_view(n);}catch(e){}}
+async function fullscreen(n){try{await api().fullscreen(n);}catch(e){}}
+async function quitApp(){
+  if(last&&last.hub.running&&!confirm("The cameras are counting. Quit anyway?"))return;
+  try{await api().quit();}catch(e){}}
+window.addEventListener("pywebviewready",async()=>{await loadSettings();refresh();setInterval(refresh,1500);});
+</script>
+</body>
+</html>

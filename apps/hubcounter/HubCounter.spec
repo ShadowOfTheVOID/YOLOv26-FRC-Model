@@ -46,13 +46,24 @@ if APP == "watchtower":
         raise SystemExit(f"no Watchtower at {WSRC}: clone arnan-bajaj/watchtower-fms there")
     sys.path.insert(0, WSRC)
     NAME, ENTRY, BUNDLE_ID = "Watchtower", os.path.join(ROOT, "apps", "watchtower", "main.py"), "org.tbavid.watchtower"
-    EXTRA_PATH = [WSRC]
-    EXTRA_DATAS = [(os.path.join(WSRC, "fms", "static"), "fms/static"),
+    WAPP = os.path.join(ROOT, "apps", "watchtower")
+    EXTRA_PATH = [WSRC, WAPP]
+    # The app's own windows (pywebview): only this OS's backend, or the
+    # bundler drags in Qt or GTK modules that are not installed and warns.
+    WEBVIEW_OS = {"darwin": ("cocoa",), "win32": ("winforms", "edgechromium", "mshtml")}.get(
+        sys.platform, ("gtk", "qt"))
+    WEBVIEW = collect_submodules(
+        "webview", filter=lambda m: not m.startswith("webview.platforms.")
+        or m.split(".")[2] in WEBVIEW_OS)
+    EXTRA_DATAS = [(os.path.join(WAPP, "home.html"), "."),
+                   (os.path.join(WSRC, "fms", "static"), "fms/static"),
                    (os.path.join(WSRC, "config", "event.example.yaml"), "config"),
                    (os.path.join(WSRC, "config", "vision.example.yaml"), "config")]
     # uvicorn picks its loop, protocols and lifespan by name at start.
     EXTRA_IMPORTS = (collect_submodules("fms") + collect_submodules("uvicorn")
-                     + ["fastapi", "starlette", "websockets", "yaml", "requests"])
+                     + ["fastapi", "starlette", "websockets", "yaml", "requests", "settings"]
+                     + collect_submodules("qrcode") + WEBVIEW)
+    EXTRA_DATAS += collect_data_files("webview")
 else:
     NAME, ENTRY, BUNDLE_ID = "Hub Counter", os.path.join(SPECPATH, "main.py"), "org.tbavid.hubcounter"
     EXTRA_PATH, EXTRA_DATAS, EXTRA_IMPORTS = [], [], []

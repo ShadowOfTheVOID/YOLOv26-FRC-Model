@@ -93,8 +93,31 @@ def main(program: str) -> int:
             proc.kill()
 
 
+def window_test(program: str) -> int:
+    """--window: the real app windows (WebKit on macOS, WebView2 on Windows):
+    Home fills itself through the Python API, and Scorekeeper, Hub cameras
+    and Field display each open on their page. Needs a desktop session,
+    which GitHub's macOS and Windows runners have."""
+    home = tempfile.mkdtemp(prefix="watchtower-home-")
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
+    out = os.path.join(home, "window.json")
+    code = subprocess.run([program, "--selftest-window", out], env=env, timeout=300).returncode
+    res = json.load(open(out)) if os.path.exists(out) else {"ok": False, "error": f"no result (exit {code})"}
+    for s in res.get("steps", []):
+        print("  " + s)
+    if not res.get("ok"):
+        fail("app windows: " + res.get("error", "failed"))
+        return 1
+    print("OK: app windows (" + "; ".join(res.get("steps", [])) + ")")
+    if os.environ.get("GITHUB_ACTIONS"):
+        print("::notice title=Watchtower windows::" + "; ".join(res.get("steps", [])))
+    return 0
+
+
 if __name__ == "__main__":
     try:
+        if sys.argv[1:2] == ["--window"]:
+            sys.exit(window_test(sys.argv[2]))
         sys.exit(main(sys.argv[1]))
     except (AssertionError, OSError, subprocess.TimeoutExpired) as e:
         fail(f"{type(e).__name__}: {e}")

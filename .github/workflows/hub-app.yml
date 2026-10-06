@@ -95,6 +95,7 @@ jobs:
           pip install --no-deps ultralytics ultralytics-thop
           pip install matplotlib pillow pyyaml requests psutil polars
           pip install fastapi uvicorn websockets      # Watchtower's server
+          pip install pywebview qrcode                # Watchtower's own windows, phone QR code
 
       - name: The built-in fuel model, checked against CHANGELOG's checksum
         env:
@@ -133,6 +134,12 @@ jobs:
 
       - name: Smoke test Watchtower (setup, FMS, counter preset to it, vision key, Quit)
         run: python apps/watchtower/smoke_test.py "${{ matrix.wprogram }}"
+
+      # Linux builds fall back to the browser (no WebKit GTK bundled), so the
+      # window test runs where the app opens its own windows.
+      - name: Watchtower's app windows (Home, Scorekeeper, Hub cameras, Field display)
+        if: runner.os != 'Linux'
+        run: python apps/watchtower/smoke_test.py --window "${{ matrix.wprogram }}"
 
       - name: Package
         run: |

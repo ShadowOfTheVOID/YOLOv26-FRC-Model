@@ -3428,6 +3428,63 @@ def test_hub_builtin_model():
             sys._MEIPASS = old
 
 
+def test_watchtower_settings():
+    """The Watchtower app edits event.yaml for the user, never the other way.
+
+    Only the changed lines are rewritten, so fms.init's comments (the only
+    documentation of the other settings) survive; anything the file holds as
+    a block, not one line, is reported so the caller rewrites it whole.
+    Watchtower's own rule -- the scorekeeper PIN differs from the others --
+    is checked before anything is written.
+    """
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("wt_settings", root / "apps" / "watchtower" / "settings.py")
+    St = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(St)
+
+    check("teams parse from any separators, in order, without repeats",
+          St.parse_teams("254, 1678 971\n604;254") == [254, 1678, 971, 604])
+    clean, err = St.check({"event.name": " X ", "event.date": "2026-10-10", "event.qual_start": "09:00",
+                           "event.utc_offset_hours": "-7", "event.teams": "1 2",
+                           "event.tba_event_key": "2026CATSTD", "game.tower": "0 10 20 30",
+                           "game.fouls": "5,15", "server.pins.control": "123456",
+                           "server.pins.ref": "222222", "server.pins.emcee": "333333"})
+    check("good values come out clean and typed",
+          not err and clean["event.name"] == "X" and clean["event.utc_offset_hours"] == -7
+          and clean["event.tba_event_key"] == "2026catstd"
+          and clean["game.tower"] == {"L0": 0, "L1": 10, "L2": 20, "L3": 30}
+          and clean["game.fouls"] == {"minor": 5, "major": 15})
+    _, err = St.check({"event.date": "10/10/2026", "event.lunch": "25:00", "game.n_shifts": "-1",
+                       "server.pins.control": "111111", "server.pins.ref": "111111",
+                       "server.pins.emcee": "12", "tba.enabled": True})
+    check("bad values are refused, each with its own reason",
+          set(err) == {"event.date", "event.lunch", "game.n_shifts", "server.pins.emcee",
+                       "server.pins.control", "tba.enabled"})
+    pins = St.new_pins()
+    check("new PINs are three different 6-digit numbers",
+          len(set(pins.values())) == 3 and all(len(p) == 6 and p.isdigit() for p in pins.values()))
+
+    text = ['# top\n', 'event:\n', '  name: "Old"          # the name\n', '  teams: []   # list\n',
+            'server:\n', '  pins:\n', '    control: "1"\n', 'game:\n', '  tower: {L0: 0}\n',
+            '  rp:\n', '    win: 3\n']
+    lines = list(text)
+    ok = (St._set_line(lines, ("event", "name"), St._render("New \"x\""))
+          and St._set_line(lines, ("event", "teams"), St._render([254, 1678]))
+          and St._set_line(lines, ("server", "pins", "control"), St._render("999999"))
+          and St._set_line(lines, ("game", "tower"), St._render({"L0": 0, "L1": 10}))
+          and St._set_line(lines, ("game", "rp", "win"), St._render(2)))
+    check("one-line fields are rewritten in place, comments kept",
+          ok and lines[2] == '  name: "New \\"x\\""          # the name\n'
+          and lines[3] == "  teams: [254, 1678]   # list\n" and lines[6] == '    control: "999999"\n'
+          and lines[8] == "  tower: {L0: 0, L1: 10}\n" and lines[10] == "    win: 2\n")
+    block = ['event:\n', '  teams:\n', '    - 1\n']
+    check("a field held as a block is reported, not mangled",
+          not St._set_line(block, ("event", "teams"), "[1]") and block[1] == "  teams:\n")
+    check("a missing field is reported",
+          not St._set_line(['event:\n', '  name: "x"\n'], ("event", "date"), '""'))
+
+
 def test_hub_scoreboard_view():
     """The live scoreboard: bioarena's score when linked, the camera's otherwise.
 
@@ -3837,7 +3894,7 @@ def main() -> int:
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
-               test_hub_counter_app, test_hub_builtin_model):
+               test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

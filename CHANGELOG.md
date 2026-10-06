@@ -9,6 +9,34 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+### Changed
+
+- **The Watchtower app is a desktop app with its own windows**, not pages in
+  the browser. It is built on pywebview: WebKit on macOS, WebView2 on
+  Windows.
+  - **The Home window** has every setting a scrimmage needs (event, teams,
+    schedule, time zone, PINs, The Blue Alliance, game rules). Nobody edits
+    `event.yaml` by hand any more.
+  - **Saving** checks the settings with Watchtower's own rules, changes only
+    those lines (the file's comments stay), and restarts the app.
+  - **Phones:** a QR code and address for refs and emcee, plus a warning
+    when the computer is not on a network.
+  - **Windows:** Scorekeeper, Hub cameras and Field display each open in
+    their own window. A framed page would lose its login: WebKit partitions
+    storage for pages framed from another origin.
+  - **Closing Home quits.**
+  - **Checked here** with Qt's engine, offscreen: Home filled itself through
+    the app's API; the three windows loaded "FMS Control", "Hub Counter"
+    and "FMS Display"; a save restarted the app serving the new name and
+    teams; and Quit on the hub page closed it. CI runs the same window test
+    on macOS and Windows (`smoke_test.py --window`).
+  - **Linux and the Pi** open the same Home page in the browser instead (no
+    window toolkit is bundled there), so settings are never hand-edited
+    there either. It is served on 127.0.0.1:8789, and every call needs a
+    per-launch token in a header, which another web page cannot send.
+    Checked in Chromium: saving restarted the app, which then served the new
+    name, date and teams.
+
 ## v0.4.3 — 2026-10-06
 
 A Watchtower app: the Watchtower FMS and the hub counter in one double-click
