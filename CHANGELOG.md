@@ -9,6 +9,10 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **`attach-models` workflow**: copies `fuel_relabel.pt` / `scout_relabel.pt`
+  (checksum-checked against this file) onto any existing release from the
+  Actions tab, no computer needed. v0.4.4 went out without them because
+  release.yml's Publish step failed before its models step.
 - **One-click updates in both apps.** Each app asks GitHub for the latest
   release when it opens (public API, no key; silent when offline). If it is
   newer, the Hub Counter page and Watchtower's Overview show "Update
