@@ -3339,9 +3339,14 @@ def test_hub_counter_app():
     check("a Pi with no screen can share from the command line, and start at boot",
           all(f in launcher for f in ('"--share"', '"--pin"', '"--no-browser"'))
           and "systemctl enable" in readme and "linux-arm64" in readme)
-    wf = (root / ".github" / "workflows" / "hub-app.yml").read_text()
-    check("CI runs the built-in model inside every build",
-          "HUBCOUNTER_REQUIRE_MODEL" in wf and "fuel_relabel.pt" in wf)
+    # Release archives carry no .github/ (deploy/package.py's allowlist), and
+    # release.yml runs these tests inside the unpacked archive: v0.4.2's first
+    # tag failed there on this read. Checked in a checkout only.
+    wf_path = root / ".github" / "workflows" / "hub-app.yml"
+    if wf_path.exists():
+        wf = wf_path.read_text()
+        check("CI runs the built-in model inside every build",
+              "HUBCOUNTER_REQUIRE_MODEL" in wf and "fuel_relabel.pt" in wf)
     check("and asks macOS for the camera and the local network, or it gets neither",
           "NSCameraUsageDescription" in spec and "NSLocalNetworkUsageDescription" in spec)
 
