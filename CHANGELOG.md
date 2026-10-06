@@ -9,6 +9,23 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.4.4 — 2026-10-06
+
+Watchtower becomes a desktop app: our camera setup page plus Watchtower's
+own parts in one window, with every setting edited inside it (event,
+teams, PINs, schedule, TBA, game rules) and the team list imported from
+The Blue Alliance in one click, no key. The Hub Counter opens in its own
+window too. Both apps install like other apps: a .dmg on Mac and an
+installer on Windows.
+
+| app | Mac | Windows | Linux PC | Raspberry Pi |
+|---|---|---|---|---|
+| Watchtower (FMS + hub counter) | `Watchtower-mac.dmg` | `Watchtower-Setup-windows.exe` | `Watchtower-linux-x64.tar.gz` | `Watchtower-linux-arm64.tar.gz` |
+| Hub Counter | `HubCounter-mac.dmg` | `HubCounter-Setup-windows.exe` | `HubCounter-linux-x64.tar.gz` | `HubCounter-linux-arm64.tar.gz` |
+
+None is signed: the first open asks once (Mac: System Settings → Privacy
+& Security → Open Anyway; Windows: More info → Run anyway).
+
 ### Changed
 
 - **The Hub Counter app opens in its own window**, like Watchtower (Mac:
@@ -24,38 +41,12 @@ the build rather than publishing an empty release.
   window self-test loads the tab inside Home, and a screenshot shows the
   page beside Watchtower's sidebar.
 
-### Added
-
-- **Watchtower patch 0007** (`deploy/frc-fms-patches/`): Watchtower's own
-  releases get the same Mac `.dmg`, Windows installer and desktop windows
-  as ours, built from v0.4.4 and checked the same way in its CI.
-
-### Changed
-
 - **A release can be made from a phone.** Publishing it on GitHub
   (Releases → Draft a new release → new tag on main → Publish) creates the
   tag and the release together. `release.yml` now takes such a release over
   instead of failing on "already exists": the CHANGELOG notes replace what
   was typed, and the archives and models are attached. The app builds were
   already attaching to an existing release.
-
-## v0.4.4 — 2026-10-06
-
-Watchtower becomes a desktop app with its own windows and every setting
-edited inside it (event, teams, PINs, schedule, TBA, game rules), with
-the team list imported from The Blue Alliance in one click and no key.
-Both apps now install like other apps: a .dmg on Mac and an installer on
-Windows.
-
-| app | Mac | Windows | Linux PC | Raspberry Pi |
-|---|---|---|---|---|
-| Watchtower (FMS + hub counter) | `Watchtower-mac.dmg` | `Watchtower-Setup-windows.exe` | `Watchtower-linux-x64.tar.gz` | `Watchtower-linux-arm64.tar.gz` |
-| Hub Counter | `HubCounter-mac.dmg` | `HubCounter-Setup-windows.exe` | `HubCounter-linux-x64.tar.gz` | `HubCounter-linux-arm64.tar.gz` |
-
-None is signed: the first open asks once (Mac: System Settings → Privacy
-& Security → Open Anyway; Windows: More info → Run anyway).
-
-### Changed
 
 - **Proper installers instead of zips** for both apps:
   - **Mac:** `Watchtower-mac.dmg` / `HubCounter-mac.dmg`. Open it and drag
@@ -109,6 +100,12 @@ None is signed: the first open asks once (Mac: System Settings → Privacy
     per-launch token in a header, which another web page cannot send.
     Checked in Chromium: saving restarted the app, which then served the new
     name, date and teams.
+
+### Added
+
+- **Watchtower patch 0007** (`deploy/frc-fms-patches/`): Watchtower's own
+  releases get the same Mac `.dmg`, Windows installer and desktop windows
+  as ours, built from v0.4.4 and checked the same way in its CI.
 
 ## v0.4.3 — 2026-10-06
 
