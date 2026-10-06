@@ -79,3 +79,26 @@ The tests should say `42 passed`. If 0003 and 0004 are already applied,
 apply only 0005. Then open a pull request on GitHub. If
 `git am` stops on a conflict (its main has moved), run `git am --abort` and
 ask for the patches to be regenerated.
+
+## Release Watchtower v0.1.0 (0003-0005 applied)
+
+Watchtower has no tags or release workflow yet, so this is its first
+release. The notes are `watchtower-v0.1.0.md` beside this file. Checked:
+0003-0005 apply to its main at 77199c9 and its tests pass (42).
+
+```bash
+cd ~/dev/watchtower-fms
+git checkout main
+git pull
+git am ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0003-*.patch ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0004-*.patch ~/dev/TBACroppedOutVid/deploy/frc-fms-patches/0005-*.patch
+source .venv/bin/activate
+python -m pytest -q
+git push origin main
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+Then on GitHub: watchtower-fms -> **Releases** -> **Draft a new release** ->
+choose tag `v0.1.0`, title `v0.1.0`, paste `watchtower-v0.1.0.md`, and
+**Publish release**.
+
