@@ -66,20 +66,24 @@ through the corner of a raised outline on its way down past the hub, and
 the downward-entry rule counted it (seen 2026-10-06 replaying a California
 Northern State Championship playoff match through Watchtower: passes beside
 the hub scored). Such a ball is
-taken back when the SAME track leaves the outline moving sideways --
-|vx| > |vy| -- and stays in sight outside for PASS_CONFIRM_FRAMES more
-frames: it flew on, it did not drop into the hub. Exits that move up (a
+taken back when the SAME track came in sideways and leaves the outline
+sideways -- |vx| > |vy| both times -- and stays in sight outside for
+PASS_CONFIRM_FRAMES more frames: it flew on, it did not drop into the hub. Exits that move up (a
 bounce off the hood) or down (into the hub below the outline) leave the count
 alone, as before, and so does a track that is lost after it leaves. Because
 the feed never goes down, the ball is reported on entry as before -- the
 latency is unchanged -- and taken back as `owed`, absorbed by the next ball
-in. Measured 2026-10-07 with count_recording, guard off -> on, mean error
-at the broadcast's fuel counters: Einstein 4 16.7 -> 17.4%, 5 10.1 -> 11.4%,
-1 5.5 -> 3.8%, 8 11.3 -> 14.1%, Central Valley 26.6 -> 16.4% (outlines
-redrawn by eye; blue had over-counted 219 against 159 at the buzzer, 188
-with the guard). Five-match mean 14.0 -> 12.6%, the Einstein four alone
-10.9 -> 11.7%: it helps where the outline catches balls flying past and
-costs about a point where a hub already counted low (Einstein 8 red).
+in. Measured 2026-10-07 with count_recording against the broadcasts' fuel
+counters read every 8 s from the end of AUTO to the buzzer (19 checkpoints
+a match), no guard -> sideways exit only -> sideways entry and exit:
+Einstein 4 16.4 / 16.5 / 16.0%, 5 5.7 / 6.5 / 5.3%, 1 5.3 / 5.3 / 8.2%,
+8 10.8 / 13.7 / 10.1%, Central Valley 26.6 / 16.4 / 17.0% (outlines
+redrawn by eye; blue had counted 219 against 159). Einstein mean 9.5 /
+10.5 / 9.9%, all five 13.0 / 11.7 / 11.3%, every AUTO winner right with
+the guard (Einstein 1 was wrong without it, 101-98 against 95-96). The
+exit-only rule took back real scores on Einstein 8 (red 532 -> 501 of
+581); requiring a sideways entry too kept them. Chosen after seeing these
+five, so not held out.
 
 An exit line (`ExitLineCounter`) keeps the signed rule -- a ball across it
 towards `out` is +1, one crossing back is -1 -- and the measured ball: the
@@ -308,7 +312,10 @@ class CrossingCounter:
                     else:                   # already counted once
                         self.net += n
                         self.entries += n
-                        if not self.signed:
+                        # Only a sideways entry can be a pass: a ball
+                        # coming in steeply is falling into the hub.
+                        vx, vy = c["v"]
+                        if not self.signed and abs(vx) > abs(vy):
                             self._pending[c["id"]] = {"n": n, "age": 0, "out": 0}
                 elif way < 0:
                     self.exits += n
@@ -897,8 +904,8 @@ class Setup:
     then takes the larger of the two: a scored ball crosses the outline on
     the way in and the exit on the way out, so adding them counts it twice.
     On Central Valley (2026-10-07, exits in view) outline + exit summed to
-    30.5% error against 18.1% for the outline alone, the mean of the two was
-    37.5%, and the larger was 18.1% -- the exits there caught 17 of 159 and
+    29.9% error against 17.0% for the outline alone, the mean of the two was
+    37.0%, and the larger was 17.0% -- the exits there caught 17 of 159 and
     83 of 810 (balls pile at the exit). The larger keeps each kind as a
     floor for the other: an exit camera aimed at a chute that counts more
     than the outline wins, and a blocked exit costs nothing.

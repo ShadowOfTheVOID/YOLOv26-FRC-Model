@@ -2407,6 +2407,12 @@ def test_hub_crossing_counter():
     fly(c, [(170, 60), (170, 85), (170, 110)])
     check("after which balls count again", c.reported == 2)
     c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(140, 50), (145, 80), (150, 110), (175, 115), (200, 118),
+            (225, 120), (250, 122), (275, 124)])
+    check("a ball that came in steeply stays counted even if it skids out "
+          "sideways (Einstein 8 lost real scores to that)",
+          c.reported == 1 and c.owed == 0 and c.passes == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
     fly(c, [(150, 60), (150, 85), (150, 110), (150, 140), (150, 170),
             (150, 205), (150, 230)])
     check("a ball leaving through the bottom (into the hub) stays counted",
@@ -2570,8 +2576,8 @@ def test_hub_multi_camera_setup():
     check("sum, max and median of rising counts never fall", ok)
 
     # An outline and an exit line on one hub count the same balls: summed,
-    # every score counted twice (Central Valley, 2026-10-07: 30.5% against
-    # 18.1% for the outline alone). Each kind combines on its own, the hub
+    # every score counted twice (Central Valley, 2026-10-07: 29.9% against
+    # 17.0% for the outline alone). Each kind combines on its own, the hub
     # takes the larger.
     mixed = HC.setup_from_dict({"cameras": [
         {"name": "front", "source": "0", "ball_area": 300, "zones": [

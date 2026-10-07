@@ -11,21 +11,23 @@ the build rather than publishing an empty release.
 
 - **Passes beside the hub are no longer scores.** A ball passed back to the
   alliance zone while the hub is active could fly through the corner of a
-  hub's outline and count. Now, when that same ball leaves the outline
-  moving sideways and is still seen flying on outside, its count is taken
-  back. The feed never goes down, so it is still reported for a moment and
+  hub's outline and count. Now, when that same ball came in sideways,
+  leaves the outline sideways and is still seen flying on outside, its
+  count is taken back. The feed never goes down, so it is still reported for a moment and
   the next ball into that hub absorbs it (shown as `owed`). Balls bouncing
   up off the hood and balls dropping out the bottom into the hub count as
   before, and counting latency is unchanged. Measured on five broadcast
-  matches: mean error 14.0% -> 12.6% (Central Valley 26.6% -> 16.4%, where
-  balls flying past were counted; the four Einstein matches 10.9% -> 11.7%).
+  matches at 19 checkpoints each: mean error 13.0% -> 11.3% (Central Valley
+  26.6% -> 17.0%, where balls flying past were counted; the four Einstein
+  matches 9.5% -> 9.9%), every AUTO winner right (Einstein 1 was wrong
+  without it).
   See deploy/HUB_FEED.md "Passes beside the hub taken back".
 - **A hub can use an outline and an exit line together.** The hub now
   takes the larger of the two (each kind combined across cameras by the
   hub's sum / max / median setting) instead of adding them. A scored ball
   crosses the outline going in and the exit coming out, so adding counted
-  it twice: on Central Valley, outline + exit added up was 30.5% off,
-  against 16.4% for the larger of the two, the same as the outline alone.
+  it twice: on Central Valley, outline + exit added up was 29.9% off,
+  against 17.0% for the larger of the two, the same as the outline alone.
   The exit acts as a floor: a chute camera that counts more than the
   outline wins, and a blocked or piled-up exit costs nothing.
 

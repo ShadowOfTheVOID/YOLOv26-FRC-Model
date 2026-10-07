@@ -332,11 +332,11 @@ back" and exit lines blue 665,395-665,500 out 720,450 and red
 
 | scoring | error | buzzer blue / red (real 159 / 810) |
 |---|---|---|
-| outline | 16.4% | 188 / 760 |
+| outline | 17.0% | 194 / 771 |
 | exit line | 86% | 17 / 83 |
-| outline + exit, added (the old behaviour) | 30.5% | 205 / 843 |
-| mean of the two | 37.5% | 102 / 422 |
-| **larger of the two (now)** | **16.4%** | 188 / 760 |
+| outline + exit, added (the old behaviour) | 29.9% | 211 / 854 |
+| mean of the two | 37.0% | 106 / 427 |
+| **larger of the two (now)** | **17.0%** | 194 / 771 |
 
 The exits again caught a tenth of the balls: they pile against the hub.
 On a broadcast the exit adds nothing; it is there for a camera aimed at a
@@ -768,32 +768,39 @@ and keep whichever is closer.
 ## Passes beside the hub taken back (2026-10-07)
 
 A pass back to the alliance zone could fly through the corner of an
-outline and count. Now a counted ball whose track leaves the outline
-sideways and is seen flying on for 2 more frames is taken back (absorbed by
-the next ball in, as `owed`; the reported count never goes down).
-`count_recording` on the five Drive matches, every frame, the shipped
-settings, error averaged over the checkpoints where the broadcast's fuel
-counters were read:
+outline and count. Now a counted ball whose track came in sideways, leaves
+the outline sideways (|vx| > |vy| both times) and is seen flying on for 2
+more frames is taken back: absorbed by the next ball in, as `owed`; the
+reported count never goes down. `count_recording` on the five Drive
+matches, every frame, shipped settings, colour counter only, against the
+broadcast's fuel counters read every 8 s from the end of AUTO to the
+buzzer (19 checkpoints a match):
 
-| match | guard off | guard on | buzzer blue / red (real), guard on | AUTO |
+| match | no guard | sideways exit only | **sideways in and out (shipped)** | buzzer blue / red, shipped (real) |
 |---|---|---|---|---|
-| Einstein 4 | 16.7% | 17.4% | 501 / 622 (479 / 804) | right |
-| Einstein 5 | 10.1% | 11.4% | 580 / 606 (585 / 669) | right |
-| Einstein 1 | 5.5% | 3.8% | 600 / 460 (621 / 415) | 96-96 tie (real 95-96); off: 101-97, wrong |
-| Einstein 8 | 11.3% | 14.1% | 587 / 495 (653 / 581) | right |
-| Central Valley | 26.6% | 16.4% | 188 / 760 (159 / 810) | right |
-| **mean** | **14.0%** | **12.6%** | | |
+| Einstein 4 | 16.4% | 16.5% | **16.0%** | 511 / 666 (479 / 807) |
+| Einstein 5 | 5.7% | 6.5% | **5.3%** | 609 / 636 (589 / 672) |
+| Einstein 1 | 5.3%, AUTO wrong | 5.3% | **8.2%** | 655 / 493 (621 / 415) |
+| Einstein 8 | 10.8% | 13.7% | **10.1%** | 591 / 553 (653 / 581) |
+| Central Valley | 26.6% | 16.4% | **17.0%** | 205 / 771 (159 / 810) |
+| Einstein mean | 9.5% | 10.5% | **9.9%** | |
+| all five | 13.0% | 11.7% | **11.3%** | |
+
+(Buzzer totals here are at the end of the video, after draining.) The
+exit-only rule took back real scores on Einstein 8 (red 532 -> 501 of
+581): balls that came in steeply and skidded out sideways. Requiring a
+sideways entry kept them. With the guard every AUTO winner is right;
+without it Einstein 1 read 101-98 against 95-96. The rule was picked after
+seeing these five matches, so it is not a held-out result; the colour
+counter alone matches the 2026-09-29 records (Einstein mean 9.5% here
+against 10.1% then), and the model blend (6.8% then) was not re-run: it
+needs a GPU.
 
 Central Valley's outlines were redrawn by eye for this run (blue
 548,318 676,318 678,398 546,398; red 1168,322 1300,322 1300,402
-1168,402; ball 90 px), so its numbers are not comparable with the 6.4% of
-the outline drawn on 2026-10-05, which was not saved. Its truth was read
-off the corner counters every 8 s from 34 s to the buzzer. The guard
-takes back balls everywhere: on Central Valley, where blue over-counted
-balls flying past (219 against 159), that is the fix; on the Einstein
-matches, where red already counted low, it costs about a point (10.9% ->
-11.7% over the four). It stays on: the scrimmage report was passes
-counted, and the 20-ball test on a real hub decides from there.
+1168,402; ball 90 px). Its 26.6% without the guard is not comparable with
+the 6.4% of the outline drawn on 2026-10-05, which was not saved: this
+outline catches more balls flying past.
 
 ## 1. Draw the outlines (once per camera position)
 
