@@ -38,9 +38,12 @@ Watchtower combines our camera setup with Watchtower's own parts:
     working, and what is still missing before the first match (teams, date,
     name).
   - **Hub cameras:** our camera setup page itself, inside Home: cameras,
-    hub outlines, ball size, fuel model, Start. It is the same page as the
-    Hub Counter app, already sending its counts to this Watchtower, and it
-    keeps counting while you use the other tabs.
+    camera presets (ELP OV4689 60 fps, USB webcam, your saved ones),
+    picture and fuel colour, hub outlines, ball size, fuel model, Start. It
+    is the same page as the Hub Counter app, already sending its counts to
+    this Watchtower, and it keeps counting while you use the other tabs.
+    Saved camera presets are shared with the Hub Counter app
+    (`~/Documents/Hub Counter/camera-presets.json`).
   - **Phones & PINs:** the address phones open, as text and as a QR code, and
     the scorekeeper, ref and emcee PINs, with a button for new PINs.
   - **Event & schedule:** name, date, time zone, teams, qualification start,

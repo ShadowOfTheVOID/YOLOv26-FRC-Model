@@ -574,6 +574,8 @@ def main() -> int:
     from tbavid.hubapp import HubController
     ctl = HubController(str(d / "cams.json"))
     ctl.default_target = f"http://{ev['key']}@127.0.0.1:{ev['port']}"
+    # Camera presets saved here or in the Hub Counter app are the same file.
+    ctl.presets_file = str(Path.home() / "Documents" / "Hub Counter" / "camera-presets.json")
     hub = threading.Thread(target=hubweb.serve, args=(ctl, HUB_PORT, "127.0.0.1"),
                            kwargs={"open_browser": False}, daemon=True, name="hub counter")
     hub.start()

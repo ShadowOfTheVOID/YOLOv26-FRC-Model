@@ -3777,6 +3777,16 @@ def test_camera_presets():
     check("Back to standard drops the camera's own colour", "colour" not in ctl.camera("cam0"))
     check("the page can apply, save and delete presets",
           {"apply_preset", "save_preset", "delete_preset"} <= set(ACTIONS))
+    other = Path(tempfile.mkdtemp())
+    wt = HubController(str(other / "cams.json"))
+    wt.presets_file = str(d / "camera-presets.json")
+    ctl.save_preset("cam0", "Shared")
+    check("an app pointed at another app's presets file offers its presets",
+          any(p["label"] == "Shared" for p in wt.presets()))
+    ctl.delete_preset("shared")
+    src = (Path(__file__).resolve().parent.parent / "apps" / "watchtower" / "main.py").read_text()
+    check("Watchtower shares the Hub Counter app's presets file",
+          '"Hub Counter" / "camera-presets.json"' in src and "ctl.presets_file" in src)
 
     try:
         import cv2  # noqa: F401  (CI has no cv2; the rest is checked there)

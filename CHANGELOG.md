@@ -18,6 +18,9 @@ the build rather than publishing an empty release.
   the log. The fuel colour gate (hue range, minimum colour and brightness)
   is adjustable per camera, with a magenta overlay of what counts as fuel.
   **Save as preset** keeps all of it in `camera-presets.json` for reuse.
+  Both apps have it: Watchtower's Hub cameras tab is the same page, and the
+  two apps share one presets file (`~/Documents/Hub Counter/`), so a preset
+  saved in either is offered in both.
   Why: a webcam on auto exposure drops to 15-24 fps in a dim gym (20 fps
   measured 25.1% error on the Einstein replays, 60 fps 10.5%), 60 fps over
   USB 2 needs MJPG, and auto white balance moves the fuel's hue. The ELP

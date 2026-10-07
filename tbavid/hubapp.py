@@ -280,6 +280,10 @@ class HubController:
         # on the page; None from a checkout and inside Watchtower, whose own
         # Home offers its updates.
         self.updater = None
+        # Where saved camera presets live; None = beside the setup file. The
+        # Watchtower app points it at the Hub Counter app's file, so a preset
+        # saved in either app is offered in both.
+        self.presets_file: Optional[str] = None
         if setup_path and os.path.exists(setup_path):
             self.load(setup_path)
 
@@ -393,6 +397,8 @@ class HubController:
     def presets_path(self) -> str:
         """Saved presets live beside the setup file (~/Documents/Hub Counter
         in the app), so every setup made there shares them."""
+        if self.presets_file:
+            return self.presets_file
         base = os.path.dirname(os.path.abspath(self.path)) if self.path else os.getcwd()
         return os.path.join(base, "camera-presets.json")
 
