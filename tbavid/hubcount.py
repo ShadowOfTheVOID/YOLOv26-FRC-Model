@@ -892,6 +892,16 @@ class Setup:
     order statistic of non-decreasing counts never go down either, so the
     combined count keeps the feed's rule. An even number of zones under
     `median` takes the lower middle one.
+
+    A hub with both outlines and exit lines combines each kind as above,
+    then takes the larger of the two: a scored ball crosses the outline on
+    the way in and the exit on the way out, so adding them counts it twice.
+    On Central Valley (2026-10-07, exits in view) outline + exit summed to
+    30.5% error against 18.1% for the outline alone, the mean of the two was
+    37.5%, and the larger was 18.1% -- the exits there caught 17 of 159 and
+    83 of 810 (balls pile at the exit). The larger keeps each kind as a
+    floor for the other: an exit camera aimed at a chute that counts more
+    than the outline wins, and a blocked exit costs nothing.
     """
 
     def __init__(self, cameras: List[Camera],
@@ -1119,6 +1129,18 @@ def setup_from_flags(source: str, outlines: Dict[str, Sequence[Point]],
     return Setup(cams)
 
 
+def combined(counts: Sequence[int], how: str) -> int:
+    """Zones of one kind on one hub, combined by `how` (Setup's docstring)."""
+    counts = sorted(counts)
+    if not counts:
+        return 0
+    if how == "max":
+        return counts[-1]
+    if how == "median":
+        return counts[(len(counts) - 1) // 2]
+    return sum(counts)
+
+
 class HubTally:
     """Each hub's combined count, and how much of it bioarena has not heard.
 
@@ -1133,15 +1155,13 @@ class HubTally:
         self._lock = threading.Lock()
 
     def value(self, hub: str) -> int:
-        counts = sorted(z.reported for z in self.zones[hub])
-        if not counts:
-            return 0
+        # Outlines and exit lines count the same balls (Setup's docstring):
+        # each kind is combined on its own, and the hub takes the larger.
+        kinds: Dict[str, List[int]] = {}
+        for z in self.zones[hub]:
+            kinds.setdefault(z.kind, []).append(z.reported)
         how = self.setup.combine[hub]
-        if how == "max":
-            return counts[-1]
-        if how == "median":
-            return counts[(len(counts) - 1) // 2]
-        return sum(counts)
+        return max((combined(c, how) for c in kinds.values()), default=0)
 
     def rise(self, hub: str) -> int:
         with self._lock:

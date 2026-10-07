@@ -20,6 +20,14 @@ the build rather than publishing an empty release.
   matches: mean error 14.0% -> 12.6% (Central Valley 26.6% -> 16.4%, where
   balls flying past were counted; the four Einstein matches 10.9% -> 11.7%).
   See deploy/HUB_FEED.md "Passes beside the hub taken back".
+- **A hub can use an outline and an exit line together.** The hub now
+  takes the larger of the two (each kind combined across cameras by the
+  hub's sum / max / median setting) instead of adding them. A scored ball
+  crosses the outline going in and the exit coming out, so adding counted
+  it twice: on Central Valley, outline + exit added up was 30.5% off,
+  against 16.4% for the larger of the two, the same as the outline alone.
+  The exit acts as a floor: a chute camera that counts more than the
+  outline wins, and a blocked or piled-up exit costs nothing.
 
 ## v0.5.2 — 2026-10-07
 

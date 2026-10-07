@@ -323,6 +323,25 @@ mostly behind the hubs, and a line across the visible part of the red
 out-flow caught 9% (Einstein 4), 15% (5) and 34% (1) of the scoreboard. The
 test is the spec's 20 balls through a practice hub's exits.
 
+**Outline and exit line on the same hub (2026-10-07).** They count the
+same balls, so the hub takes the larger of the two kinds; each kind is
+first combined across its zones by the hub's sum / max / median. Measured
+on Central Valley with the outlines from "Passes beside the hub taken
+back" and exit lines blue 665,395-665,500 out 720,450 and red
+1180,420-1180,505 out 1130,460:
+
+| scoring | error | buzzer blue / red (real 159 / 810) |
+|---|---|---|
+| outline | 16.4% | 188 / 760 |
+| exit line | 86% | 17 / 83 |
+| outline + exit, added (the old behaviour) | 30.5% | 205 / 843 |
+| mean of the two | 37.5% | 102 / 422 |
+| **larger of the two (now)** | **16.4%** | 188 / 760 |
+
+The exits again caught a tenth of the balls: they pile against the hub.
+On a broadcast the exit adds nothing; it is there for a camera aimed at a
+chute, where it may count more than the outline and then wins.
+
 ## Blur correction and still-yellow removal (per camera)
 
 Two settings per camera, both off by default:

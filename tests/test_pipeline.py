@@ -2569,6 +2569,30 @@ def test_hub_multi_camera_setup():
             last = v
     check("sum, max and median of rising counts never fall", ok)
 
+    # An outline and an exit line on one hub count the same balls: summed,
+    # every score counted twice (Central Valley, 2026-10-07: 30.5% against
+    # 18.1% for the outline alone). Each kind combines on its own, the hub
+    # takes the larger.
+    mixed = HC.setup_from_dict({"cameras": [
+        {"name": "front", "source": "0", "ball_area": 300, "zones": [
+            {"hub": "red", "outline": sq, "name": "o1"},
+            {"hub": "red", "line": [[0, 0], [10, 0]], "out": [5, 5], "name": "e1"},
+            {"hub": "red", "line": [[20, 0], [30, 0]], "out": [25, 5], "name": "e2"}]},
+        {"name": "side", "source": "1", "ball_area": 300, "zones": [
+            {"hub": "red", "outline": sq, "name": "o2"}]}]})
+    zm = {z.name: z for z in mixed.zones("red")}
+    zm["o1"].counter.reported, zm["o2"].counter.reported = 20, 5
+    zm["e1"].counter.reported, zm["e2"].counter.reported = 4, 3
+    tm = HC.HubTally(mixed)
+    check("outline and exit lines on one hub: the larger kind, not the total",
+          tm.value("red") == 25)
+    zm["e1"].counter.reported = 30
+    check("exits counting more (a chute camera) win, each kind summed",
+          tm.value("red") == 33)
+    mixed.combine["red"] = "max"
+    check("and each kind is combined by the hub's own rule",
+          tm.value("red") == 30)
+
     def refused(c, why):
         try:
             HC.setup_from_dict(c)
