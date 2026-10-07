@@ -9,6 +9,8 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.2 — 2026-10-07
+
 - **Watchtower: a Write key section for The Blue Alliance.** The TBA tab is
   now three parts: the event key; **Write key** (Auth ID and Auth Secret,
   the on/off switch for sending results, and how to get a key: request
