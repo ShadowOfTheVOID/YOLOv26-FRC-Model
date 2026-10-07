@@ -9,6 +9,58 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.0 — 2026-10-07
+
+- **Phones get a name, not a raw IP.** When you share the page on Wi-Fi (Hub
+  Counter) or open Phones & PINs (Watchtower), the address now leads with
+  `<computer>.local` -- which Macs and Windows announce on the network by
+  themselves and phones resolve -- instead of `192.168.x.x`. The IP is still
+  shown as a backup and the QR code still carries it, because not every
+  network passes `.local` through and every device on the Wi-Fi must still
+  get in. The page stays gated by its PIN; the name is a convenience, not a
+  security measure.
+- **The team's red and black**: app icons (Hub Counter a yellow fuel ball
+  over a white hub on black, Watchtower a black lighthouse on red) and the
+  pages' accent colour and logos (buttons, sliders, selection were blue).
+  Fuel stays yellow and the blue alliance stays blue: those are the game. They replace
+  PyInstaller's default (the Python icon on Windows) on the Mac app, the
+  Windows program and its installer. Drawn by `apps/icons/make_icons.py`;
+  the finished `.icns` / `.ico` / `.png` files are committed, so builds need
+  nothing new.
+- **Camera presets, picture settings and fuel colour** (Hub Counter page,
+  step 1). Built in: **ELP OV4689 2.8-12 mm varifocal, 60 fps** (1280x720
+  MJPG at 60 fps, exposure fixed at 8 ms, white balance at 4600 K) and **USB
+  webcam (standard)** (1280x720 at 30 fps, automatic picture). Exposure,
+  white balance, brightness, contrast, saturation, gain and the video format
+  can be set per local camera, and settings a driver ignores are named in
+  the log. The fuel colour gate (hue range, minimum colour and brightness)
+  is adjustable per camera, with a magenta overlay of what counts as fuel.
+  **Save as preset** keeps all of it in `camera-presets.json` for reuse.
+  Both apps have it: Watchtower's Hub cameras tab is the same page, and the
+  two apps share one presets file (`~/Documents/Hub Counter/`), so a preset
+  saved in either is offered in both.
+  Why: a webcam on auto exposure drops to 15-24 fps in a dim gym (20 fps
+  measured 25.1% error on the Einstein replays, 60 fps 10.5%), 60 fps over
+  USB 2 needs MJPG, and auto white balance moves the fuel's hue. The ELP
+  values are a starting point, not yet checked on the camera; the standard
+  colour gate is unchanged, so existing setups count exactly as before.
+- **`attach-models` workflow**: copies `fuel_relabel.pt` / `scout_relabel.pt`
+  (checksum-checked against this file) onto any existing release from the
+  Actions tab, no computer needed. v0.4.4 went out without them because
+  release.yml's Publish step failed before its models step.
+- **One-click updates in both apps.** Each app asks GitHub for the latest
+  release when it opens (public API, no key; silent when offline). If it is
+  newer, the Hub Counter page and Watchtower's Overview show "Update
+  available" with an **Update** button -- never automatic, and refused while
+  the cameras count, so a match cannot be interrupted. Mac and Windows:
+  download, close, install in place (Windows: the installer silently into
+  the same folder; Mac: the .app swapped, the old one put back if the copy
+  fails), reopen. Linux/Pi: a link to the release page. Builds now carry
+  their release tag (`app_version.txt`); pull-request builds (0.0.0) never
+  check. Only v0.4.4 -> next can be the first real test: tested here with a
+  stand-in for GitHub and the helper scripts' text, not yet on a real Mac or
+  Windows install.
+
 ## v0.4.4 — 2026-10-06
 
 Watchtower becomes a desktop app: our camera setup page plus Watchtower's

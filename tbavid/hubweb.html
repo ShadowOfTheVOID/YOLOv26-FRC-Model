@@ -11,7 +11,7 @@
   --bg:#0b0e14; --bg2:#0f131b; --panel:#141923; --panel2:#1a2030; --line:#252c3b;
   --ink:#e7ebf3; --ink2:#a9b2c3; --muted:#6f7a8f;
   --red:#ff4d4f; --red-deep:#c9302c; --blue:#3b8cff; --blue-deep:#1f5fd1;
-  --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --accent:#5b7cfa;
+  --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --accent:#e11d2a;
   --radius:14px; --shadow:0 10px 30px rgba(0,0,0,.35);
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
@@ -34,13 +34,17 @@ button,input,select{font:inherit;color:inherit}
   background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:.01em}
 .logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;
-  background:linear-gradient(135deg,#6d8bff,#3b5bdb);box-shadow:0 4px 14px rgba(91,124,250,.45)}
+  background:linear-gradient(135deg,#34343a,#060608);box-shadow:0 4px 14px rgba(0,0,0,.35)}
 .logo svg{width:20px;height:20px}
 .file{display:flex;align-items:center;gap:8px;min-width:0;flex:1;color:var(--ink2);font-size:13px}
 .file .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46vw}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;
   background:var(--panel2);border:1px solid var(--line);color:var(--ink2);white-space:nowrap}
 .pill.saved{color:var(--ok)} .pill.dirty{color:var(--warn)}
+/* One-click update (the Hub Counter app only: S.update is null elsewhere). */
+.updbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;border-radius:12px;
+  background:color-mix(in srgb,var(--accent) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line))}
+.updbar b{font-weight:650} .updbar .grow{flex:1} .updbar a{color:var(--accent)}
 
 /* ---------- buttons ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;
@@ -219,6 +223,10 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
 <div class="wrap">
   <div class="main">
+    <div class="updbar" id="updbar" style="display:none"><span>Update available: <b id="updver"></b>
+      <span class="muted" id="updnote"></span></span><span class="grow"></span>
+      <a id="updnotes" target="_blank" rel="noopener">What's new</a>
+      <button class="btn sm primary" id="updbtn" onclick="installUpdate()">Update</button></div>
     <div class="board">
       <div class="score red"><div class="lbl">RED HUB</div><div class="num tnum" id="red">0</div></div>
       <div class="score blue"><div class="lbl">BLUE HUB</div><div class="num tnum" id="blue">0</div></div>
@@ -260,7 +268,36 @@ input[type=range]{flex:1;accent-color:var(--accent)}
           <label class="field full"><span>Source</span><input class="input" id="f_source"></label>
           <label class="field"><span>Frame rate</span><input class="input" id="f_fps" type="number" min="0" placeholder="camera default"></label>
           <label class="field"><span>Size</span><input class="input" id="f_size" placeholder="1280x720"></label>
+          <label class="field full"><span>Camera preset</span><select class="input" id="f_preset" onchange="applyPreset(this.value)"></select></label>
         </div>
+        <p class="muted" id="presetnote" style="margin:0 0 8px"></p>
+        <div class="row">
+          <button class="btn sm" onclick="savePreset()"><svg><use href="#i-save"/></svg>Save as preset</button>
+          <button class="btn sm" id="delpreset" onclick="deletePreset()">Delete preset</button>
+        </div>
+        <details class="adv" id="picbox"><summary>Picture <span class="muted" id="picstate"></span></summary>
+          <label class="switch"><span>Automatic exposure</span><input type="checkbox" id="i_auto_exposure"><i></i></label>
+          <div class="slider" id="exprow"><span class="muted" style="width:92px">Exposure</span><input type="range" id="i_exposure_ms" min="1" max="33" step="1"><b class="tnum" id="expv"></b></div>
+          <label class="switch"><span>Automatic white balance</span><input type="checkbox" id="i_auto_wb"><i></i></label>
+          <div class="slider" id="wbrow"><span class="muted" style="width:92px">White balance</span><input type="range" id="i_wb_kelvin" min="2800" max="6500" step="100"><b class="tnum" id="wbv"></b></div>
+          <div class="fields">
+            <label class="field"><span>Brightness</span><input class="input" id="i_brightness" type="number" placeholder="camera's own"></label>
+            <label class="field"><span>Contrast</span><input class="input" id="i_contrast" type="number" placeholder="camera's own"></label>
+            <label class="field"><span>Saturation</span><input class="input" id="i_saturation" type="number" placeholder="camera's own"></label>
+            <label class="field"><span>Gain</span><input class="input" id="i_gain" type="number" placeholder="camera's own"></label>
+            <label class="field full"><span>Video format</span><select class="input" id="i_fourcc"><option value="">camera's own</option><option value="MJPG">MJPG (compressed: needed for 60 fps over USB)</option><option value="YUYV">YUYV (uncompressed)</option></select></label>
+          </div>
+          <p class="muted" style="margin:0">Exposure under 16 ms keeps 60 fps; shorter also blurs fast balls less. Brightness, contrast, saturation and gain use the camera's own numbers. Changes reopen the camera; the picture refreshes by itself.</p>
+        </details>
+        <details class="adv" id="colbox"><summary>Fuel colour <span class="muted" id="colstate"></span></summary>
+          <label class="switch"><span>Show what counts as fuel <span style="color:#ff00ff;font-weight:700">(magenta)</span></span><input type="checkbox" id="showfuel"><i></i></label>
+          <div class="slider"><span class="muted" style="width:92px">Hue from</span><input type="range" id="c_hue_lo" min="0" max="90" step="1"><b class="tnum" id="c_hue_lov"></b></div>
+          <div class="slider"><span class="muted" style="width:92px">Hue to</span><input type="range" id="c_hue_hi" min="0" max="90" step="1"><b class="tnum" id="c_hue_hiv"></b></div>
+          <div class="slider"><span class="muted" style="width:92px">Min. colour</span><input type="range" id="c_sat_min" min="0" max="255" step="1"><b class="tnum" id="c_sat_minv"></b></div>
+          <div class="slider"><span class="muted" style="width:92px">Min. brightness</span><input type="range" id="c_val_min" min="0" max="255" step="1"><b class="tnum" id="c_val_minv"></b></div>
+          <p class="muted" style="margin:6px 0 8px">Every ball should turn magenta and little else. Shirts, the floor or the field walls turning magenta: raise the minimums or narrow the hue. Balls in shadow missed: lower the minimums.</p>
+          <button class="btn sm" onclick="resetColour()">Back to standard</button>
+        </details>
         <div class="row">
           <button class="btn sm" onclick="grab()"><svg><use href="#i-image"/></svg>Refresh picture</button>
           <span class="muted" id="seekwrap">at <input class="input" id="seek" type="number" min="0" style="width:64px;height:28px;display:inline-block"> s</span>
@@ -370,7 +407,7 @@ async function refresh(){
   const dirty=JSON.stringify(S.cfg)!==savedCfg||!S.path;
   $("savestate").className="pill "+(dirty?"dirty":"saved");$("savestate").textContent=dirty?"Not saved":"Saved";
   if(!cam()&&S.cfg.cameras.length)cur=S.cfg.cameras[0].name;
-  renderCams();renderZones();renderSteps();renderLive();renderModel();handleJob();
+  renderCams();renderZones();renderSteps();renderLive();renderModel();renderUpdate();handleJob();
   const pic=cur&&S.pictures[cur];
   if(pic){const key=cur+":"+pic+":"+(S.running?Date.now():S.job.id);if(S.running||key!==lastPic){lastPic=key;loadImg();}}
   else{$("pic").style.display="none";$("empty").style.display="";}
@@ -393,7 +430,57 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";}
 function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
   $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;
-  renderModel();const m=c.model;if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}}
+  renderModel();const m=c.model;if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}
+  fillProfile(c);}
+/* ---------- presets, picture, fuel colour (tbavid/camprofile.py) ---------- */
+const IMG_NUM=["brightness","contrast","saturation","gain"],GATE=["hue_lo","hue_hi","sat_min","val_min"];
+function presetOf(c){return (S.presets||[]).find(p=>p.id===c.preset);}
+function renderPresets(c){const sel=$("f_preset"),P=S.presets||[];
+  const opt=p=>`<option value="${esc(p.id)}">${esc(p.label)}</option>`;
+  const html=`<option value="">Custom (no preset)</option><optgroup label="Built in">${P.filter(p=>p.builtin).map(opt).join("")}</optgroup>`+
+    (P.some(p=>!p.builtin)?`<optgroup label="Saved">${P.filter(p=>!p.builtin).map(opt).join("")}</optgroup>`:"");
+  if(sel.dataset.html!==html){sel.innerHTML=html;sel.dataset.html=html;}
+  sel.value=c.preset&&presetOf(c)?c.preset:"";const p=presetOf(c);
+  $("presetnote").textContent=p?p.note||"":"";$("presetnote").style.display=p&&p.note?"":"none";
+  $("delpreset").style.display=p&&!p.builtin?"":"none";}
+function fillProfile(c){renderPresets(c);const local=S.kinds[c.name]==="camera",im=c.image||{},co=Object.assign({},S.standard_colour,c.colour||{});
+  $("picbox").style.display=local?"":"none";
+  $("i_auto_exposure").checked=im.auto_exposure!==false;$("i_exposure_ms").value=im.exposure_ms||8;$("expv").textContent=(im.exposure_ms||8)+" ms";
+  $("exprow").style.display=im.auto_exposure===false?"":"none";
+  $("i_auto_wb").checked=im.auto_wb!==false;$("i_wb_kelvin").value=im.wb_kelvin||4600;$("wbv").textContent=(im.wb_kelvin||4600)+" K";
+  $("wbrow").style.display=im.auto_wb===false?"":"none";
+  for(const k of IMG_NUM)$("i_"+k).value=im[k]??"";$("i_fourcc").value=im.fourcc||"";
+  $("picstate").textContent=im.auto_exposure===false?`(${im.exposure_ms||"?"} ms${im.auto_wb===false?", "+(im.wb_kelvin||"?")+" K":""})`:"(automatic)";
+  for(const k of GATE){$("c_"+k).value=co[k];$("c_"+k+"v").textContent=co[k];}
+  const std=GATE.every(k=>co[k]===S.standard_colour[k]);$("colstate").textContent=std?"(standard)":"(adjusted)";}
+async function setImage(part){const c=cam();if(!c)return;
+  try{await api("update_camera",{name:cur,fields:{image:part}});}catch(e){refresh();return;}
+  await refresh();if(!S.running)grab();}
+async function setColour(part){if(!cam())return;try{await api("update_camera",{name:cur,fields:part});}catch(e){}
+  await refresh();lastPic="";loadImg();}
+$("i_auto_exposure").addEventListener("change",e=>setImage(e.target.checked?{auto_exposure:true}:{auto_exposure:false,exposure_ms:+$("i_exposure_ms").value}));
+$("i_exposure_ms").addEventListener("input",e=>$("expv").textContent=e.target.value+" ms");
+$("i_exposure_ms").addEventListener("change",e=>setImage({auto_exposure:false,exposure_ms:+e.target.value}));
+$("i_auto_wb").addEventListener("change",e=>setImage(e.target.checked?{auto_wb:true}:{auto_wb:false,wb_kelvin:+$("i_wb_kelvin").value}));
+$("i_wb_kelvin").addEventListener("input",e=>$("wbv").textContent=e.target.value+" K");
+$("i_wb_kelvin").addEventListener("change",e=>setImage({auto_wb:false,wb_kelvin:+e.target.value}));
+for(const k of IMG_NUM)$("i_"+k).addEventListener("change",e=>setImage({[k]:e.target.value===""?null:+e.target.value}));
+$("i_fourcc").addEventListener("change",e=>setImage({fourcc:e.target.value||null}));
+for(const k of GATE){$("c_"+k).addEventListener("input",e=>$("c_"+k+"v").textContent=e.target.value);
+  $("c_"+k).addEventListener("change",()=>{if(!$("showfuel").checked)$("showfuel").checked=true;const o={};for(const j of GATE)o[j]=+$("c_"+j).value;setColour({colour:o});});}
+$("showfuel").addEventListener("change",()=>{lastPic="";if(S.pictures[cur])loadImg();});
+function resetColour(){setColour({colour_reset:true});}
+async function applyPreset(id){if(!cur)return;if(!id){refresh();return;}
+  try{await api("apply_preset",{camera:cur,preset:id});toast("Preset applied");}catch(e){}
+  await refresh();if(!S.running)grab();}
+async function savePreset(){const c=cam();if(!c)return;const p=presetOf(c);
+  const name=await modal("Save as preset",`<label class="field"><span>Preset name</span><input class="input" id="mIn" placeholder="e.g. Practice field, ELP on red hub" value="${p&&!p.builtin?esc(p.label):""}"></label>
+    <p class="muted" style="margin-top:10px">Keeps this camera's size, frame rate, picture and fuel colour, to use on any camera and in any setup on this computer. Outlines and ball size are not part of it.</p>`,
+    [{label:"Cancel",value:null},{label:"Save preset",cls:"primary",value:()=>$("mIn").value.trim()}]);
+  if(!name)return;try{const r=await api("save_preset",{camera:cur,label:name});toast("Saved preset "+r.label);}catch(e){}refresh();}
+async function deletePreset(){const c=cam(),p=c&&presetOf(c);if(!p||p.builtin)return;
+  const ok=await modal("Delete preset",`<p>Delete the preset <b>${esc(p.label)}</b>? Cameras using it keep their settings.</p>`,[{label:"Cancel",value:null},{label:"Delete",cls:"primary",value:true}]);
+  if(!ok)return;try{await api("delete_preset",{preset:p.id});toast("Preset deleted");}catch(e){}refresh();}
 /* On every refresh, not only in fillForm: turning the model on or off left
    the label at "(off)" until another camera was picked. */
 function renderModel(){const c=cam();const m=c&&c.model||null;$("modelstate").textContent=m?"("+m.weights.split(/[\/\\]/).pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
@@ -415,6 +502,16 @@ function setStatus(kind,text,sub){$("sdot").className="dot "+kind;$("stext").tex
    take http://KEY@host:8000, bioarena a UDP host:port. Inside the Watchtower
    app this page said "Connected to bioarena" while sending to Watchtower. */
 function fieldName(){const t=(S.running?S.live.target:$("target").value)||"";return /^https?:/i.test(t.trim())?"Watchtower":"bioarena";}
+function renderUpdate(){const u=S.update,bar=$("updbar");
+  if(!u||!u.available){bar.style.display="none";return;}
+  bar.style.display="";$("updver").textContent=u.latest;$("updnotes").href=u.release_url||"#";
+  const busy=u.state==="downloading"||u.state==="installing",b=$("updbtn");
+  b.style.display=u.can_install?"":"none";b.disabled=busy||S.running;
+  $("updnote").textContent=u.state==="downloading"?`(downloading ${Math.round(u.progress*100)}%)`:
+    u.state==="installing"?"(installing, the app will reopen)":u.error?`(${u.error})`:
+    S.running?"(stop the cameras to update)":u.can_install?`(you have ${u.current})`:`(you have ${u.current}; download it from the release page)`;}
+async function installUpdate(){if(!confirm("Update now? The app closes, installs the new version and opens again (about a minute)."))return;
+  try{const r=await api("update_install",{});if(r&&r.error)toast(r.error,"bad");}catch(e){}refresh();}
 function renderLive(){const v=S.live,F=fieldName();
   for(const h of["red","blue"]){const e=$(h);if(v.counts[h]!==lastCounts[h]){e.textContent=v.counts[h];e.classList.remove("bump");void e.offsetWidth;if(v.counts[h]>lastCounts[h])e.classList.add("bump");lastCounts[h]=v.counts[h];}}
   if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:`Ready. Press Start to send counts to ${F}.`);
@@ -452,7 +549,7 @@ async function showCalibration(r){const rows=Object.entries(r.hand).map(([h,n])=
 /* ---------- picture & drawing ---------- */
 $("img").addEventListener("load",sizeCanvas);
 function loadImg(){const n=new Image();n.onload=()=>{$("empty").style.display="none";$("pic").style.display="";$("img").src=n.src;};
-  n.src="/frame.jpg?cam="+encodeURIComponent(cur)+"&w=1600&t="+Date.now();}
+  n.src="/frame.jpg?cam="+encodeURIComponent(cur)+"&w=1600"+($("showfuel").checked?"&fuel=1":"")+"&t="+Date.now();}
 function sizeCanvas(){const img=$("img"),cv=$("cv");if(!img.clientWidth)return;
   if(cv.width!==img.clientWidth||cv.height!==img.clientHeight){cv.width=img.clientWidth;cv.height=img.clientHeight;}overlay();}
 function scale(){const p=S&&S.pictures[cur];return p?$("img").clientWidth/p[0]:1;}
@@ -544,7 +641,9 @@ async function shareDialog(){
     const ok=await modal("Share on Wi-Fi",`<p>Open this page on a phone or another computer on the <b>same Wi-Fi</b>. They need a PIN that only this computer shows. The scoreboard (/board) opens without one.</p><p class="muted">Only this computer can quit or stop sharing.</p>`,[{label:"Cancel",value:false},{label:"Start sharing",cls:"primary",value:true}]);
     if(!ok)return;try{await api("share_on",{});}catch(e){return;}await refresh();}
   const s=S.share;if(!s||!s.on)return;
-  const stop=await modal("Sharing on Wi-Fi",`<p>On the other device, open</p><p style="font-size:22px;font-weight:700;user-select:all">${esc(s.url)}</p><p>and enter the PIN</p><p style="font-size:34px;font-weight:800;letter-spacing:6px">${esc(s.pin)}</p><p class="muted">Scoreboard for a TV: ${esc(s.url)}board (no PIN). If the other device cannot connect, the Wi-Fi may keep devices apart, or this computer's firewall blocks port 8791.</p>`,[{label:"Stop sharing",value:true},{label:"Done",cls:"primary",value:false}]);
+  const addr=s.name_url||s.url;                 // the .local name if this computer has one, else the IP
+  const backup=s.name_url?`<p class="muted" style="margin:2px 0 0">If that does not open, use <span style="user-select:all">${esc(s.url)}</span> instead.</p>`:"";
+  const stop=await modal("Sharing on Wi-Fi",`<p>On the other device, open</p><p style="font-size:22px;font-weight:700;user-select:all">${esc(addr)}</p>${backup}<p>and enter the PIN</p><p style="font-size:34px;font-weight:800;letter-spacing:6px">${esc(s.pin)}</p><p class="muted">Scoreboard for a TV: ${esc(addr)}board (no PIN). If the other device cannot connect, the Wi-Fi may keep devices apart, or this computer's firewall blocks port 8791.</p>`,[{label:"Stop sharing",value:true},{label:"Done",cls:"primary",value:false}]);
   if(stop){await api("share_off",{});toast("Stopped sharing");refresh();}}
 async function quitApp(){
   const msg=(S&&S.running?"Counting stops and the feed goes OFFLINE. ":"")+(S&&savedCfg!==null&&JSON.stringify(S.cfg)!==savedCfg?"<b>The setup is not saved.</b> ":"")+"Quit the hub counter?";

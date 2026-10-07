@@ -145,15 +145,26 @@ class App:
         self.windows: dict = {}
         self.home = None
         self.ip = lan_ip()
+        # One-click updates, shown on Overview. Updating quits like Quit does
+        # (closing the windows lets the installer replace the app).
+        from tbavid.appupdate import Updater, build_version
+        self.updater = Updater("Watchtower", build_version(), on_exit=self.quit)
+        self.updater.check_async()
 
     # -- called from home.html ----------------------------------------------
     def state(self) -> dict:
         st = self.ctl.state()
         live = st.get("live") or {}
         ip = lan_ip()
+        from tbavid.hubweb import host_name
+        name = host_name()
         return {"name": self.ev["name"], "date": self.ev["date"], "teams": self.ev["teams"],
                 "pins": {k: str(v) for k, v in self.ev["pins"].items()},
-                "phone_url": f"http://{ip}:{self.ev['port']}", "on_network": ip != "127.0.0.1",
+                "phone_url": f"http://{ip}:{self.ev['port']}",
+                # The friendly .local name shown to refs, or "" -- the QR still
+                # carries the IP, so a scan connects even where .local does not.
+                "phone_name": f"http://{name}:{self.ev['port']}" if name else "",
+                "on_network": ip != "127.0.0.1",
                 "fms_ok": port_open(self.ev["port"]), "data_dir": str(self.d),
                 "hub": {"running": bool(st.get("running")), "linked": bool(live.get("linked")),
                         "counts": live.get("counts") or {"red": 0, "blue": 0},
@@ -248,6 +259,18 @@ class App:
     def quit(self) -> None:
         threading.Thread(target=self._close_all, daemon=True).start()
 
+    def update_status(self) -> dict:
+        return self.updater.status()
+
+    def update_install(self) -> dict:
+        return self.updater.install(bool(self.ctl.state().get("running")))
+
+    def open_release(self) -> None:
+        """'What's new' in the real browser: a link followed inside the app
+        window would take Home away."""
+        if self.updater.release_url:
+            webbrowser.open(self.updater.release_url)
+
     # -- lifecycle ------------------------------------------------------------
     def restart(self) -> None:
         self.stop_all()
@@ -321,6 +344,15 @@ class HomeApi:
 
     def quit(self):
         return self._app.quit()
+
+    def update_status(self):
+        return self._app.update_status()
+
+    def update_install(self):
+        return self._app.update_install()
+
+    def open_release(self):
+        return self._app.open_release()
 
 
 def selftest_windows(app: "App", out: str) -> None:
@@ -400,7 +432,8 @@ def selftest_windows(app: "App", out: str) -> None:
 
 HOME_API = ("state", "qr", "get_settings", "local_offset", "new_pins", "save_settings", "tba_teams",
             "parse_team_text",
-            "open_view", "fullscreen", "open_folder", "quit")
+            "open_view", "fullscreen", "open_folder", "quit", "update_status", "update_install",
+            "open_release")
 
 
 def serve_home(app: "App", token: str):
@@ -547,6 +580,8 @@ def main() -> int:
     from tbavid.hubapp import HubController
     ctl = HubController(str(d / "cams.json"))
     ctl.default_target = f"http://{ev['key']}@127.0.0.1:{ev['port']}"
+    # Camera presets saved here or in the Hub Counter app are the same file.
+    ctl.presets_file = str(Path.home() / "Documents" / "Hub Counter" / "camera-presets.json")
     hub = threading.Thread(target=hubweb.serve, args=(ctl, HUB_PORT, "127.0.0.1"),
                            kwargs={"open_browser": False}, daemon=True, name="hub counter")
     hub.start()

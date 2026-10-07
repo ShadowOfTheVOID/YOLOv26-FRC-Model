@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Watchtower</title>
 <style>
-:root{--bg:#f4f5f7;--card:#fff;--fg:#15181d;--mute:#5f6875;--line:#e2e5ea;--acc:#2563eb;--acc-fg:#fff;
+:root{--bg:#f4f5f7;--card:#fff;--fg:#15181d;--mute:#5f6875;--line:#e2e5ea;--acc:#d61f2c;--acc-fg:#fff;
   --ok:#16a34a;--warn:#b45309;--bad:#dc2626;--red:#dc2626;--blue:#2563eb;--chip:#eef1f5;--side:#eceef2}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a20;--fg:#e7eaef;--mute:#9aa3b0;--line:#262b33;
-  --acc:#5b8cff;--acc-fg:#fff;--chip:#20252d;--red:#f87171;--blue:#7aa2ff;--side:#13161b;--warn:#f59e0b}}
+  --acc:#ef4452;--acc-fg:#fff;--chip:#20252d;--red:#f87171;--blue:#7aa2ff;--side:#13161b;--warn:#f59e0b}}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:14.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   -webkit-user-select:none;user-select:none;display:flex}
 nav{width:212px;flex:none;background:var(--side);border-right:1px solid var(--line);padding:18px 10px;display:flex;flex-direction:column;gap:2px}
 .brand{display:flex;align-items:center;gap:10px;padding:0 8px 16px}
-.logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#2563eb,#7c3aed);display:grid;place-items:center;flex:none}
+.logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#f43f4e,#960a18);display:grid;place-items:center;flex:none}
 .brand b{font-size:15px}
 nav button{all:unset;display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--fg);font-weight:500}
 nav button:hover{background:var(--chip)} nav button.on{background:var(--acc);color:var(--acc-fg)}
@@ -68,7 +68,7 @@ code{-webkit-user-select:text;user-select:text}
 </head>
 <body>
 <nav>
-  <div class="brand"><div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 6h5l-4 4 2 7-6-4-6 4 2-7-4-4h5z"/></svg></div><b>Watchtower</b></div>
+  <div class="brand"><div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="#111113"><path d="M12 2l4 3.2H8z"/><rect x="8.6" y="5.2" width="6.8" height="4" rx=".6"/><rect x="7" y="9.2" width="10" height="1.4" rx=".5"/><path d="M9.3 10.6h5.4l1.3 10H8z"/><rect x="5.5" y="20.2" width="13" height="1.6" rx=".8"/><circle cx="12" cy="7.2" r="1.2" fill="#fff"/></svg></div><b>Watchtower</b></div>
   <button data-tab="home" class="on"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8v10H3z"/></svg><span class="t">Overview</span></button>
   <button data-tab="hub"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg><span class="t">Hub cameras</span></button>
   <button data-tab="phones"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg><span class="t">Phones &amp; PINs</span></button>
@@ -88,6 +88,10 @@ code{-webkit-user-select:text;user-select:text}
     <span class="chip"><span class="dot" id="netdot"></span><span id="nettxt">Wi-Fi</span></span>
     <span class="chip"><span class="dot" id="camdot"></span><span id="camtxt">Cameras</span></span></div>
   <div class="warnbox" id="setupwarn" style="display:none"></div>
+  <div class="card" id="updcard" style="display:none"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span>Update available: <b id="updver"></b> <span class="sub" id="updnote"></span></span><span style="flex:1"></span>
+    <a id="updnotes" href="#" style="color:var(--acc)" onclick="api().open_release();return false">What's new</a>
+    <button class="btn primary" id="updbtn" onclick="installUpdate()">Update</button></div></div>
   <div class="tiles">
     <button class="tile" onclick="openView('control')">
       <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></span>
@@ -95,7 +99,7 @@ code{-webkit-user-select:text;user-select:text}
       <span class="foot">PIN <span class="pin" id="pin_control_t">——</span></span></button>
     <button class="tile" onclick="show('hub')">
       <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></span>
-      <b>Hub cameras</b><span class="sub">Draw each hub's outline, measure a ball, Start. Counts go to the scorekeeper.</span>
+      <b>Hub cameras</b><span class="sub">Pick a camera preset, draw each hub's outline, measure a ball, Start. Counts go to the scorekeeper.</span>
       <span class="foot" id="hubfoot">Not counting</span></button>
     <button class="tile" onclick="openView('display')">
       <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M7 21h10"/></svg></span>
@@ -113,7 +117,7 @@ code{-webkit-user-select:text;user-select:text}
   <h1>Phones &amp; PINs</h1><div class="sub">Refs log fouls and the emcee calls the hub lights from their phones.</div>
   <div class="warnbox" id="netwarn" style="display:none;margin-top:14px">This computer is not on a network, so phones cannot reach it. Join the event Wi-Fi (or your own router), then reopen this tab.</div>
   <div class="card" style="margin-top:14px"><div class="phone"><div class="qr" id="qr"></div>
-    <div><div class="sub">On the same Wi-Fi, scan or open</div><div class="url" id="phoneurl">—</div>
+    <div><div class="sub">On the same Wi-Fi, scan or open</div><div class="url" id="phoneurl">—</div><div class="sub" id="phoneurl2" style="user-select:all"></div>
       <p class="note">Can't connect? Allow Watchtower when the firewall asks (Windows: tick Private networks), and use your own router: venue and school Wi-Fi often keep devices apart.</p></div></div></div>
   <div class="card"><h2>PINs</h2>
     <div class="form" id="form_pins"></div>
@@ -238,14 +242,27 @@ async function refresh(){
   else chip("camdot","camtxt","","Cameras idle");
   $("hubfoot").innerHTML=h.running?`Counting · <span class="red">red ${h.counts.red}</span> · <span class="blue">blue ${h.counts.blue}</span>`:(h.cameras?`${h.cameras} camera${h.cameras>1?"s":""} set up · not counting`:"No cameras set up yet");
   $("pin_control_t").textContent=s.pins.control||"——";
+  renderUpdate(h.running);
   const todo=[];if(!s.teams.length)todo.push("add the teams");if(!s.date)todo.push("set the date");
   if((s.name||"").startsWith("My Offseason"))todo.push("name the event");
   $("setupwarn").style.display=todo.length?"":"none";
   $("setupwarn").innerHTML=todo.length?`Before the first match: ${todo.join(", ")} in <a href="#" style="color:var(--acc)" onclick="show('event');return false">Event &amp; schedule</a>.`:"";
   $("netwarn").style.display=s.on_network?"none":"";
-  $("phoneurl").textContent=s.phone_url;
+  $("phoneurl").textContent=s.phone_name||s.phone_url;
+  $("phoneurl2").textContent=s.phone_name?("or "+s.phone_url):"";
   if(s.phone_url!==qrFor){qrFor=s.phone_url;try{$("qr").innerHTML=await api().qr(s.phone_url);}catch(e){}}
 }
+async function renderUpdate(running){let u;try{u=await api().update_status();}catch(e){return;}
+  const c=$("updcard");if(!u||!u.available){c.style.display="none";return;}
+  c.style.display="";$("updver").textContent=u.latest;$("updnotes").title=u.release_url||"";
+  const busy=u.state==="downloading"||u.state==="installing",b=$("updbtn");
+  b.style.display=u.can_install?"":"none";b.disabled=busy||running;
+  $("updnote").textContent=u.state==="downloading"?`(downloading ${Math.round(u.progress*100)}%)`:
+    u.state==="installing"?"(installing, Watchtower will reopen)":u.error?`(${u.error})`:
+    running?"(stop the cameras to update)":u.can_install?`(you have ${u.current})`:`(you have ${u.current}; download it from the release page)`;}
+async function installUpdate(){if(!confirm("Update now? Watchtower closes, installs the new version and opens again (about a minute). Matches and settings are kept."))return;
+  let r;try{r=await api().update_install();}catch(e){r={error:String(e)};}
+  if(r&&r.error)alert(r.error);}
 async function openView(n){try{await api().open_view(n);}catch(e){}}
 async function fullscreen(n){try{await api().fullscreen(n);}catch(e){}}
 async function quitApp(){

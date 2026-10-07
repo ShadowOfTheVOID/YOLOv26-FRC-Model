@@ -164,6 +164,11 @@ def main() -> int:
     from tbavid import hubweb
     from tbavid.hubapp import HubController
     ctl = HubController(str(d / "cams.json"))
+    # One-click updates (the page shows "Update available"); none from a
+    # checkout or a 0.0.0 test build. Updating quits like the Quit button.
+    from tbavid.appupdate import Updater, build_version
+    ctl.updater = Updater("HubCounter", build_version(), on_exit=ctl.quit)
+    ctl.updater.check_async()
     server = threading.Thread(target=hubweb.serve, args=(ctl, PORT, "127.0.0.1"),
                               kwargs={"open_browser": False, "share": args.share, "pin": args.pin},
                               daemon=True, name="hub counter page")

@@ -3583,9 +3583,299 @@ def test_watchtower_home_api():
           "def run_window(" in hc and "win.events.closed += ctl.quit" in hc
           and "webbrowser.open(URL)" in hc and "--selftest-window" in hc)
     spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
+    icons = root / "apps" / "icons"
+    check("both apps carry their own icon (not PyInstaller's Python snake) on Mac, Windows and the installer",
+          all((icons / f"{n}.{e}").stat().st_size > 1000
+              for n in ("HubCounter", "Watchtower") for e in ("icns", "ico", "png"))
+          and "icon=ICONS +" in spec and 'icon=ICONS + ".icns"' in spec
+          and "SetupIconFile" in (root / "apps" / "installer" / "windows.iss").read_text()
+          and "-DIconFile=" in (root / ".github" / "workflows" / "hub-app.yml").read_text())
     check("and both apps bundle the window toolkit",
           spec.index("WEBVIEW = collect_submodules") < spec.index('if APP == "watchtower":')
           and "EXTRA_IMPORTS = WEBVIEW" in spec)
+
+
+def test_app_update():
+    """One-click updates: offered only when newer, never while counting.
+
+    The user chose an Update button over automatic updates, so an update
+    cannot close the app in the middle of a match: install() refuses while
+    the cameras run. Builds without a real version (0.0.0: pull-request
+    builds, runs from a checkout) never ask GitHub at all.
+    """
+    import http.server
+    import json as _json
+    import tempfile
+    import threading as _t
+    from tbavid import appupdate
+    from tbavid.hubweb import HOST_ONLY, ACTIONS
+
+    vt = appupdate.version_tuple
+    check("versions compare as numbers (0.4.10 is newer than 0.4.9)", vt("v0.4.10") > vt("0.4.9"))
+    check("an unparsable version is never newer", vt("latest") == () and vt("") == ())
+    an = appupdate.asset_name
+    check("each OS fetches its own release file",
+          an("Watchtower", "darwin") == "Watchtower-mac.dmg"
+          and an("HubCounter", "win32") == "HubCounter-Setup-windows.exe"
+          and an("Watchtower", "linux", "aarch64") == "Watchtower-linux-arm64.tar.gz"
+          and an("Watchtower", "linux", "x86_64") == "Watchtower-linux-x64.tar.gz")
+
+    rel = {"tag_name": "v0.5.0", "html_url": "https://example.invalid/r",
+           "assets": [{"name": "Watchtower-mac.dmg", "browser_download_url": "https://example.invalid/w.dmg"},
+                      {"name": "Watchtower-Setup-windows.exe", "browser_download_url": "https://example.invalid/w.exe"}]}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = _json.dumps(rel).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    _t.Thread(target=srv.serve_forever, daemon=True).start()
+    old = appupdate.API
+    appupdate.API = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        exits = []
+        u = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: exits.append(1), platform="win32")
+        u.check()
+        st = u.status()
+        check("a newer release is offered with its installer",
+              st["available"] and st["can_install"] and st["latest"] == "v0.5.0"
+              and u.asset_url.endswith("w.exe"))
+        check("refused while the cameras count", "error" in u.install(counting=True) and not exits)
+        same = appupdate.Updater("Watchtower", "0.5.0", on_exit=lambda: None, platform="darwin")
+        same.check()
+        check("the same version offers nothing", not same.status()["available"])
+        lin = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="linux")
+        lin.check()
+        check("Linux/Pi is told about it but gets a link, not an installer",
+              lin.status()["available"] and not lin.status()["can_install"]
+              and "error" in lin.install(counting=False))
+        dev = appupdate.Updater("Watchtower", "0.0.0", on_exit=lambda: None, platform="win32")
+        dev.check()
+        check("pull-request builds never look", dev.status()["latest"] == "")
+        appupdate.API = "http://127.0.0.1:9/"          # offline at the venue
+        off = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="win32")
+        off.check(timeout=2)
+        check("offline: no update, no error shown", not off.status()["available"] and not off.status()["error"])
+    finally:
+        appupdate.API = old
+        srv.shutdown()
+
+    work = Path(tempfile.mkdtemp())
+    w = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="win32")
+    cmd = w.write_helper(work / "W-Setup.exe", work, pid=4242,
+                         exe=r"C:\Users\a\AppData\Local\Programs\Watchtower\Watchtower.exe").read_text()
+    check("Windows: waits for the app, installs silently into the same folder, reopens",
+          'PID eq 4242' in cmd and "/VERYSILENT" in cmd
+          and r'/DIR="C:\Users\a\AppData\Local\Programs\Watchtower"' in cmd
+          and cmd.index("/VERYSILENT") < cmd.index('start ""'))
+    m = appupdate.Updater("Watchtower", "0.4.4", on_exit=lambda: None, platform="darwin")
+    sh = m.write_helper(work / "W.dmg", work, pid=4242,
+                        exe="/Applications/Watchtower.app/Contents/MacOS/Watchtower").read_text()
+    check("macOS: replaces the .app in place, puts the old one back if the copy fails",
+          "kill -0 4242" in sh and 'mv "/Applications/Watchtower.app" "/Applications/Watchtower.app.old"' in sh
+          and 'ditto "$new" "/Applications/Watchtower.app"' in sh and 'open "/Applications/Watchtower.app"' in sh
+          and "hdiutil detach" in sh)
+    check("only the computer the app runs on can start an update",
+          "update_install" in HOST_ONLY and "update_install" in ACTIONS)
+    root = Path(__file__).resolve().parent.parent
+    spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
+    check("builds carry their version (the release tag) for the comparison",
+          "app_version.txt" in spec and "HUBCOUNTER_VERSION" in spec)
+    for app in ("hubcounter", "watchtower"):
+        src = (root / "apps" / app / "main.py").read_text()
+        check(f"the {app} app checks at start", "Updater(" in src and "check_async()" in src)
+
+
+def test_camera_presets():
+    """Camera presets: format, picture settings and the fuel colour gate.
+
+    A webcam left to itself lengthens its shutter in a dim gym and drops to
+    15-24 fps (20 fps measured 25.1% error on the Einstein replays against
+    10.5% at 60), so the ELP OV4689 preset fixes exposure under one 60 fps
+    frame and asks for MJPG, without which USB 2 cannot carry 60 fps. Any
+    change to a camera makes it custom, and saved presets survive a restart.
+    """
+    import tempfile
+    from tbavid import camprofile as cp
+    from tbavid.hubapp import HubController
+    from tbavid.hubcount import LOOSE_HI, LOOSE_LO, setup_from_dict, setup_to_dict
+    from tbavid.hubweb import ACTIONS
+
+    check("the standard colour gate is the counter's own", cp.gate(None) == (LOOSE_LO, LOOSE_HI))
+    elp = cp.find(cp.BUILTIN, "elp-ov4689")
+    check("ELP OV4689: 60 fps over MJPG, exposure fixed under one frame, white balance fixed",
+          elp["fps"] == 60 and elp["image"]["fourcc"] == "MJPG"
+          and elp["image"]["auto_exposure"] is False and elp["image"]["exposure_ms"] < 1000 / 60
+          and elp["image"]["auto_wb"] is False)
+    web = cp.find(cp.BUILTIN, "usb-webcam")
+    check("the standard webcam preset keeps the camera's automatic picture",
+          web["image"]["auto_exposure"] and web["image"]["auto_wb"])
+    for bad in ({"hue_lo": 40, "hue_hi": 15}, {"sat_min": 300}, {"hue_hi": 200}):
+        try:
+            cp.check_colour(bad)
+            ok = False
+        except ValueError:
+            ok = True
+        check(f"colour {bad} refused", ok)
+    for bad in ({"exposure_ms": 0}, {"wb_kelvin": 100}, {"fourcc": "MJPEG"}):
+        try:
+            cp.check_image(bad)
+            ok = False
+        except ValueError:
+            ok = True
+        check(f"picture {bad} refused", ok)
+    check("exposure in each backend's units (V4L2 100 us steps, else log2 s)",
+          cp.exposure_value(8, "V4L2") == 80 and cp.exposure_value(8, "MSMF") == -7)
+
+    cfg = {"rules": 2, "cameras": [{"name": "a", "source": "0", "ball_area": 900,
+           "preset": "elp-ov4689", "image": elp["image"], "colour": {"hue_lo": 18},
+           "zones": [{"hub": "red", "outline": [[0, 0], [10, 0], [10, 10]]}]}]}
+    back = setup_to_dict(setup_from_dict(cfg))["cameras"][0]
+    check("a setup keeps its preset, picture and colour through save and load",
+          back["preset"] == "elp-ov4689" and back["image"]["exposure_ms"] == 8
+          and back["colour"] == dict(cp.STANDARD_COLOUR, hue_lo=18))
+    try:
+        setup_from_dict({"cameras": [dict(cfg["cameras"][0], colour={"hue_lo": 99, "hue_hi": 5})]})
+        ok = False
+    except ValueError as e:
+        ok = "'a'" in str(e)
+    check("a bad colour in a setup file names its camera", ok)
+
+    d = Path(tempfile.mkdtemp())
+    ctl = HubController(str(d / "cams.json"))
+    ctl.say = lambda t: None
+    ctl.cfg["cameras"].append({"name": "cam0", "source": "0", "ball_area": 900,
+                               "size": "1920x1080", "zones": []})
+    c = ctl.apply_preset("cam0", "elp-ov4689")
+    check("a preset sets size, fps, picture and colour", c["fps"] == 60 and c["size"] == "1280x720"
+          and c["image"]["fourcc"] == "MJPG" and c["preset"] == "elp-ov4689")
+    ctl.update_camera("cam0", {"name": "cam0", "fps": "60", "size": "1280x720"})
+    check("re-sending the same fields keeps the preset", ctl.camera("cam0").get("preset") == "elp-ov4689")
+    ctl.update_camera("cam0", {"image": {"exposure_ms": 12}})
+    c = ctl.camera("cam0")
+    check("a changed setting makes it custom and keeps the rest",
+          "preset" not in c and c["image"]["exposure_ms"] == 12 and c["image"]["fourcc"] == "MJPG")
+    ctl.update_camera("cam0", {"colour": {"sat_min": 80}})
+    p = ctl.save_preset("cam0", "Practice field")
+    check("a saved preset goes beside the setup file",
+          (d / "camera-presets.json").exists() and p["id"] == "practice-field")
+    again = HubController(str(d / "cams.json"))
+    saved = [x for x in again.state()["presets"] if not x["builtin"]]
+    check("and is there after a restart, with its settings",
+          [x["label"] for x in saved] == ["Practice field"]
+          and saved[0]["image"]["exposure_ms"] == 12 and saved[0]["colour"]["sat_min"] == 80)
+    try:
+        ctl.delete_preset("elp-ov4689")
+        ok = False
+    except ValueError:
+        ok = True
+    check("a built-in preset cannot be deleted", ok)
+    ctl.delete_preset("practice-field")
+    check("a saved one can, and the camera keeps its settings",
+          not cp.load_saved(ctl.presets_path) and ctl.camera("cam0")["image"]["exposure_ms"] == 12)
+    ctl.update_camera("cam0", {"colour_reset": True})
+    check("Back to standard drops the camera's own colour", "colour" not in ctl.camera("cam0"))
+    check("the page can apply, save and delete presets",
+          {"apply_preset", "save_preset", "delete_preset"} <= set(ACTIONS))
+    other = Path(tempfile.mkdtemp())
+    wt = HubController(str(other / "cams.json"))
+    wt.presets_file = str(d / "camera-presets.json")
+    ctl.save_preset("cam0", "Shared")
+    check("an app pointed at another app's presets file offers its presets",
+          any(p["label"] == "Shared" for p in wt.presets()))
+    ctl.delete_preset("shared")
+    src = (Path(__file__).resolve().parent.parent / "apps" / "watchtower" / "main.py").read_text()
+    check("Watchtower shares the Hub Counter app's presets file",
+          '"Hub Counter" / "camera-presets.json"' in src and "ctl.presets_file" in src)
+
+    try:
+        import cv2  # noqa: F401  (CI has no cv2; the rest is checked there)
+        import numpy as np
+    except ImportError:
+        return
+
+    class Cap:
+        def __init__(self):
+            self.props = {}
+
+        def getBackendName(self):
+            return "V4L2"
+
+        def set(self, prop, v):
+            if prop == cv2.CAP_PROP_WB_TEMPERATURE:
+                return False
+            self.props[prop] = v
+            return True
+
+    said = []
+    cap = Cap()
+    res = cp.apply_image(cap, elp["image"], said.append, "cam0")
+    check("V4L2 gets manual exposure (1) at 80 x 100 us",
+          cap.props[cv2.CAP_PROP_AUTO_EXPOSURE] == 1 and cap.props[cv2.CAP_PROP_EXPOSURE] == 80)
+    check("a setting the driver ignores is reported, not assumed",
+          res["white balance"] == "ignored" and said and "white balance" in said[0])
+    from tbavid.hubapp import fuel_overlay
+    from tbavid.hubcount import ZoneEye
+    img = np.zeros((40, 80, 3), np.uint8)
+    img[:, :40] = cv2.cvtColor(np.uint8([[[30, 120, 200]]]), cv2.COLOR_HSV2BGR)[0, 0]   # fuel
+    img[:, 40:] = cv2.cvtColor(np.uint8([[[30, 40, 200]]]), cv2.COLOR_HSV2BGR)[0, 0]    # pale wall
+    over = fuel_overlay(img)
+    check("the overlay paints fuel magenta and leaves the wall",
+          tuple(over[20, 10]) != tuple(img[20, 10]) and tuple(over[20, 60]) == tuple(img[20, 60]))
+    lo, hi = cp.gate({"sat_min": 20})
+    blobs = ZoneEye((0, 0, 80, 40), lo=lo, hi=hi).blobs(img)
+    check("a camera's own colour gate is the one its zones count with",
+          len(blobs) == 1 and blobs[0][2] == 80 * 40)
+
+
+def test_share_hides_the_ip_behind_a_name():
+    """Sharing shows a .local hostname, but never instead of the IP.
+
+    Phones should not have to read a raw 192.168.x.x, so Share offers
+    <computer>.local (Bonjour/mDNS, which Macs and Windows advertise). Not
+    every network passes .local through, and the rule is that every device
+    on the Wi-Fi still gets in, so the IP is always carried too -- the name
+    is an addition, never a replacement, and the QR encodes the IP so a scan
+    always connects.
+    """
+    from tbavid import hubweb
+
+    saved = hubweb.socket.gethostname
+    try:
+        hubweb.socket.gethostname = lambda: "Scoring-Mac.lan"
+        check("a computer's name becomes a clean .local address",
+              hubweb.host_name() == "scoring-mac.local")
+        hubweb.socket.gethostname = lambda: ""
+        check("no name -> no .local (the IP is used)", hubweb.host_name() == "")
+    finally:
+        hubweb.socket.gethostname = saved
+
+    class Ctl:
+        def say(self, *a):
+            pass
+    sh = hubweb.Share(Ctl())
+    sh.httpd = object()                       # pretend it is running, without a socket
+    sh.pin = "123456"
+    hubweb.socket.gethostname = lambda: "field-laptop"
+    try:
+        st = sh.status(host=True)
+    finally:
+        hubweb.socket.gethostname = saved
+    check("status carries both the IP url and the .local name",
+          st["url"].startswith("http://") and "field-laptop.local" in st["name_url"]
+          and st["url"] != st["name_url"])
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    check("the share dialog leads with the name and keeps the IP as a backup",
+          "s.name_url||s.url" in page and "use <span" in page)
+    sh.httpd = None
+    check("not sharing -> nothing leaked", sh.status(host=True) == {"on": False})
 
 
 def test_hub_scoreboard_view():
@@ -3998,7 +4288,8 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
-               test_watchtower_home_api):
+               test_watchtower_home_api, test_app_update,
+               test_camera_presets, test_share_hides_the_ip_behind_a_name):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

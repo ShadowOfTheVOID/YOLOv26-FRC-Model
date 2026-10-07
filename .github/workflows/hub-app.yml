@@ -169,7 +169,8 @@ jobs:
                 # Inno's own error, as an annotation: the raw log is not on the PR.
                 if ! "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "-DAppName=$1" "-DAppExe=$1.exe" \
                     "-DSrcDir=$(cygpath -w "$PWD/dist/$1")" "-DOutFile=${2%.exe}" \
-                    "-DAppVersion=${APP_VERSION#v}" "-O$(cygpath -w "$PWD")" apps/installer/windows.iss \
+                    "-DAppVersion=${APP_VERSION#v}" "-DIconFile=$(cygpath -w "$PWD/apps/icons/${1// /}.ico")" \
+                    "-O$(cygpath -w "$PWD")" apps/installer/windows.iss \
                     > iscc.log 2>&1; then
                   echo "::error title=Inno Setup ($1)::$(grep -iE 'error|line [0-9]+' iscc.log | tail -5 | tr '\n' ' ')"
                   tail -30 iscc.log; return 1

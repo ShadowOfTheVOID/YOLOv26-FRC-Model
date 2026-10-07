@@ -39,7 +39,7 @@ from .hubapp import HubController, encode, fit_scale, list_dir, probe_cameras
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 SHARE_PORT = 8791
 OPEN_PATHS = {"/board", "/api/board", "/login"}   # no PIN on the shared port
-HOST_ONLY = {"quit", "share_on", "share_off"}     # never from a shared device
+HOST_ONLY = {"quit", "share_on", "share_off", "update_install"}  # never from a shared device
 MAX_TRIES = 5                                     # wrong PINs per address ...
 LOCKOUT_S = 60.0                                  # ... before a minute's wait
 
@@ -53,6 +53,21 @@ def lan_ip() -> str:
             return s.getsockname()[0]
     except OSError:
         return "127.0.0.1"
+
+
+def host_name() -> str:
+    """A name phones can use instead of the raw IP: <computer>.local, which
+    Macs and Windows advertise over the network by themselves (Bonjour /
+    mDNS), and iPhones and recent Androids resolve. Not every network passes
+    it through, so it is only ever shown ALONGSIDE the IP, never instead of
+    it -- the IP is the address that always works."""
+    try:
+        name = socket.gethostname().split(".")[0].strip()
+    except OSError:
+        return ""
+    # keep it a sane hostname label; .local is appended by the resolver's rule
+    name = "".join(c for c in name if c.isalnum() or c == "-").lower()
+    return f"{name}.local" if name else ""
 
 
 class Share:
@@ -73,6 +88,11 @@ class Share:
 
     def url(self) -> str:
         return f"http://{lan_ip()}:{self.port}/"
+
+    def name_url(self) -> str:
+        """The .local address, or "" when this computer has no usable name."""
+        n = host_name()
+        return f"http://{n}:{self.port}/" if n else ""
 
     def start(self, pin: str = "", port: int = SHARE_PORT) -> dict:
         with self.lock:
@@ -100,7 +120,7 @@ class Share:
     def status(self, host: bool) -> dict:
         if not self.on:
             return {"on": False}
-        out = {"on": True, "url": self.url()}
+        out = {"on": True, "url": self.url(), "name_url": self.name_url()}
         if host:
             out["pin"] = self.pin
         return out
@@ -138,7 +158,7 @@ background:#0b0e14;color:#e7ebf3;font:16px system-ui,sans-serif}
 form{background:#141925;padding:28px;border-radius:14px;width:min(320px,90vw)}
 input{width:100%;box-sizing:border-box;font-size:28px;letter-spacing:6px;text-align:center;
 padding:10px;border-radius:10px;border:1px solid #2a3142;background:#0b0e14;color:#fff}
-button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;background:#5b7cfa;
+button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;background:#e11d2a;
 color:#fff;font-size:16px;font-weight:600}p{color:#9aa3b5;font-size:14px}#e{color:#f87171}</style>
 </head><body><form id="f"><b>Hub Counter</b><p>Enter the PIN shown on the counting computer.</p>
 <input id="p" inputmode="numeric" autocomplete="one-time-code" autofocus>
@@ -206,7 +226,7 @@ def make_handler(ctl: HubController, allow_remote: bool = False,
             if u.path == "/api/ls":
                 return self._json(list_dir(q.get("path", "")))
             if u.path == "/frame.jpg":
-                frame = ctl.picture(q.get("cam", ""))
+                frame = ctl.picture(q.get("cam", ""), q.get("fuel") == "1")
                 if frame is None:
                     return self._send(404, b"no picture", "text/plain")
                 h, w = frame.shape[:2]
@@ -265,6 +285,9 @@ def _at(body) -> Optional[float]:
 ACTIONS = {
     "add_camera": lambda c, b: c.add_camera(b.get("source", ""), b.get("name", "")),
     "remove_camera": lambda c, b: c.remove_camera(b["name"]),
+    "apply_preset": lambda c, b: c.apply_preset(b["camera"], b["preset"]),
+    "save_preset": lambda c, b: c.save_preset(b["camera"], b.get("label", "")),
+    "delete_preset": lambda c, b: c.delete_preset(b["preset"]),
     "update_camera": lambda c, b: c.update_camera(b["name"], b.get("fields", {})),
     "add_zone": lambda c, b: c.add_zone(b["camera"], b["hub"], b["points"],
                                         b.get("kind", "outline")),
@@ -283,6 +306,9 @@ ACTIONS = {
     "stop": lambda c, b: c.stop(),
     "save": lambda c, b: c.save(b.get("path") or None),
     "quit": lambda c, b: c.quit(),
+    # One-click update (the Hub Counter app sets c.updater; tbavid/appupdate.py).
+    "update_install": lambda c, b: (c.updater.install(c.running) if c.updater
+                                    else {"error": "updates come with the app, not a checkout"}),
     "share_on": lambda c, b: c.share.start(b.get("pin", "")),
     "share_off": lambda c, b: c.share.stop(),
     "load": lambda c, b: c.load(b["path"]),

@@ -19,6 +19,7 @@ import time
 from collections import deque
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from .camprofile import STANDARD_COLOUR
 from .hubcount import DEFAULT_BLUR
 from .hubmodel import BUILTIN, DEFAULT_WEIGHT, bundled_model
 
@@ -184,7 +185,8 @@ def probe_cameras(max_index: int = 6) -> List[Dict]:
 
 
 def grab_frame(source: str, fps: float = 0.0, size: str = "",
-               at_s: Optional[float] = None):
+               at_s: Optional[float] = None, image: Optional[Dict] = None,
+               out: Callable[[str], None] = print):
     """One frame to draw on. A recording is read at `at_s`, or a third of the
     way in: a broadcast opens on a title card (Einstein 4 at 3 s showed only
     "EINSTEIN PLAYOFFS", and outlines were drawn on it). A camera is read a
@@ -203,7 +205,7 @@ def grab_frame(source: str, fps: float = 0.0, size: str = "",
         ok, frame = cap.read()
         cap.release()
     else:
-        cap = open_source(source, fps, size)
+        cap = open_source(source, fps, size, image, out)
         frame = None
         for _ in range(10):
             ok, fr = cap.read()
@@ -214,6 +216,22 @@ def grab_frame(source: str, fps: float = 0.0, size: str = "",
     if not ok:
         raise ValueError(f"no frame from {source}")
     return frame
+
+
+def fuel_overlay(frame, colour: Optional[Dict] = None):
+    """The picture with every pixel the colour gate takes as fuel painted
+    magenta: what a colour setting does is judged on the camera's own
+    picture, not on numbers. (Magenta: the one colour a field has none of.)"""
+    import cv2
+    import numpy as np
+    from .camprofile import gate
+
+    lo, hi = gate(colour)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    m = cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8)) > 0
+    out = frame.copy()
+    out[m] = (0.35 * frame[m] + 0.65 * np.array((255, 0, 255))).astype(np.uint8)
+    return out
 
 
 def encode(frame, scale: float = 1.0, fmt: str = ".jpg") -> bytes:
@@ -258,6 +276,14 @@ class HubController:
         # it to its own server (http://KEY@127.0.0.1:8000), so counts go
         # there without anyone typing the vision key.
         self.default_target = ""
+        # The Hub Counter app's one-click updater (tbavid/appupdate.py), shown
+        # on the page; None from a checkout and inside Watchtower, whose own
+        # Home offers its updates.
+        self.updater = None
+        # Where saved camera presets live; None = beside the setup file. The
+        # Watchtower app points it at the Hub Counter app's file, so a preset
+        # saved in either app is offered in both.
+        self.presets_file: Optional[str] = None
         if setup_path and os.path.exists(setup_path):
             self.load(setup_path)
 
@@ -366,6 +392,54 @@ class HubController:
             self.say(WIRELESS_WARNING)
         return cam
 
+    # -- camera presets (camprofile) -------------------------------------------
+    @property
+    def presets_path(self) -> str:
+        """Saved presets live beside the setup file (~/Documents/Hub Counter
+        in the app), so every setup made there shares them."""
+        if self.presets_file:
+            return self.presets_file
+        base = os.path.dirname(os.path.abspath(self.path)) if self.path else os.getcwd()
+        return os.path.join(base, "camera-presets.json")
+
+    def presets(self) -> List[Dict]:
+        from .camprofile import all_presets
+        return all_presets(self.presets_path)
+
+    def apply_preset(self, cam_name: str, pid: str) -> Dict:
+        """Size, frame rate, picture and colour from a preset; the outlines
+        and ball size stay (re-measure the ball if the size changed)."""
+        from .camprofile import find
+        p = find(self.presets(), pid)
+        with self.lock:
+            c = self.camera(cam_name)
+            old_size = c.get("size", "")
+            c.update(preset=p["id"], fps=p["fps"], size=p["size"],
+                     image=dict(p["image"]), colour=dict(p["colour"]))
+        self.say(f"{c['name']}: preset {p['label']}")
+        if p["size"] and old_size != p["size"] and c.get("ball_area"):
+            self.say(f"{c['name']}: the picture size changed, so measure the "
+                     f"ball again (and check the outlines)")
+        return c
+
+    def save_preset(self, cam_name: str, label: str) -> Dict:
+        from .camprofile import save_preset
+        with self.lock:
+            c = json.loads(json.dumps(self.camera(cam_name)))
+        p = save_preset(self.presets_path, label, c)
+        with self.lock:
+            self.camera(cam_name)["preset"] = p["id"]
+        self.say(f"saved preset {p['label']} ({self.presets_path})")
+        return p
+
+    def delete_preset(self, pid: str) -> None:
+        from .camprofile import delete_preset
+        delete_preset(self.presets_path, pid)
+        with self.lock:
+            for c in self.cfg["cameras"]:
+                if c.get("preset") == pid:
+                    c.pop("preset")
+
     def remove_camera(self, name: str) -> None:
         with self.lock:
             self.cfg["cameras"] = [c for c in self.cfg["cameras"]
@@ -385,6 +459,7 @@ class HubController:
                 c["name"] = new
             if "source" in fields and str(fields["source"]).strip():
                 c["source"] = str(fields["source"]).strip()
+            before = (float(c.get("fps") or 0), str(c.get("size") or ""))
             for k in ("fps", "ball_area"):
                 if k in fields:
                     try:
@@ -393,6 +468,8 @@ class HubController:
                         raise ValueError(f"{k} must be a number")
             if "size" in fields:
                 c["size"] = str(fields["size"] or "").strip()
+            if (float(c.get("fps") or 0), str(c.get("size") or "")) != before:
+                c.pop("preset", None)
             if "blur" in fields:
                 b = float(fields["blur"] or 0)
                 if not 0 <= b <= 1:
@@ -400,6 +477,18 @@ class HubController:
                 c["blur"] = round(b, 2)
             if "remove_static" in fields:
                 c["remove_static"] = bool(fields["remove_static"])
+            # Picture settings and colour gate (camprofile). Any change makes
+            # the camera "custom": its preset no longer describes it.
+            from .camprofile import check_colour, check_image
+            if "image" in fields:
+                c["image"] = check_image(dict(c.get("image") or {}, **(fields["image"] or {})))
+                c.pop("preset", None)
+            if "colour" in fields:
+                c["colour"] = check_colour(dict(c.get("colour") or {}, **(fields["colour"] or {})))
+                c.pop("preset", None)
+            if fields.get("colour_reset"):
+                c.pop("colour", None)
+                c.pop("preset", None)
             if "model" in fields:
                 # A path to turn the model blend on, "" to turn it off. The
                 # counter settings tuned in hubmodel are kept unless a setup
@@ -468,17 +557,24 @@ class HubController:
             raise ValueError("the camera is in use by the counter; its live "
                              "picture is shown instead")
         frame = grab_frame(c["source"], float(c.get("fps") or 0),
-                           c.get("size", ""), at_s)
+                           c.get("size", ""), at_s, c.get("image"), self.say)
         with self.lock:
             self.frames[c["name"]] = frame
         return frame
 
-    def picture(self, cam_name: str):
-        """What to show for a camera: live while running, else its still."""
+    def picture(self, cam_name: str, fuel: bool = False):
+        """What to show for a camera: live while running, else its still;
+        with `fuel`, the colour gate's pixels painted over it."""
         with self.lock:
             if self.running and cam_name in self.live_frames:
-                return self.live_frames[cam_name]
-            return self.frames.get(cam_name)
+                frame = self.live_frames[cam_name]
+            else:
+                frame = self.frames.get(cam_name)
+            colour = next((c.get("colour") for c in self.cfg["cameras"]
+                           if c["name"] == cam_name), None)
+        if fuel and frame is not None:
+            frame = fuel_overlay(frame, colour)
+        return frame
 
     def measure(self, cam_name: str, seconds: float = 5.0) -> Optional[float]:
         from .hubcount import measure
@@ -488,7 +584,8 @@ class HubController:
                              "near it")
         polys = {z["name"]: [tuple(p) for p in zone_points(z)] for z in c["zones"]}
         area = measure(c["source"], polys, seconds, None,
-                       float(c.get("fps") or 0), c.get("size", ""), out=self.say)
+                       float(c.get("fps") or 0), c.get("size", ""), out=self.say,
+                       image=c.get("image"), colour=c.get("colour"))
         if area:
             with self.lock:
                 c["ball_area"] = round(area)
@@ -619,6 +716,9 @@ class HubController:
                "problems": problems(cfg), "pictures": pictures,
                "builtin_model": bundled_model() is not None,
                "default_target": self.default_target,
+               "update": self.updater.status() if self.updater else None,
+               "presets": self.presets(),
+               "standard_colour": dict(STANDARD_COLOUR),
                "log": self.messages_since(last_log)}
         s = self.sender
         live = {"counts": {"red": 0, "blue": 0}, "linked": False, "reply": None,

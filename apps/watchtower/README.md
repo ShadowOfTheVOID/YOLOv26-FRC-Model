@@ -19,6 +19,13 @@ The first open shows the same one-time "unverified app" warning as the Hub
 Counter app (`apps/hubcounter/README.md`): on Mac, System Settings → Privacy &
 Security → **Open Anyway**; on Windows, **More info → Run anyway**.
 
+**Updates** (from the release after v0.4.4): Overview shows "Update
+available" with an **Update** button when a newer release is out; never
+automatic, and greyed out while the hub cameras count. On Mac and Windows it
+closes Watchtower, installs the new version in place and reopens it (about a
+minute); event.yaml, matches and logs live in `~/Documents/Watchtower` and
+are kept. Linux and the Pi get a link to the release page.
+
 ## What it is
 
 A desktop app with its own windows, like any other program: no browser, no
@@ -31,9 +38,12 @@ Watchtower combines our camera setup with Watchtower's own parts:
     working, and what is still missing before the first match (teams, date,
     name).
   - **Hub cameras:** our camera setup page itself, inside Home: cameras,
-    hub outlines, ball size, fuel model, Start. It is the same page as the
-    Hub Counter app, already sending its counts to this Watchtower, and it
-    keeps counting while you use the other tabs.
+    camera presets (ELP OV4689 60 fps, USB webcam, your saved ones),
+    picture and fuel colour, hub outlines, ball size, fuel model, Start. It
+    is the same page as the Hub Counter app, already sending its counts to
+    this Watchtower, and it keeps counting while you use the other tabs.
+    Saved camera presets are shared with the Hub Counter app
+    (`~/Documents/Hub Counter/camera-presets.json`).
   - **Phones & PINs:** the address phones open, as text and as a QR code, and
     the scorekeeper, ref and emcee PINs, with a button for new PINs.
   - **Event & schedule:** name, date, time zone, teams, qualification start,

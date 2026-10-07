@@ -1,0 +1,44 @@
+name: attach-models
+
+# Copies fuel_relabel.pt and scout_relabel.pt onto an existing release,
+# from the release that trained them (.github/models-release), checked
+# against the checksums in CHANGELOG.md.
+#
+# Why: release.yml attaches them only after its Publish step, so when
+# Publish failed on v0.4.4 the release went out with every app but no
+# models, and a re-run needs a computer. This runs from the phone:
+# Actions -> attach-models -> Run workflow -> type the tag (e.g. v0.4.4).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release to attach the models to, e.g. v0.4.4"
+        required: true
+
+permissions:
+  contents: write            # uploading release assets; nothing else
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy the models onto ${{ github.event.inputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          src="$(cat .github/models-release)"
+          mkdir -p models
+          gh release download "$src" -p fuel_relabel.pt -p scout_relabel.pt -D models --clobber
+          python3 - <<'EOF'
+          import hashlib, re
+          log = open("CHANGELOG.md").read()
+          for name in ("fuel_relabel.pt", "scout_relabel.pt"):
+              want = re.search(r"([0-9a-f]{64})\s+" + re.escape(name), log).group(1)
+              got = hashlib.sha256(open("models/" + name, "rb").read()).hexdigest()
+              assert got == want, f"{name}: {got} is not the {want} in CHANGELOG.md"
+              print(f"{name} {got} ok")
+          EOF
+          gh release upload "$TAG" models/fuel_relabel.pt models/scout_relabel.pt --clobber
+          echo "::notice title=attach-models::fuel_relabel.pt and scout_relabel.pt attached to $TAG from $src"
