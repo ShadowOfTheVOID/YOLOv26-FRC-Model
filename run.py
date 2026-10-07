@@ -1304,7 +1304,8 @@ def main(argv=None):
                         "measure it with --measure")
     p.add_argument("--target", default="10.0.100.5:8411",
                    help="bioarena's HOST:PORT (default 10.0.100.5:8411), or "
-                        "frc-fms as http://VISIONKEY@HOST:8000")
+                        "Watchtower / frc-fms as http://VISIONKEY@HOST:8000 or "
+                        "https://VISIONKEY@watchtower.systemoverload.org")
     p.add_argument("--cam-fps", dest="cam_fps", type=float, default=0.0,
                    help="ask the camera for this frame rate (60 halves the "
                         "wait for the next frame)")

@@ -117,8 +117,11 @@ code{-webkit-user-select:text;user-select:text}
   <h1>Phones &amp; PINs</h1><div class="sub">Refs log fouls and the emcee calls the hub lights from their phones.</div>
   <div class="warnbox" id="netwarn" style="display:none;margin-top:14px">This computer is not on a network, so phones cannot reach it. Join the event Wi-Fi (or your own router), then reopen this tab.</div>
   <div class="card" style="margin-top:14px"><div class="phone"><div class="qr" id="qr"></div>
-    <div><div class="sub">On the same Wi-Fi, scan or open</div><div class="url" id="phoneurl">—</div><div class="sub" id="phoneurl2" style="user-select:all"></div>
+    <div><div class="sub" id="phonehow">On the same Wi-Fi, scan or open</div><div class="url" id="phoneurl">—</div><div class="sub" id="phoneurl2" style="user-select:all"></div>
       <p class="note">Can't connect? Allow Watchtower when the firewall asks (Windows: tick Private networks), and use your own router: venue and school Wi-Fi often keep devices apart.</p></div></div></div>
+  <div class="card"><h2>Public address</h2>
+    <div class="form" id="form_public"></div>
+    <p class="note">Optional. Set it when a reverse proxy or tunnel (ours is https://watchtower.systemoverload.org) forwards to port 8000 on this computer: phones are then sent through this address instead of the .local name, and the QR code above carries it; the Wi-Fi IP stays listed for when the website or internet is down. Empty = Wi-Fi only. A hub counter on another computer sends to this address with the vision key in front: https://KEY@watchtower.systemoverload.org.</p></div>
   <div class="card"><h2>PINs</h2>
     <div class="form" id="form_pins"></div>
     <div class="row" style="margin-top:12px"><button class="btn" onclick="regenPins()">Make new PINs</button></div>
@@ -153,6 +156,7 @@ code{-webkit-user-select:text;user-select:text}
 const $=id=>document.getElementById(id);
 const api=()=>window.pywebview.api;
 const GROUPS={event:["event.name","event.date","event.utc_offset_hours","event.teams","event.qual_start","event.cycle_min","event.lunch"],
+  public:["server.public_url"],
   pins:["server.pins.control","server.pins.ref","server.pins.emcee"],
   tba:["event.tba_event_key","tba.read_key","tba.enabled","tba.auth_id","tba.auth_secret","tba.send_score_breakdown"],
   rules:null};
@@ -168,7 +172,7 @@ function show(t){for(const b of document.querySelectorAll("nav [data-tab]"))b.cl
   $("savebar").style.display=(t==="home"||t==="hub")?"none":"";}
 for(const b of document.querySelectorAll("nav [data-tab]"))b.onclick=()=>show(b.dataset.tab);
 
-function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams"].includes(f.kind)||f.name==="event.name";
+function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams","url"].includes(f.kind)||f.name==="event.name";
   let input;
   if(f.kind==="bool")return `<div class="f ${wide?"wide":""}"><label class="check"><input type="checkbox" id="${id}">${f.label}</label><div class="err" id="e_${id}"></div></div>`;
   if(f.kind==="teams")input=`<textarea id="${id}" placeholder="254, 1678, 971, …"></textarea>
@@ -181,12 +185,14 @@ function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams"].inc
   else if(f.kind==="offset"){let o="";for(let h=-12;h<=14;h+=0.5)o+=`<option value="${h}">UTC ${h>=0?"+":""}${h}</option>`;
     input=`<div class="inrow"><select id="${id}">${o}</select><button class="btn" type="button" onclick="useLocalOffset()">This computer's</button></div>`;}
   else if(f.kind==="int"||f.kind==="pin")input=`<input id="${id}" inputmode="numeric">`;
+  else if(f.kind==="url")input=`<input id="${id}" type="url" placeholder="https://watchtower.systemoverload.org" autocomplete="off">`;
   else input=`<input id="${id}">`;
   const extra=f.kind==="teams"?` <span id="tcount" style="font-weight:400"></span>`:"";
   return `<div class="f ${wide?"wide":""}"><label for="${id}">${f.label}${extra}</label>${input}<div class="err" id="e_${id}"></div></div>`;}
-function build(){const used=new Set([...GROUPS.event,...GROUPS.pins,...GROUPS.tba]);
+function build(){const used=new Set([...GROUPS.event,...GROUPS.public,...GROUPS.pins,...GROUPS.tba]);
   const by=n=>FIELDS.find(f=>f.name===n);
   $("form_event").innerHTML=GROUPS.event.map(n=>fieldHTML(by(n))).join("");
+  $("form_public").innerHTML=GROUPS.public.map(n=>fieldHTML(by(n))).join("");
   $("form_pins").innerHTML=GROUPS.pins.map(n=>fieldHTML(by(n))).join("");
   $("form_tba").innerHTML=GROUPS.tba.map(n=>fieldHTML(by(n))).join("");
   $("form_rules").innerHTML=FIELDS.filter(f=>!used.has(f.name)).map(fieldHTML).join("");
@@ -248,9 +254,15 @@ async function refresh(){
   $("setupwarn").style.display=todo.length?"":"none";
   $("setupwarn").innerHTML=todo.length?`Before the first match: ${todo.join(", ")} in <a href="#" style="color:var(--acc)" onclick="show('event');return false">Event &amp; schedule</a>.`:"";
   $("netwarn").style.display=s.on_network?"none":"";
-  $("phoneurl").textContent=s.phone_name||s.phone_url;
-  $("phoneurl2").textContent=s.phone_name?("or "+s.phone_url):"";
-  if(s.phone_url!==qrFor){qrFor=s.phone_url;try{$("qr").innerHTML=await api().qr(s.phone_url);}catch(e){}}
+  // A public address (a proxy or tunnel in front of this FMS) works from any
+  // network, so it replaces the .local name and the QR carries it.
+  const pub=s.public_url||"",qrUrl=pub||s.phone_url;
+  $("phonehow").textContent=pub?"From any network, scan or open":"On the same Wi-Fi, scan or open";
+  $("phoneurl").textContent=pub||s.phone_name||s.phone_url;
+  // With the website attached phones go through it, not the .local name;
+  // only the raw IP stays, for when the website or the internet is down.
+  $("phoneurl2").textContent=pub?("if the website is down, on the Wi-Fi: "+s.phone_url):(s.phone_name?("or "+s.phone_url):"");
+  if(qrUrl!==qrFor){qrFor=qrUrl;try{$("qr").innerHTML=await api().qr(qrUrl);}catch(e){}}
 }
 async function renderUpdate(running){let u;try{u=await api().update_status();}catch(e){return;}
   const c=$("updcard");if(!u||!u.available){c.style.display="none";return;}
