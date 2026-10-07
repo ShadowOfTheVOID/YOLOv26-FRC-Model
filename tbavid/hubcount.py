@@ -73,8 +73,13 @@ bounce off the hood) or down (into the hub below the outline) leave the count
 alone, as before, and so does a track that is lost after it leaves. Because
 the feed never goes down, the ball is reported on entry as before -- the
 latency is unchanged -- and taken back as `owed`, absorbed by the next ball
-in. Unmeasured: no hand-counted recording with passes beside a hub is in the
-repository; the Einstein rules above were measured before this guard.
+in. Measured 2026-10-07 with count_recording, guard off -> on, mean error
+at the broadcast's fuel counters: Einstein 4 16.7 -> 17.4%, 5 10.1 -> 11.4%,
+1 5.5 -> 3.8%, 8 11.3 -> 14.1%, Central Valley 26.6 -> 16.4% (outlines
+redrawn by eye; blue had over-counted 219 against 159 at the buzzer, 188
+with the guard). Five-match mean 14.0 -> 12.6%, the Einstein four alone
+10.9 -> 11.7%: it helps where the outline catches balls flying past and
+costs about a point where a hub already counted low (Einstein 8 red).
 
 An exit line (`ExitLineCounter`) keeps the signed rule -- a ball across it
 towards `out` is +1, one crossing back is -1 -- and the measured ball: the

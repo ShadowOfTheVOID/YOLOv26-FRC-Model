@@ -746,6 +746,36 @@ and keep whichever is closer.
 
   macOS asks for camera permission for the terminal the first time.
 
+## Passes beside the hub taken back (2026-10-07)
+
+A pass back to the alliance zone could fly through the corner of an
+outline and count. Now a counted ball whose track leaves the outline
+sideways and is seen flying on for 2 more frames is taken back (absorbed by
+the next ball in, as `owed`; the reported count never goes down).
+`count_recording` on the five Drive matches, every frame, the shipped
+settings, error averaged over the checkpoints where the broadcast's fuel
+counters were read:
+
+| match | guard off | guard on | buzzer blue / red (real), guard on | AUTO |
+|---|---|---|---|---|
+| Einstein 4 | 16.7% | 17.4% | 501 / 622 (479 / 804) | right |
+| Einstein 5 | 10.1% | 11.4% | 580 / 606 (585 / 669) | right |
+| Einstein 1 | 5.5% | 3.8% | 600 / 460 (621 / 415) | 96-96 tie (real 95-96); off: 101-97, wrong |
+| Einstein 8 | 11.3% | 14.1% | 587 / 495 (653 / 581) | right |
+| Central Valley | 26.6% | 16.4% | 188 / 760 (159 / 810) | right |
+| **mean** | **14.0%** | **12.6%** | | |
+
+Central Valley's outlines were redrawn by eye for this run (blue
+548,318 676,318 678,398 546,398; red 1168,322 1300,322 1300,402
+1168,402; ball 90 px), so its numbers are not comparable with the 6.4% of
+the outline drawn on 2026-10-05, which was not saved. Its truth was read
+off the corner counters every 8 s from 34 s to the buzzer. The guard
+takes back balls everywhere: on Central Valley, where blue over-counted
+balls flying past (219 against 159), that is the fix; on the Einstein
+matches, where red already counted low, it costs about a point (10.9% ->
+11.7% over the four). It stays on: the scrimmage report was passes
+counted, and the 20-ball test on a real hub decides from there.
+
 ## 1. Draw the outlines (once per camera position)
 
 ```bash

@@ -16,8 +16,10 @@ the build rather than publishing an empty release.
   back. The feed never goes down, so it is still reported for a moment and
   the next ball into that hub absorbs it (shown as `owed`). Balls bouncing
   up off the hood and balls dropping out the bottom into the hub count as
-  before, and counting latency is unchanged. Not yet measured on a
-  hand-counted recording: check it on your replay before relying on it.
+  before, and counting latency is unchanged. Measured on five broadcast
+  matches: mean error 14.0% -> 12.6% (Central Valley 26.6% -> 16.4%, where
+  balls flying past were counted; the four Einstein matches 10.9% -> 11.7%).
+  See deploy/HUB_FEED.md "Passes beside the hub taken back".
 
 ## v0.5.2 — 2026-10-07
 
