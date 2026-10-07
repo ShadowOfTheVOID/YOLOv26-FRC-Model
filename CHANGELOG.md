@@ -9,6 +9,8 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.0 — 2026-10-07
+
 - **Phones get a name, not a raw IP.** When you share the page on Wi-Fi (Hub
   Counter) or open Phones & PINs (Watchtower), the address now leads with
   `<computer>.local` -- which Macs and Windows announce on the network by
