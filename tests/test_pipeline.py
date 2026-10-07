@@ -3481,6 +3481,8 @@ def test_watchtower_settings():
     _, err3 = St.check({"server.public_url": "https://x.org/?a=1"})
     check("but a key, another scheme or a query is refused (the link goes to phones)",
           set(err) == set(err2) == set(err3) == {"server.public_url"})
+    check("both halves of the TBA write key, and the read key, are masked fields",
+          all(St.KEY[k][1] == "secret" for k in ("tba.auth_id", "tba.auth_secret", "tba.read_key")))
     pins = St.new_pins()
     check("new PINs are three different 6-digit numbers",
           len(set(pins.values())) == 3 and all(len(p) == 6 and p.isdigit() for p in pins.values()))

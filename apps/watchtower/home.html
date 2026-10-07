@@ -26,7 +26,7 @@ main{flex:1;overflow:auto;padding:24px 28px 40px;position:relative}
 main.bleed{padding:0;overflow:hidden}
 #tab_hub.on{display:block;max-width:none;position:absolute;inset:0}
 #tab_hub iframe{border:0;width:100%;height:100%;display:block;background:var(--bg)}
-section.tab{display:none;max-width:860px} section.tab.on{display:block}
+section.tab{display:none;max-width:860px;margin:0 auto} section.tab.on{display:block}
 h1{font-size:22px;margin:0 0 2px} h2{font-size:15px;margin:0 0 10px} .sub{color:var(--mute);font-size:13px}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 18px}
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border-radius:999px;padding:5px 11px;font-size:13px}
@@ -55,7 +55,7 @@ input[type=checkbox]{width:auto;margin:0 8px 0 0;accent-color:var(--acc)}
 textarea{min-height:80px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
 input:focus,textarea:focus,select:focus{outline:2px solid var(--acc);outline-offset:-1px;border-color:transparent}
 .inrow{display:flex;gap:8px} .inrow>*:first-child{flex:1}
-.bar{position:sticky;bottom:-40px;margin:16px -28px -40px;padding:12px 28px;background:var(--bg);border-top:1px solid var(--line);display:flex;gap:10px;align-items:center}
+.bar{position:sticky;bottom:-40px;margin:16px -28px -40px;padding:12px max(28px,calc(28px + (100% - 860px)/2));background:var(--bg);border-top:1px solid var(--line);display:flex;gap:10px;align-items:center}
 button.btn{font:inherit;font-weight:600;border-radius:9px;padding:8px 14px;border:1px solid var(--line);background:var(--chip);color:var(--fg);cursor:pointer;white-space:nowrap}
 button.btn.primary{background:var(--acc);border-color:var(--acc);color:var(--acc-fg)}
 button.btn:disabled{opacity:.5;cursor:default}
@@ -137,8 +137,14 @@ code{-webkit-user-select:text;user-select:text}
 <!-- ============================================================ TBA -->
 <section class="tab" id="tab_tba">
   <h1>The Blue Alliance</h1><div class="sub">Optional. Pushes the schedule, scores, rankings and alliances while there is internet, and queues them while there is none.</div>
-  <div class="card" style="margin-top:14px"><div class="form" id="form_tba"></div>
-    <p class="note">The auth ID and secret come from your event's page on TBA (Account → event admin → API keys). Test with one match before turning sending on for the day.</p></div>
+  <div class="card" style="margin-top:14px"><h2>Event</h2><div class="form" id="form_tba"></div>
+    <p class="note">The key in your event's TBA address: thebluealliance.com/event/<b>2026catstd</b>. Both keys below belong to this event.</p></div>
+  <div class="card"><h2>Write key <span class="sub" style="font-weight:400">sends results to TBA</span></h2>
+    <div class="form" id="form_tbawrite"></div>
+    <p class="note">A write key is an <b>Auth ID</b> and an <b>Auth Secret</b> that TBA issues for one event. Get one: sign in at thebluealliance.com, then request write access for your event at thebluealliance.com/request/apiwrite (TBA approves it by hand, so ask a few days before). Once approved, the ID and secret are shown on your TBA account page. Keep the secret private: anyone with it can change your event's results on TBA. Test with one match before turning sending on for the day.</p></div>
+  <div class="card"><h2>Read key <span class="sub" style="font-weight:400">optional, for importing teams</span></h2>
+    <div class="form" id="form_tbaread"></div>
+    <p class="note">Only needed if Import from TBA finds no team list on the event page. Make one under Read API Keys on your TBA account page (thebluealliance.com/account). It cannot change anything on TBA.</p></div>
 </section>
 
 <!-- ============================================================ Rules -->
@@ -158,7 +164,9 @@ const api=()=>window.pywebview.api;
 const GROUPS={event:["event.name","event.date","event.utc_offset_hours","event.teams","event.qual_start","event.cycle_min","event.lunch"],
   public:["server.public_url"],
   pins:["server.pins.control","server.pins.ref","server.pins.emcee"],
-  tba:["event.tba_event_key","tba.read_key","tba.enabled","tba.auth_id","tba.auth_secret","tba.send_score_breakdown"],
+  tba:["event.tba_event_key"],
+  tbawrite:["tba.auth_id","tba.auth_secret","tba.enabled","tba.send_score_breakdown"],
+  tbaread:["tba.read_key"],
   rules:null};
 let FIELDS=[],saved={},dirty=false,last=null,qrFor="";
 
@@ -181,7 +189,7 @@ function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams","url
     <div class="note">Or paste TBA's Scouting list (event page → Scouting → Team List → Copy) into the box.</div>`;
   else if(f.kind==="date")input=`<input id="${id}" type="date">`;
   else if(f.kind==="time")input=`<input id="${id}" type="time">`;
-  else if(f.kind==="secret")input=`<input id="${id}" type="password" autocomplete="off">`;
+  else if(f.kind==="secret")input=`<input id="${id}" type="password" autocomplete="off" spellcheck="false">`;
   else if(f.kind==="offset"){let o="";for(let h=-12;h<=14;h+=0.5)o+=`<option value="${h}">UTC ${h>=0?"+":""}${h}</option>`;
     input=`<div class="inrow"><select id="${id}">${o}</select><button class="btn" type="button" onclick="useLocalOffset()">This computer's</button></div>`;}
   else if(f.kind==="int"||f.kind==="pin")input=`<input id="${id}" inputmode="numeric">`;
@@ -189,12 +197,14 @@ function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams","url
   else input=`<input id="${id}">`;
   const extra=f.kind==="teams"?` <span id="tcount" style="font-weight:400"></span>`:"";
   return `<div class="f ${wide?"wide":""}"><label for="${id}">${f.label}${extra}</label>${input}<div class="err" id="e_${id}"></div></div>`;}
-function build(){const used=new Set([...GROUPS.event,...GROUPS.public,...GROUPS.pins,...GROUPS.tba]);
+function build(){const used=new Set([...GROUPS.event,...GROUPS.public,...GROUPS.pins,...GROUPS.tba,...GROUPS.tbawrite,...GROUPS.tbaread]);
   const by=n=>FIELDS.find(f=>f.name===n);
   $("form_event").innerHTML=GROUPS.event.map(n=>fieldHTML(by(n))).join("");
   $("form_public").innerHTML=GROUPS.public.map(n=>fieldHTML(by(n))).join("");
   $("form_pins").innerHTML=GROUPS.pins.map(n=>fieldHTML(by(n))).join("");
   $("form_tba").innerHTML=GROUPS.tba.map(n=>fieldHTML(by(n))).join("");
+  $("form_tbawrite").innerHTML=GROUPS.tbawrite.map(n=>fieldHTML(by(n))).join("");
+  $("form_tbaread").innerHTML=GROUPS.tbaread.map(n=>fieldHTML(by(n))).join("");
   $("form_rules").innerHTML=FIELDS.filter(f=>!used.has(f.name)).map(fieldHTML).join("");
   for(const el of document.querySelectorAll("main input,main textarea,main select"))
     el.addEventListener("input",()=>{dirty=true;countTeams();$("msg").textContent="";});

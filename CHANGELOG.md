@@ -9,6 +9,19 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.2 — 2026-10-07
+
+- **Watchtower: a Write key section for The Blue Alliance.** The TBA tab is
+  now three parts: the event key; **Write key** (Auth ID and Auth Secret,
+  the on/off switch for sending results, and how to get a key: request
+  write access for the event at thebluealliance.com/request/apiwrite, which
+  TBA approves by hand); and the optional **Read key** for importing teams.
+  Both halves of the write key are masked like a password (the Auth ID was
+  plain text), since together they can change the event's results on TBA.
+  Same settings in event.yaml; nothing to redo.
+- **Watchtower's settings pages are centred** in a wide window instead of
+  hugging the left edge, with Save / Undo lined up under them.
+
 ## v0.5.1 — 2026-10-07
 
 The first release the v0.5.0 apps can install themselves: on Mac and

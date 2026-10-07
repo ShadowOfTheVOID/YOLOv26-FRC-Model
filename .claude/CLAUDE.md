@@ -307,7 +307,8 @@ HUBCOUNTER_VERSION; 0.0.0 = never check). Update button only, refused while
 counting (the user chose that over automatic). Mac/Windows install via a
 helper script that waits for the app to exit; Linux/Pi get a link. v0.5.0 is the
 first build with it (0.4.4 -> 0.5.0 is a manual download); the first real
-one-click update is 0.5.0 -> 0.5.1.
+one-click update is 0.5.0 -> 0.5.1. v0.5.2: TBA tab split into event / Write key
+(auth_id + auth_secret, both password fields) / Read key; settings pages centred.
 Watchtower's optional `server.public_url` (Phones & PINs; e.g. our Caddy
 proxy https://watchtower.systemoverload.org, nothing built in): when set,
 phones get that link and its QR instead of the .local name; the raw IP stays
