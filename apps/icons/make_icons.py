@@ -5,7 +5,8 @@ Python snake on Windows, a blank app on macOS -- so the Hub Counter and
 Watchtower looked alike and like a script. The finished files are
 committed (HubCounter.icns/.ico/.png, Watchtower.*), so builds need no
 Pillow; run this only to change the drawings. Colours match the pages'
-the team's red and black: Hub Counter a red ball over a white hub on black,
+the team's red and black: Hub Counter a yellow fuel ball (the game's
+colour) over a white hub on black,
 Watchtower a black lighthouse on red.
 """
 import math
@@ -18,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 S = 4                       # supersampling: drawn at 4096, scaled to 1024
 N = 1024 * S
 RED = (239, 35, 60)
+YELLOW = (250, 204, 21)      # fuel stays the game's yellow
 BLACK = (17, 17, 19)
 
 
@@ -71,7 +73,7 @@ def hub_counter():
     d = ImageDraw.Draw(art)
     # the ball's arc into the funnel: three fading dots
     for x, y, r in ((292, 330, 20), (360, 262, 28), (444, 220, 36)):
-        d.ellipse((*p(x - r, y - r), *p(x + r, y + r)), fill=RED + (255,))
+        d.ellipse((*p(x - r, y - r), *p(x + r, y + r)), fill=(255, 226, 110, 255))
     # the hub: a funnel, translucent with a white rim
     funnel = [p(300, 470), p(724, 470), p(650, 800), p(374, 800)]
     d.polygon(funnel, fill=(255, 255, 255, 34))
@@ -86,9 +88,9 @@ def hub_counter():
         d.line([p(xl + 30, y), p(1024 - xl - 30, y)], fill=(255, 255, 255, 120), width=14 * S)
     # the ball, about to drop in
     cx, cy, r = 540, 370, 78
-    d.ellipse((*p(cx - r, cy - r), *p(cx + r, cy + r)), fill=RED + (255,))
+    d.ellipse((*p(cx - r, cy - r), *p(cx + r, cy + r)), fill=YELLOW + (255,))
     d.ellipse((*p(cx - r * 0.55, cy - r * 0.6), *p(cx - r * 0.05, cy - r * 0.15)),
-              fill=(255, 150, 160, 220))
+              fill=(255, 240, 170, 220))
     finish(art, (52, 52, 58), (6, 6, 8), "HubCounter")
 
 

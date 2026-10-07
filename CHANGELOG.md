@@ -9,8 +9,10 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
-- **App icons in the team's red and black**: Hub Counter is a red ball over
-  a white hub on black, Watchtower a black lighthouse on red. They replace
+- **The team's red and black**: app icons (Hub Counter a yellow fuel ball
+  over a white hub on black, Watchtower a black lighthouse on red) and the
+  pages' accent colour and logos (buttons, sliders, selection were blue).
+  Fuel stays yellow and the blue alliance stays blue: those are the game. They replace
   PyInstaller's default (the Python icon on Windows) on the Mac app, the
   Windows program and its installer. Drawn by `apps/icons/make_icons.py`;
   the finished `.icns` / `.ico` / `.png` files are committed, so builds need
