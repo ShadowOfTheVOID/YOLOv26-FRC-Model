@@ -234,6 +234,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="state"><span class="dot" id="sdot"></span><span id="stext">Stopped</span></div>
         <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
         <div class="chips" id="schips"></div>
+        <div class="chips" id="xcheck"></div>
       </div>
     </div>
 
@@ -320,7 +321,10 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       </div>
       <div class="comb"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
       <div class="comb"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
-      <p class="muted" style="margin:8px 0 0">Sum when cameras see different balls; max or median when several watch the same ones.</p>
+      <p class="muted" style="margin:8px 0 0">Sum when cameras see different balls; max or median when several watch the same ones. A hub with both an outline and an exit line takes the larger of the two, never their total: they count the same balls.</p>
+      <div class="comb"><span class="muted">Red: exits confirm entries after</span><input class="input tnum" id="confirm_red" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('red',this.value)"><span class="muted">s</span></div>
+      <div class="comb"><span class="muted">Blue: exits confirm entries after</span><input class="input tnum" id="confirm_blue" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('blue',this.value)"><span class="muted">s</span></div>
+      <p class="muted" style="margin:8px 0 0">Only with an outline <i>and</i> an exit line on the hub. An entry that has not come out of an exit within the delay is taken back. Leave it off unless a hand-counted test recording showed it closer (<code>run.py hubcount --hand</code>): an exit line that misses balls makes it count low.</p>
     </section>
 
     <section class="card step" id="st3">
@@ -426,6 +430,7 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   $("camform").style.display=cam()?"":"none";
   const c=cam();$("seekwrap").style.display=c&&S.kinds[c.name]==="file"?"":"none";
   if(!document.activeElement||!document.activeElement.closest(".step"))fillForm();
+  for(const h of["red","blue"]){const e=$("confirm_"+h);if(e&&document.activeElement!==e)e.value=(S.cfg.confirm||{})[h]||"";}
   document.querySelectorAll(".seg").forEach(g=>{const v=S.cfg.combine[g.dataset.hub]||"sum";g.querySelectorAll("button").forEach(b=>b.className=b.textContent===v?"on":"");});
   $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";}
 function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
@@ -524,6 +529,7 @@ function renderLive(){const v=S.live,F=fieldName();
     const parts=[(r.match_state||"").replace(/_/g," ").toLowerCase(),r.shift||"",`${v.rtt_ms} ms`].filter(Boolean);
     setStatus(delayed?"warn":"ok",`Connected to ${F}`,parts.join(" · ")+(delayed?" · counting from a delayed stream":""));}
   else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
+  $("xcheck").innerHTML=Object.entries(v.check||{}).map(([h,c])=>`<span class="chip"${c.warn?' style="color:#f5a524"':""} title="exits now against the outline ${c.lag_s} s ago${c.confirming?" · exits confirm this hub":""}">${h} exit ${c.exit} / outline ${c.due}${c.ratio!=null?` <b class="tnum">${Math.round(c.ratio*100)}%</b>`:""}${c.warn?" · check the cameras":""}</span>`).join("");
   $("schips").innerHTML=Object.entries(v.cameras).map(([n,c])=>`<span class="chip">${esc(n)} <b class="tnum">${Math.round(c.fps)}</b> fps</span>`).join("");}
 function handleJob(){const j=S.job;
   if(j.running){$("prog").style.display=j.progress!=null?"block":"none";$("prog").firstChild.style.width=((j.progress||0)*100)+"%";
@@ -611,6 +617,7 @@ document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEac
 function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
 function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
 function findCams(){api("find_cameras");}
+function setConfirm(hub,v){api("confirm",{hub,seconds:Number(v)||0}).then(refresh);}
 async function addWireless(){
   const url=await modal("Add a wireless camera",`<label class="field"><span>Camera address</span>
     <input class="input" id="mIn" placeholder="rtsp://192.168.1.50:554/stream1"></label>

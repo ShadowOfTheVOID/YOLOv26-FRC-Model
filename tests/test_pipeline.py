@@ -2390,6 +2390,39 @@ def test_hub_crossing_counter():
     check("a ball in then back out stays counted, the exit only noted",
           c.reported == 1 and c.exits == 1 and c.owed == 0)
 
+    # A pass back to the alliance zone clipping the outline on its way down
+    # past the hub counted (a 2026-10-06 replay through Watchtower).
+    # The same track leaving sideways and flying on is taken back.
+    lob = [(60, 80), (85, 90), (110, 102), (135, 112), (160, 120), (185, 127),
+           (210, 133), (235, 138), (260, 142)]
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    rises = fly(c, lob)
+    check("a pass through the outline's corner is reported on entry, then "
+          "taken back once it flies on outside",
+          rises[2] == 1 and c.reported == 1 and c.net == 0 and c.passes == 1
+          and c.owed == 1)
+    rises = fly(c, [(150, 60), (150, 85), (150, 110)])
+    check("the next real ball settles the pass without a second report",
+          sum(rises) == 0 and c.reported == 1 and c.owed == 0)
+    fly(c, [(170, 60), (170, 85), (170, 110)])
+    check("after which balls count again", c.reported == 2)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(140, 50), (145, 80), (150, 110), (175, 115), (200, 118),
+            (225, 120), (250, 122), (275, 124)])
+    check("a ball that came in steeply stays counted even if it skids out "
+          "sideways (Einstein 8 lost real scores to that)",
+          c.reported == 1 and c.owed == 0 and c.passes == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110), (150, 140), (150, 170),
+            (150, 205), (150, 230)])
+    check("a ball leaving through the bottom (into the hub) stays counted",
+          c.reported == 1 and c.owed == 0 and c.passes == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, lob[:7])
+    c.update([])
+    check("a ball lost just after a sideways exit stays counted (not seen "
+          "flying on)", c.reported == 1 and c.owed == 0 and c.passes == 0)
+
     # The experiment's signed rule, which exit lines still use: a pass-over
     # is reported on entry, its exit owed against the next ball in.
     c = HC.CrossingCounter(square, ball_area=280.0, signed=True)
@@ -2541,6 +2574,84 @@ def test_hub_multi_camera_setup():
             ok &= v >= last
             last = v
     check("sum, max and median of rising counts never fall", ok)
+
+    # An outline and an exit line on one hub count the same balls: summed,
+    # every score counted twice (Central Valley, 2026-10-07: 29.9% against
+    # 17.0% for the outline alone). Each kind combines on its own, the hub
+    # takes the larger.
+    mixed = HC.setup_from_dict({"cameras": [
+        {"name": "front", "source": "0", "ball_area": 300, "zones": [
+            {"hub": "red", "outline": sq, "name": "o1"},
+            {"hub": "red", "line": [[0, 0], [10, 0]], "out": [5, 5], "name": "e1"},
+            {"hub": "red", "line": [[20, 0], [30, 0]], "out": [25, 5], "name": "e2"}]},
+        {"name": "side", "source": "1", "ball_area": 300, "zones": [
+            {"hub": "red", "outline": sq, "name": "o2"}]}]})
+    zm = {z.name: z for z in mixed.zones("red")}
+    zm["o1"].counter.reported, zm["o2"].counter.reported = 20, 5
+    zm["e1"].counter.reported, zm["e2"].counter.reported = 4, 3
+    tm = HC.HubTally(mixed)
+    check("outline and exit lines on one hub: the larger kind, not the total",
+          tm.value("red") == 25)
+    zm["e1"].counter.reported = 30
+    check("exits counting more (a chute camera) win, each kind summed",
+          tm.value("red") == 33)
+    mixed.combine["red"] = "max"
+    check("and each kind is combined by the hub's own rule",
+          tm.value("red") == 30)
+    mixed.combine["red"] = "sum"
+
+    # Exits cross-check the outline: the exits now against the outline a
+    # moment ago. Shown on the page; the score is untouched unless confirm.
+    one = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0", "ball_area": 300,
+        "zones": [{"hub": "red", "outline": sq, "name": "o"},
+                  {"hub": "red", "line": [[0, 0], [10, 0]], "out": [5, 5], "name": "e"}]}]})
+    zo, ze = {z.name: z for z in one.zones("red")}["o"], {z.name: z for z in one.zones("red")}["e"]
+    tc = HC.HubTally(one)
+    check("no cross-check before the first frame", tc.check("red") is None)
+    for t in range(0, 40):                 # one entry a second, exits 2 s behind
+        zo.counter.reported = t
+        ze.counter.reported = max(0, t - 2)
+        tc.tick(float(t))
+    c = tc.check("red")
+    check("cross-check: exits keeping up 2 s behind read 100%, no warning",
+          c["outline"] == 39 and c["exit"] == 37 and c["due"] == 37
+          and c["ratio"] == 1.0 and not c["warn"] and tc.value("red") == 39)
+    for t in range(40, 60):                # the exit line goes blind
+        zo.counter.reported = t
+        tc.tick(float(t))
+    c = tc.check("red")
+    check("cross-check: an exit line that stops seeing balls warns",
+          c["ratio"] < 0.8 and c["warn"])
+
+    # Confirm mode: exits + entries in the last `lag` s, high-water mark.
+    conf = HC.setup_from_dict(dict(HC.setup_to_dict(one), confirm={"red": 2.0}))
+    check("the exit delay is saved with the setup",
+          conf.confirm == {"red": 2.0}
+          and HC.setup_to_dict(conf)["confirm"] == {"red": 2.0})
+    try:
+        HC.setup_from_dict(dict(HC.setup_to_dict(one), confirm={"red": 30}))
+        check("an exit delay over the maximum is refused", False)
+    except ValueError:
+        check("an exit delay over the maximum is refused", True)
+    zo, ze = {z.name: z for z in conf.zones("red")}["o"], {z.name: z for z in conf.zones("red")}["e"]
+    tc = HC.HubTally(conf)
+    ser, vals = [], []
+    for t, o, e in [(0, 1, 0), (0.5, 2, 0), (1, 3, 0), (2.2, 3, 1), (2.6, 3, 2),
+                    (4, 4, 2), (5, 5, 2), (7.5, 5, 2), (8, 6, 3)]:
+        zo.counter.reported, ze.counter.reported = o, e
+        tc.tick(t)
+        vals.append(tc.value("red"))
+        ser.append((t, o, e))
+    check("confirm: an entry counts the moment it crosses",
+          vals[:3] == [1, 2, 3])
+    check("confirm: entries that never reached the exit are absorbed, never "
+          "taken off the feed", vals == sorted(vals) and vals[-1] == 4)
+    check("confirm_counts replays the recorded series to the live answer",
+          HC.confirm_counts(ser, 2.0) == vals[-1])
+    rep = "\n".join(HC.confirm_report({"series": {"red": ser}}, {"red": 4}))
+    check("the practice-field report compares every way of counting",
+          "outline" in rep and "exit line" in rep and "exits confirm, 2 s" in rep
+          and "+2 (50%)" in rep)
 
     def refused(c, why):
         try:
@@ -2816,6 +2927,16 @@ def test_hub_ui_controller_and_web():
         code, _ = call("/api/combine", json.dumps({"hub": "blue", "how": "avg"}).encode(),
                        {"Content-Type": "application/json"})
         check("a bad value is a 400, not a crash", code == 400)
+        code, _ = call("/api/confirm", json.dumps({"hub": "red", "seconds": 2.5}).encode(),
+                       {"Content-Type": "application/json"})
+        check("the page sets a hub's exit delay",
+              code == 200 and ctl.cfg["confirm"] == {"red": 2.5})
+        code, _ = call("/api/confirm", json.dumps({"hub": "red", "seconds": 0}).encode(),
+                       {"Content-Type": "application/json"})
+        check("and 0 turns it off again", code == 200 and "confirm" not in ctl.cfg)
+        code, _ = call("/api/confirm", json.dumps({"hub": "red", "seconds": 99}).encode(),
+                       {"Content-Type": "application/json"})
+        check("an exit delay out of range is a 400", code == 400)
         code, _ = call("/api/stop", b"hub=blue", {"Content-Type":
                                                   "application/x-www-form-urlencoded"})
         check("a form post (what another website could send) is refused",

@@ -293,6 +293,7 @@ ACTIONS = {
                                         b.get("kind", "outline")),
     "delete_zone": lambda c, b: c.delete_zone(b["camera"], b["zone"]),
     "combine": lambda c, b: c.set_combine(b["hub"], b["how"]),
+    "confirm": lambda c, b: c.set_confirm(b["hub"], b.get("seconds", 0)),
     "grab": lambda c, b: c.job("picture", lambda: (c.grab(b["camera"], _at(b)), None)[1]),
     "measure": lambda c, b: c.job("measure", lambda: c.measure(b["camera"])),
     "find_cameras": lambda c, b: c.job("find cameras", probe_cameras),

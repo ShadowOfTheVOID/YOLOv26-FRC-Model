@@ -323,6 +323,64 @@ mostly behind the hubs, and a line across the visible part of the red
 out-flow caught 9% (Einstein 4), 15% (5) and 34% (1) of the scoreboard. The
 test is the spec's 20 balls through a practice hub's exits.
 
+**Outline and exit line on the same hub (2026-10-07).** They count the
+same balls, so the hub takes the larger of the two kinds; each kind is
+first combined across its zones by the hub's sum / max / median. Measured
+on Central Valley with the outlines from "Passes beside the hub taken
+back" and exit lines blue 665,395-665,500 out 720,450 and red
+1180,420-1180,505 out 1130,460:
+
+| scoring | error | buzzer blue / red (real 159 / 810) |
+|---|---|---|
+| outline | 17.0% | 194 / 771 |
+| exit line | 86% | 17 / 83 |
+| outline + exit, added (the old behaviour) | 29.9% | 211 / 854 |
+| mean of the two | 37.0% | 106 / 427 |
+| **larger of the two (now)** | **17.0%** | 194 / 771 |
+
+The exits again caught a tenth of the balls: they pile against the hub.
+On a broadcast the exit adds nothing; it is there for a camera aimed at a
+chute, where it may count more than the outline and then wins.
+
+## Practice field: outline + exit line test (for 2026-10-09)
+
+What to bring back so the exit line can be judged on the real camera:
+
+1. Set the cameras where they will be on Saturday. In the page, draw each
+   hub's **outline** (top edge 3-4 balls above the hood) **and** an **exit
+   line** across its exit chute, on whichever camera sees each best.
+2. Record each camera while balls go in (several minutes; include fast
+   streams, rim bounces, passes beside the hub, balls piling at the exit).
+   *Add recording* in the page, or any recorder at 60 fps.
+3. Count by hand, per hub, every ball that went in during the recording.
+   Even 30-50 is enough.
+4. Run:
+
+   ```bash
+   python run.py hubcount red_cam.mp4 --setup cams.json --camera red-cam --hand red=37
+   ```
+
+   It prints the outline, the exit line, the larger of the two (what the
+   hub counts now) and *exits confirm* at 0.5-5 s, each with its error
+   against the hand count. While counting live, the page shows the same
+   cross-check per hub: the exits against the outline a moment earlier.
+5. Decide per hub:
+   - **exits confirm** at the delay that came closest, only if it beats
+     "larger" by more than a ball or two: set it under step 2 (*Red: exits
+     confirm entries after ... s*), or `"confirm": {"red": 2.0}` in
+     cams.json;
+   - otherwise leave it off: the hub takes the larger of outline and
+     exit, and the cross-check still warns when a camera loses balls.
+
+The rule, so the numbers can be read: confirm mode reports the high-water
+mark of *exits now + outline entries in the last N s*. An entry is
+counted the moment it crosses (latency unchanged) and taken back if it has
+not come out within N s. It trusts the exit line: an exit that misses
+balls makes it count low. On the Central Valley broadcast, where the exits
+caught 17 of 159 and 83 of 810, it read 37 / 106 at 2.5-3 s against the
+outline's 194 / 771 -- which is why it is off by default and set per hub
+only from this test.
+
 ## Blur correction and still-yellow removal (per camera)
 
 Two settings per camera, both off by default:
@@ -745,6 +803,63 @@ and keep whichever is closer.
   ```
 
   macOS asks for camera permission for the terminal the first time.
+
+## Passes beside the hub taken back (2026-10-07)
+
+A pass back to the alliance zone could fly through the corner of an
+outline and count. Now a counted ball whose track came in sideways, leaves
+the outline sideways (|vx| > |vy| both times) and is seen flying on for 2
+more frames is taken back: absorbed by the next ball in, as `owed`; the
+reported count never goes down. `count_recording` on the five Drive
+matches, every frame, shipped settings, colour counter only, against the
+broadcast's fuel counters read every 8 s from the end of AUTO to the
+buzzer (19 checkpoints a match):
+
+| match | no guard | sideways exit only | **sideways in and out (shipped)** | buzzer blue / red, shipped (real) |
+|---|---|---|---|---|
+| Einstein 4 | 16.4% | 16.5% | **16.0%** | 511 / 666 (479 / 807) |
+| Einstein 5 | 5.7% | 6.5% | **5.3%** | 609 / 636 (589 / 672) |
+| Einstein 1 | 5.3%, AUTO wrong | 5.3% | **8.2%** | 655 / 493 (621 / 415) |
+| Einstein 8 | 10.8% | 13.7% | **10.1%** | 591 / 553 (653 / 581) |
+| Central Valley | 26.6% | 16.4% | **17.0%** | 205 / 771 (159 / 810) |
+| Einstein mean | 9.5% | 10.5% | **9.9%** | |
+| all five | 13.0% | 11.7% | **11.3%** | |
+
+(Buzzer totals here are at the end of the video, after draining.) The
+exit-only rule took back real scores on Einstein 8 (red 532 -> 501 of
+581): balls that came in steeply and skidded out sideways. Requiring a
+sideways entry kept them. With the guard every AUTO winner is right;
+without it Einstein 1 read 101-98 against 95-96. The rule was picked after
+seeing these five matches, so it is not a held-out result; the colour
+counter alone matches the 2026-09-29 records (Einstein mean 9.5% here
+against 10.1% then), and the model blend (6.8% then) was not re-run: it
+needs a GPU.
+
+**With the model (colour + Ultralytics, 2026-10-07).** The same five
+matches, `fuel_relabel.pt` on CPU (~25 min a match), the model's count
+blended 50/50 with the colour count as the apps do, same 19 checkpoints:
+
+| | E4 | E5 | E1 | E8 | Central Valley | Einstein mean | all five |
+|---|---|---|---|---|---|---|---|
+| colour, no guard | 16.4% | 5.7% | 5.3% (AUTO wrong) | 10.8% | 26.6% | 9.5% | 13.0% |
+| colour, guard | 16.0% | 5.3% | 8.2% | 10.1% | 17.0% | 9.9% | 11.3% |
+| model alone | 8.3% | 4.7% | 8.7% | 13.5% (AUTO wrong) | 36.8% | 8.8% | 14.4% |
+| colour + model, no guard | 9.3% | 5.0% | 6.6% | 11.9% | 31.5% | 8.2% | 12.8% |
+| **colour + model, guard** | 9.0% | 4.7% | 8.1% | 11.5% | 26.6% | **8.3%** | 12.0% |
+
+The model was trained on E4, E5 and E8, so it is flattered there; on E1
+the blend is no better than colour alone, and on Central Valley, a
+broadcast it never saw, it counted blue 286 against 159 and pulled the
+blend to 26.6% against 17.0% for colour alone. Against the 6.8% recorded
+on 2026-10-02 (official checkpoints at 30 fps) the Einstein mean here is
+8.3% under this scoring. The guard changes the blend by a tenth of a point
+on Einstein and helps it on Central Valley.
+
+Central Valley's outlines were redrawn by eye for this run (blue
+548,318 676,318 678,398 546,398; red 1168,322 1300,322 1300,402
+1168,402; ball 90 px). Its 26.6% without the guard is not comparable with
+the 6.4% of the outline drawn on 2026-10-05, which was not saved: this
+outline catches more balls flying past.
 
 ## 1. Draw the outlines (once per camera position)
 

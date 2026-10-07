@@ -9,6 +9,47 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.3 — 2026-10-07
+
+- **Exit line and outline cross-check each other.** A hub with both shows,
+  while counting, its exits against the outline count a moment earlier
+  (`red exit 41 / outline 44 · 93%`), and warns when they drift apart
+  (under 80% or over 125%): one of the cameras is missing balls. The score
+  is unchanged.
+- **Exits confirm entries (off by default).** Per hub, *exits confirm
+  entries after N s* counts each ball the moment it crosses the outline,
+  as always, and takes back any entry that has not come out of an exit
+  within N seconds (a rim bounce, a pass). The feed never goes down; what
+  is taken back is absorbed by later balls. It trusts the exit line, so it
+  only helps where the exit sees nearly every ball: on the Central Valley
+  broadcast (exits catching a tenth) it would count 37 / 106 against 159 /
+  810. Turn it on only if the practice-field test says so.
+- **The practice-field test:** `run.py hubcount test.mp4 --setup cams.json
+  --hand red=N,blue=M` prints, for each hub with both lines, the outline,
+  the exit line, the larger of the two, and exits-confirm at 0.5-5 s, each
+  against your hand count. See deploy/HUB_FEED.md "Practice field".
+- **Passes beside the hub are no longer scores.** A ball passed back to the
+  alliance zone while the hub is active could fly through the corner of a
+  hub's outline and count. Now, when that same ball came in sideways,
+  leaves the outline sideways and is still seen flying on outside, its
+  count is taken back. The feed never goes down, so it is still reported for a moment and
+  the next ball into that hub absorbs it (shown as `owed`). Balls bouncing
+  up off the hood and balls dropping out the bottom into the hub count as
+  before, and counting latency is unchanged. Measured on five broadcast
+  matches at 19 checkpoints each: mean error 13.0% -> 11.3% (Central Valley
+  26.6% -> 17.0%, where balls flying past were counted; the four Einstein
+  matches 9.5% -> 9.9%), every AUTO winner right (Einstein 1 was wrong
+  without it).
+  See deploy/HUB_FEED.md "Passes beside the hub taken back".
+- **A hub can use an outline and an exit line together.** The hub now
+  takes the larger of the two (each kind combined across cameras by the
+  hub's sum / max / median setting) instead of adding them. A scored ball
+  crosses the outline going in and the exit coming out, so adding counted
+  it twice: on Central Valley, outline + exit added up was 29.9% off,
+  against 17.0% for the larger of the two, the same as the outline alone.
+  The exit acts as a floor: a chute camera that counts more than the
+  outline wins, and a blocked or piled-up exit costs nothing.
+
 ## v0.5.2 — 2026-10-07
 
 - **Watchtower: a Write key section for The Blue Alliance.** The TBA tab is
