@@ -1,5 +1,5 @@
 From ee794965e0c831f5f66f1e3fbe66bbb7766d4033 Mon Sep 17 00:00:00 2001
-From: ShadowOfTheVOID <teddtony@outlook.com>
+From: ShadowOfTheVOID <126734193+ShadowOfTheVOID@users.noreply.github.com>
 Date: Tue, 6 Oct 2026 03:51:58 +0000
 Subject: [PATCH] The Watchtower app: build it on each tag, for Mac, Windows,
  Linux and Pi
