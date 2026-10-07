@@ -3583,6 +3583,13 @@ def test_watchtower_home_api():
           "def run_window(" in hc and "win.events.closed += ctl.quit" in hc
           and "webbrowser.open(URL)" in hc and "--selftest-window" in hc)
     spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
+    icons = root / "apps" / "icons"
+    check("both apps carry their own icon (not PyInstaller's Python snake) on Mac, Windows and the installer",
+          all((icons / f"{n}.{e}").stat().st_size > 1000
+              for n in ("HubCounter", "Watchtower") for e in ("icns", "ico", "png"))
+          and "icon=ICONS +" in spec and 'icon=ICONS + ".icns"' in spec
+          and "SetupIconFile" in (root / "apps" / "installer" / "windows.iss").read_text()
+          and "-DIconFile=" in (root / ".github" / "workflows" / "hub-app.yml").read_text())
     check("and both apps bundle the window toolkit",
           spec.index("WEBVIEW = collect_submodules") < spec.index('if APP == "watchtower":')
           and "EXTRA_IMPORTS = WEBVIEW" in spec)

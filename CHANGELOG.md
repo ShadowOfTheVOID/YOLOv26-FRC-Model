@@ -9,6 +9,12 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **App icons in the team's red and black**: Hub Counter is a red ball over
+  a white hub on black, Watchtower a black lighthouse on red. They replace
+  PyInstaller's default (the Python icon on Windows) on the Mac app, the
+  Windows program and its installer. Drawn by `apps/icons/make_icons.py`;
+  the finished `.icns` / `.ico` / `.png` files are committed, so builds need
+  nothing new.
 - **Camera presets, picture settings and fuel colour** (Hub Counter page,
   step 1). Built in: **ELP OV4689 2.8-12 mm varifocal, 60 fps** (1280x720
   MJPG at 60 fps, exposure fixed at 8 ms, white balance at 4600 K) and **USB

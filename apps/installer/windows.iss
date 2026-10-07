@@ -26,6 +26,9 @@
 #ifndef OutFile
   #define OutFile AppName + "-Setup-windows"
 #endif
+#ifndef IconFile
+  #define IconFile ""
+#endif
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -54,6 +57,10 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExe}
+; The installer's own icon (the app's), when hub-app.yml passes /DIconFile.
+#if IconFile != ""
+SetupIconFile={#IconFile}
+#endif
 ; Close a running copy before replacing its files.
 CloseApplications=yes
 

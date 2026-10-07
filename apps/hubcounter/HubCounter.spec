@@ -112,13 +112,18 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
+# The app's own icon, not PyInstaller's default (the Python snake on
+# Windows). Drawn by apps/icons/make_icons.py; the files are committed.
+ICONS = os.path.join(ROOT, "apps", "icons", "Watchtower" if APP == "watchtower" else "HubCounter")
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name=NAME,
-          console=False, upx=False)
+          console=False, upx=False,
+          icon=ICONS + (".icns" if sys.platform == "darwin" else ".ico"))
 coll = COLLECT(exe, a.binaries, a.datas, name=NAME, upx=False)
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name=f"{NAME}.app",
+        icon=ICONS + ".icns",
         bundle_identifier=BUNDLE_ID,
         info_plist={
             "CFBundleShortVersionString": os.environ.get("HUBCOUNTER_VERSION", "0.0.0"),
