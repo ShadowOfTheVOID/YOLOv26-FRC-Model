@@ -796,6 +796,26 @@ counter alone matches the 2026-09-29 records (Einstein mean 9.5% here
 against 10.1% then), and the model blend (6.8% then) was not re-run: it
 needs a GPU.
 
+**With the model (colour + Ultralytics, 2026-10-07).** The same five
+matches, `fuel_relabel.pt` on CPU (~25 min a match), the model's count
+blended 50/50 with the colour count as the apps do, same 19 checkpoints:
+
+| | E4 | E5 | E1 | E8 | Central Valley | Einstein mean | all five |
+|---|---|---|---|---|---|---|---|
+| colour, no guard | 16.4% | 5.7% | 5.3% (AUTO wrong) | 10.8% | 26.6% | 9.5% | 13.0% |
+| colour, guard | 16.0% | 5.3% | 8.2% | 10.1% | 17.0% | 9.9% | 11.3% |
+| model alone | 8.3% | 4.7% | 8.7% | 13.5% (AUTO wrong) | 36.8% | 8.8% | 14.4% |
+| colour + model, no guard | 9.3% | 5.0% | 6.6% | 11.9% | 31.5% | 8.2% | 12.8% |
+| **colour + model, guard** | 9.0% | 4.7% | 8.1% | 11.5% | 26.6% | **8.3%** | 12.0% |
+
+The model was trained on E4, E5 and E8, so it is flattered there; on E1
+the blend is no better than colour alone, and on Central Valley, a
+broadcast it never saw, it counted blue 286 against 159 and pulled the
+blend to 26.6% against 17.0% for colour alone. Against the 6.8% recorded
+on 2026-10-02 (official checkpoints at 30 fps) the Einstein mean here is
+8.3% under this scoring. The guard changes the blend by a tenth of a point
+on Einstein and helps it on Central Valley.
+
 Central Valley's outlines were redrawn by eye for this run (blue
 548,318 676,318 678,398 546,398; red 1168,322 1300,322 1300,402
 1168,402; ball 90 px). Its 26.6% without the guard is not comparable with
