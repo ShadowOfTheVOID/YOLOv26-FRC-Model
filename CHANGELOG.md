@@ -9,6 +9,8 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.3 — 2026-10-07
+
 - **Passes beside the hub are no longer scores.** A ball passed back to the
   alliance zone while the hub is active could fly through the corner of a
   hub's outline and count. Now, when that same ball came in sideways,
