@@ -342,6 +342,45 @@ The exits again caught a tenth of the balls: they pile against the hub.
 On a broadcast the exit adds nothing; it is there for a camera aimed at a
 chute, where it may count more than the outline and then wins.
 
+## Practice field: outline + exit line test (for 2026-10-09)
+
+What to bring back so the exit line can be judged on the real camera:
+
+1. Set the cameras where they will be on Saturday. In the page, draw each
+   hub's **outline** (top edge 3-4 balls above the hood) **and** an **exit
+   line** across its exit chute, on whichever camera sees each best.
+2. Record each camera while balls go in (several minutes; include fast
+   streams, rim bounces, passes beside the hub, balls piling at the exit).
+   *Add recording* in the page, or any recorder at 60 fps.
+3. Count by hand, per hub, every ball that went in during the recording.
+   Even 30-50 is enough.
+4. Run:
+
+   ```bash
+   python run.py hubcount red_cam.mp4 --setup cams.json --camera red-cam --hand red=37
+   ```
+
+   It prints the outline, the exit line, the larger of the two (what the
+   hub counts now) and *exits confirm* at 0.5-5 s, each with its error
+   against the hand count. While counting live, the page shows the same
+   cross-check per hub: the exits against the outline a moment earlier.
+5. Decide per hub:
+   - **exits confirm** at the delay that came closest, only if it beats
+     "larger" by more than a ball or two: set it under step 2 (*Red: exits
+     confirm entries after ... s*), or `"confirm": {"red": 2.0}` in
+     cams.json;
+   - otherwise leave it off: the hub takes the larger of outline and
+     exit, and the cross-check still warns when a camera loses balls.
+
+The rule, so the numbers can be read: confirm mode reports the high-water
+mark of *exits now + outline entries in the last N s*. An entry is
+counted the moment it crosses (latency unchanged) and taken back if it has
+not come out within N s. It trusts the exit line: an exit that misses
+balls makes it count low. On the Central Valley broadcast, where the exits
+caught 17 of 159 and 83 of 810, it read 37 / 106 at 2.5-3 s against the
+outline's 194 / 771 -- which is why it is off by default and set per hub
+only from this test.
+
 ## Blur correction and still-yellow removal (per camera)
 
 Two settings per camera, both off by default:

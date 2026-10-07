@@ -11,6 +11,23 @@ the build rather than publishing an empty release.
 
 ## v0.5.3 — 2026-10-07
 
+- **Exit line and outline cross-check each other.** A hub with both shows,
+  while counting, its exits against the outline count a moment earlier
+  (`red exit 41 / outline 44 · 93%`), and warns when they drift apart
+  (under 80% or over 125%): one of the cameras is missing balls. The score
+  is unchanged.
+- **Exits confirm entries (off by default).** Per hub, *exits confirm
+  entries after N s* counts each ball the moment it crosses the outline,
+  as always, and takes back any entry that has not come out of an exit
+  within N seconds (a rim bounce, a pass). The feed never goes down; what
+  is taken back is absorbed by later balls. It trusts the exit line, so it
+  only helps where the exit sees nearly every ball: on the Central Valley
+  broadcast (exits catching a tenth) it would count 37 / 106 against 159 /
+  810. Turn it on only if the practice-field test says so.
+- **The practice-field test:** `run.py hubcount test.mp4 --setup cams.json
+  --hand red=N,blue=M` prints, for each hub with both lines, the outline,
+  the exit line, the larger of the two, and exits-confirm at 0.5-5 s, each
+  against your hand count. See deploy/HUB_FEED.md "Practice field".
 - **Passes beside the hub are no longer scores.** A ball passed back to the
   alliance zone while the hub is active could fly through the corner of a
   hub's outline and count. Now, when that same ball came in sideways,

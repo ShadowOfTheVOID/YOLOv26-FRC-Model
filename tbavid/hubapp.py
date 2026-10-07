@@ -544,6 +544,26 @@ class HubController:
             c = self.camera(cam_name)
             c["zones"] = [z for z in c["zones"] if z["name"] != zone_name]
 
+    def set_confirm(self, hub: str, seconds) -> None:
+        """Exits confirm a hub's outline entries after `seconds`; 0 = off
+        (hubcount.HubTally). Off by default: only a hand-counted recording
+        from the real camera can show it helps (run.py hubcount --hand)."""
+        from .hubcount import MAX_CONFIRM_S
+        try:
+            v = float(seconds or 0)
+        except (TypeError, ValueError):
+            raise ValueError("the exit delay is a number of seconds") from None
+        if hub not in HUBS or not 0 <= v <= MAX_CONFIRM_S:
+            raise ValueError(f"the exit delay is 0 (off) to {MAX_CONFIRM_S:g} s")
+        with self.lock:
+            conf = self.cfg.setdefault("confirm", {})
+            if v:
+                conf[hub] = round(v, 2)
+            else:
+                conf.pop(hub, None)
+            if not conf:
+                self.cfg.pop("confirm", None)
+
     def set_combine(self, hub: str, how: str) -> None:
         if hub not in HUBS or how not in COMBINE:
             raise ValueError(f"combine is one of {', '.join(COMBINE)}")
@@ -746,6 +766,10 @@ class HubController:
                                       "model": z.model.reported}
                              for zs in tally.zones.values() for z in zs
                              if z.model is not None}
+        if tally is not None:
+            # Hubs with an outline and an exit line: the exits against the
+            # outline a moment ago (hubcount.HubTally.check).
+            live["check"] = {h: c for h in HUBS for c in [tally.check(h)] if c}
         live["model_behind"] = dict(self.monitor.get("model_dropped") or {})
         live["model_off"] = list(self.monitor.get("model_off") or [])
         out["live"] = live

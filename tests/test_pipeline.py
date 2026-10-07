@@ -2598,6 +2598,60 @@ def test_hub_multi_camera_setup():
     mixed.combine["red"] = "max"
     check("and each kind is combined by the hub's own rule",
           tm.value("red") == 30)
+    mixed.combine["red"] = "sum"
+
+    # Exits cross-check the outline: the exits now against the outline a
+    # moment ago. Shown on the page; the score is untouched unless confirm.
+    one = HC.setup_from_dict({"cameras": [{"name": "c", "source": "0", "ball_area": 300,
+        "zones": [{"hub": "red", "outline": sq, "name": "o"},
+                  {"hub": "red", "line": [[0, 0], [10, 0]], "out": [5, 5], "name": "e"}]}]})
+    zo, ze = {z.name: z for z in one.zones("red")}["o"], {z.name: z for z in one.zones("red")}["e"]
+    tc = HC.HubTally(one)
+    check("no cross-check before the first frame", tc.check("red") is None)
+    for t in range(0, 40):                 # one entry a second, exits 2 s behind
+        zo.counter.reported = t
+        ze.counter.reported = max(0, t - 2)
+        tc.tick(float(t))
+    c = tc.check("red")
+    check("cross-check: exits keeping up 2 s behind read 100%, no warning",
+          c["outline"] == 39 and c["exit"] == 37 and c["due"] == 37
+          and c["ratio"] == 1.0 and not c["warn"] and tc.value("red") == 39)
+    for t in range(40, 60):                # the exit line goes blind
+        zo.counter.reported = t
+        tc.tick(float(t))
+    c = tc.check("red")
+    check("cross-check: an exit line that stops seeing balls warns",
+          c["ratio"] < 0.8 and c["warn"])
+
+    # Confirm mode: exits + entries in the last `lag` s, high-water mark.
+    conf = HC.setup_from_dict(dict(HC.setup_to_dict(one), confirm={"red": 2.0}))
+    check("the exit delay is saved with the setup",
+          conf.confirm == {"red": 2.0}
+          and HC.setup_to_dict(conf)["confirm"] == {"red": 2.0})
+    try:
+        HC.setup_from_dict(dict(HC.setup_to_dict(one), confirm={"red": 30}))
+        check("an exit delay over the maximum is refused", False)
+    except ValueError:
+        check("an exit delay over the maximum is refused", True)
+    zo, ze = {z.name: z for z in conf.zones("red")}["o"], {z.name: z for z in conf.zones("red")}["e"]
+    tc = HC.HubTally(conf)
+    ser, vals = [], []
+    for t, o, e in [(0, 1, 0), (0.5, 2, 0), (1, 3, 0), (2.2, 3, 1), (2.6, 3, 2),
+                    (4, 4, 2), (5, 5, 2), (7.5, 5, 2), (8, 6, 3)]:
+        zo.counter.reported, ze.counter.reported = o, e
+        tc.tick(t)
+        vals.append(tc.value("red"))
+        ser.append((t, o, e))
+    check("confirm: an entry counts the moment it crosses",
+          vals[:3] == [1, 2, 3])
+    check("confirm: entries that never reached the exit are absorbed, never "
+          "taken off the feed", vals == sorted(vals) and vals[-1] == 4)
+    check("confirm_counts replays the recorded series to the live answer",
+          HC.confirm_counts(ser, 2.0) == vals[-1])
+    rep = "\n".join(HC.confirm_report({"series": {"red": ser}}, {"red": 4}))
+    check("the practice-field report compares every way of counting",
+          "outline" in rep and "exit line" in rep and "exits confirm, 2 s" in rep
+          and "+2 (50%)" in rep)
 
     def refused(c, why):
         try:
@@ -2873,6 +2927,16 @@ def test_hub_ui_controller_and_web():
         code, _ = call("/api/combine", json.dumps({"hub": "blue", "how": "avg"}).encode(),
                        {"Content-Type": "application/json"})
         check("a bad value is a 400, not a crash", code == 400)
+        code, _ = call("/api/confirm", json.dumps({"hub": "red", "seconds": 2.5}).encode(),
+                       {"Content-Type": "application/json"})
+        check("the page sets a hub's exit delay",
+              code == 200 and ctl.cfg["confirm"] == {"red": 2.5})
+        code, _ = call("/api/confirm", json.dumps({"hub": "red", "seconds": 0}).encode(),
+                       {"Content-Type": "application/json"})
+        check("and 0 turns it off again", code == 200 and "confirm" not in ctl.cfg)
+        code, _ = call("/api/confirm", json.dumps({"hub": "red", "seconds": 99}).encode(),
+                       {"Content-Type": "application/json"})
+        check("an exit delay out of range is a 400", code == 400)
         code, _ = call("/api/stop", b"hub=blue", {"Content-Type":
                                                   "application/x-www-form-urlencoded"})
         check("a form post (what another website could send) is refused",

@@ -312,6 +312,12 @@ one-click update is 0.5.0 -> 0.5.1. v0.5.2: TBA tab split into event / Write key
 v0.5.3: pass guard (a counted ball that came in AND left the outline sideways
 and flew on is taken back as owed; measured HUB_FEED.md "Passes beside the hub")
 and outline + exit line on one hub take the larger kind, not the sum.
+Also in v0.5.3: HubTally cross-check (exits vs outline `lag` s ago, warns
+outside 0.8-1.25, score untouched) and per-hub `"confirm": {hub: s}` (count =
+high-water of exits + outline entries in the last s seconds), OFF by default;
+`run.py hubcount --hand red=N` is the practice-field test (2026-10-09 plan in
+HUB_FEED.md "Practice field"). On broadcasts the exits are blind, so confirm
+is useless there (CV 37/106 of 159/810).
 Watchtower's optional `server.public_url` (Phones & PINs; e.g. our Caddy
 proxy https://watchtower.systemoverload.org, nothing built in): when set,
 phones get that link and its QR instead of the .local name; the raw IP stays

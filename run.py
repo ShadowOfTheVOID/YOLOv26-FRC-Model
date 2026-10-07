@@ -903,6 +903,14 @@ def cmd_hubcount(args, cfg):
                 if z in r["model"]:
                     print(f"  {z}: {n} = colour {r['colour'][z]} blended with "
                           f"model {r['model'][z]}")
+        if args.hand or r.get("series"):
+            hand = {}
+            for part in (args.hand or "").split(","):
+                if part.strip():
+                    hub, _, n = part.partition("=")
+                    hand[hub.strip()] = int(n)
+            for line in hubcount.confirm_report(r, hand):
+                print(line)
     return 0
 
 
@@ -1355,6 +1363,10 @@ def main(argv=None):
     p.add_argument("--end", type=float, default=0.0, help="seconds in to stop")
     p.add_argument("--every", type=float, default=0.5,
                    help="seconds between timeline rows (default 0.5)")
+    p.add_argument("--hand", metavar="red=N,blue=M",
+                   help="balls counted by hand over the whole recording: "
+                        "compares outline, exit line and exits-confirm mode "
+                        "for hubs with both (the practice-field test)")
     p.add_argument("--csv", help="where to write the timeline (default "
                                  "<video>_hubcount.csv)")
     p.add_argument("--model", metavar="WEIGHTS.PT",

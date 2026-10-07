@@ -810,6 +810,14 @@ STREAM_RETRIES = 5   # reconnects in a row before a stream counts as gone
 # chute and one across the field see very different balls.
 
 COMBINE = ("sum", "max", "median")
+# Exits confirming outline entries (HubTally). An entry that has not come
+# out of an exit within the hub's delay is taken back; the cross-check on
+# the page compares the exits with the outline that long ago. CHECK_MIN
+# entries before a ratio means anything; outside CHECK_BAND it warns.
+MAX_CONFIRM_S = 10.0
+CHECK_LAG_S = 2.0
+CHECK_MIN = 10
+CHECK_BAND = (0.8, 1.25)
 HUB_NAMES = ("red", "blue")
 
 
@@ -913,11 +921,15 @@ class Setup:
 
     def __init__(self, cameras: List[Camera],
                  combine: Optional[Dict[str, str]] = None,
-                 measuring: bool = False):
+                 measuring: bool = False,
+                 confirm: Optional[Dict[str, float]] = None):
         self.cameras = cameras
         self.notes: List[str] = []      # what loading changed, to be shown
         self.combine = {h: "sum" for h in HUB_NAMES}
         self.combine.update(combine or {})
+        # Seconds an outline entry may take to reach the hub's exit line
+        # before it is taken back (HubTally); 0 or absent = off.
+        self.confirm = {h: float(v) for h, v in (confirm or {}).items() if v}
         self.validate(measuring)
 
     def zones(self, hub: str) -> List[Zone]:
@@ -957,6 +969,10 @@ class Setup:
                 if z.name in zone_names:
                     raise ValueError(f"two zones are named {z.name!r}")
                 zone_names.add(z.name)
+        for hub, lag in self.confirm.items():
+            if hub not in HUB_NAMES or not 0 < lag <= MAX_CONFIRM_S:
+                raise ValueError(f"confirm: {hub!r}: the exit delay is seconds, "
+                                 f"0 to {MAX_CONFIRM_S:g} (got {lag})")
         for hub, how in self.combine.items():
             if hub not in HUB_NAMES or how not in COMBINE:
                 raise ValueError(f"combine: {hub!r}: {how!r} is not one of "
@@ -1038,7 +1054,7 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
                                c.get("image"), c.get("colour"), c.get("preset", "")))
         except ValueError as e:
             raise ValueError(f"camera {name!r}: {e}")
-    setup = Setup(cams, cfg.get("combine"), measuring)
+    setup = Setup(cams, cfg.get("combine"), measuring, cfg.get("confirm"))
     setup.notes = notes
     return setup
 
@@ -1077,7 +1093,10 @@ def setup_to_dict(setup: "Setup") -> Dict:
                               **c.model["counter"],
                               **({"device": c.model["device"]} if c.model["device"] else {}))
         cams.append(d)
-    return {"rules": RULES, "combine": dict(setup.combine), "cameras": cams}
+    out = {"rules": RULES, "combine": dict(setup.combine), "cameras": cams}
+    if setup.confirm:
+        out["confirm"] = dict(setup.confirm)
+    return out
 
 
 def load_setup(path: str, measuring: bool = False) -> Setup:
@@ -1153,22 +1172,92 @@ class HubTally:
 
     Camera threads call `rise` after updating their zones; it is locked so two
     cameras on one hub cannot both report the same increase.
+
+    A hub with both outlines and exit lines is cross-checked: every scored
+    ball goes in through the outline and comes out of an exit a moment
+    later, so the exits now should match the outline `lag` seconds ago.
+    Their ratio is shown on the page (`check`); outside CHECK_BAND it warns,
+    and the score is untouched.
+
+    With `Setup.confirm[hub]` set, the exits also correct the score:
+        count = exits now + outline entries in the last `lag` seconds
+    -- an entry is counted the moment it crosses, as always, and taken back
+    if it has not come out of an exit within `lag` (a ball that clipped the
+    rim, a bounce, a pass the guard missed). Reported as the high-water mark,
+    so the feed never goes down; what is taken back is absorbed by later
+    balls. It trusts the exits: an exit line that misses balls makes it
+    count low, which is why it is off until a hand-counted recording from
+    the real camera shows it helps (`confirm_report`). On the broadcasts the
+    exits caught a tenth of the balls; nothing here has been measured on a
+    camera that sees an exit well.
     """
 
     def __init__(self, setup: Setup):
         self.setup = setup
         self.zones = {h: setup.zones(h) for h in HUB_NAMES}
         self.sent = {h: 0 for h in HUB_NAMES}
+        self.best = {h: 0 for h in HUB_NAMES}
+        self.now: Optional[float] = None
+        # (time, outline count) each time a cross-checked hub's outline rose.
+        self.history: Dict[str, List[Tuple[float, int]]] = {h: [] for h in HUB_NAMES}
         self._lock = threading.Lock()
 
+    def kinds(self, hub: str) -> Dict[str, int]:
+        """The hub's outline and exit counts, each combined across zones."""
+        by: Dict[str, List[int]] = {}
+        for z in self.zones[hub]:
+            by.setdefault(z.kind, []).append(z.reported)
+        how = self.setup.combine[hub]
+        return {k: combined(c, how) for k, c in by.items()}
+
+    def tick(self, t: float) -> None:
+        """Called once per frame, after the zones are updated, with the
+        frame's time: records the outline counts the cross-check looks back on."""
+        with self._lock:
+            self.now = t
+            for h in HUB_NAMES:
+                k = self.kinds(h)
+                if "exit" not in k or "outline" not in k:
+                    continue
+                hist = self.history[h]
+                if not hist or hist[-1][1] != k["outline"]:
+                    hist.append((t, k["outline"]))
+                    keep = t - MAX_CONFIRM_S - 1.0
+                    while len(hist) > 1 and hist[1][0] <= keep:
+                        del hist[0]
+
+    def outline_at(self, hub: str, t: float) -> int:
+        n = 0
+        for when, count in self.history[hub]:
+            if when > t:
+                break
+            n = count
+        return n
+
+    def check(self, hub: str) -> Optional[Dict]:
+        """The cross-check for the page, or None if the hub lacks an exit
+        line or an outline."""
+        k = self.kinds(hub)
+        if "exit" not in k or "outline" not in k or self.now is None:
+            return None
+        lag = self.setup.confirm.get(hub) or CHECK_LAG_S
+        due = self.outline_at(hub, self.now - lag)
+        ratio = round(k["exit"] / due, 2) if due >= CHECK_MIN else None
+        warn = ratio is not None and not CHECK_BAND[0] <= ratio <= CHECK_BAND[1]
+        return {"outline": k["outline"], "exit": k["exit"], "due": due,
+                "ratio": ratio, "warn": warn, "lag_s": lag,
+                "confirming": hub in self.setup.confirm}
+
     def value(self, hub: str) -> int:
+        k = self.kinds(hub)
+        lag = self.setup.confirm.get(hub)
+        if lag and "exit" in k and "outline" in k and self.now is not None:
+            recent = k["outline"] - self.outline_at(hub, self.now - lag)
+            self.best[hub] = max(self.best[hub], k["exit"] + recent)
+            return self.best[hub]
         # Outlines and exit lines count the same balls (Setup's docstring):
         # each kind is combined on its own, and the hub takes the larger.
-        kinds: Dict[str, List[int]] = {}
-        for z in self.zones[hub]:
-            kinds.setdefault(z.kind, []).append(z.reported)
-        how = self.setup.combine[hub]
-        return max((combined(c, how) for c in kinds.values()), default=0)
+        return max(k.values(), default=0)
 
     def rise(self, hub: str) -> int:
         with self._lock:
@@ -1359,9 +1448,10 @@ def run(sender, setup: Setup, realtime: bool = False,
                                                   cam.ball_area, w, h),
                                         cam.remove_static, file_fps, lo, hi)
                         for z in cam.zones}
-            for z in cam.zones:
-                if z.counter.update(eyes[z.name].blobs(frame)):
-                    report(cam, z, captured)
+            rose = [z for z in cam.zones if z.counter.update(eyes[z.name].blobs(frame))]
+            tally.tick(captured)
+            for z in rose:
+                report(cam, z, captured)
             if worker and (n - 1) % stride == 0:
                 worker.offer(frame, (n - 1) / file_fps, captured)
                 if worker.skipped and monitor is not None:
@@ -1550,7 +1640,7 @@ def count_recording(setup: Setup, video: str, camera: str = "",
                          + ", ".join(c.name for c in setup.cameras))
     d = setup_to_dict(setup)
     cd = next(c for c in d["cameras"] if c["name"] == cams[0].name)
-    one = setup_from_dict({"combine": d["combine"],
+    one = setup_from_dict({"combine": d["combine"], "confirm": d.get("confirm"),
                            "cameras": [dict(cd, source=video)]})
     cam = one.cameras[0]
     tally = HubTally(one)
@@ -1577,6 +1667,9 @@ def count_recording(setup: Setup, video: str, camera: str = "",
             z.model = ModelCounter(z.counter.poly, fps / stride,
                                    **cam.model["counter"])
     timeline: List[Tuple[float, int, int]] = []
+    # Per cross-checked hub, (t, outline, exit) whenever either changed:
+    # what confirm_report replays at any exit delay.
+    series: Dict[str, List[Tuple[float, int, int]]] = {}
     fi, next_mark, began = first, start, time.monotonic()
     while (not last or fi < last) and not (stop and stop.is_set()):
         ok, frame = cap.read()
@@ -1589,6 +1682,14 @@ def count_recording(setup: Setup, video: str, camera: str = "",
         for z, eye in eyes:
             z.counter.update(eye.blobs(frame))
         t = fi / fps
+        tally.tick(t)
+        for h in HUB_NAMES:
+            k = tally.kinds(h)
+            if "exit" in k and "outline" in k:
+                row = (round(t, 3), k["outline"], k["exit"])
+                ser = series.setdefault(h, [])
+                if not ser or ser[-1][1:] != row[1:]:
+                    ser.append(row)
         if model_eye is not None and (fi - first) % stride == 0:
             dets, assist = model_eye.detect(frame)
             for z in cam.model_zones():
@@ -1612,7 +1713,54 @@ def count_recording(setup: Setup, video: str, camera: str = "",
             "red": final[1], "blue": final[2], "timeline": timeline,
             "zones": {z.name: z.reported for z in cam.zones},
             "colour": {z.name: z.counter.reported for z in cam.zones},
-            "model": {z.name: z.model.reported for z in cam.model_zones()}}
+            "model": {z.name: z.model.reported for z in cam.model_zones()},
+            "series": series}
+
+
+CONFIRM_LAGS = (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0)
+
+
+def confirm_counts(series: Sequence[Tuple[float, int, int]],
+                   lag: float) -> int:
+    """What HubTally's confirm mode would have reported by the end of a
+    recording, from `count_recording`'s (t, outline, exit) series: the
+    high-water mark of exits + outline entries in the last `lag` seconds.
+    It can only rise when a count rises, so replaying the changes is exact."""
+    best, hist = 0, []
+    for t, outline, ex in series:
+        hist.append((t, outline))
+        due = 0
+        for when, n in hist:
+            if when > t - lag:
+                break
+            due = n
+        best = max(best, ex + outline - due)
+    return best
+
+
+def confirm_report(result: Dict, hand: Dict[str, int]) -> List[str]:
+    """Lines comparing, per cross-checked hub, the outline, the exit line,
+    the larger of the two (what the hub counts without confirm) and confirm
+    mode at each delay in CONFIRM_LAGS, against a hand count of the whole
+    recording. The practice-field test: whichever is nearest is what to
+    set (cams.json "confirm": {"red": <delay>}), and only if it beats the
+    larger-of-the-two."""
+    lines = []
+    for hub, ser in sorted((result.get("series") or {}).items()):
+        if not ser:
+            continue
+        true = hand.get(hub)
+        out, ex = ser[-1][1], ser[-1][2]
+        def show(name, n):
+            err = f"  {n - true:+d} ({abs(n - true) / true:.0%})" if true else ""
+            return f"  {name:<24} {n:5d}{err}"
+        lines.append(f"{hub}: hand count {true if true else '?'}")
+        lines.append(show("outline", out))
+        lines.append(show("exit line", ex))
+        lines.append(show("larger (current)", max(out, ex)))
+        for lag in CONFIRM_LAGS:
+            lines.append(show(f"exits confirm, {lag:g} s", confirm_counts(ser, lag)))
+    return lines
 
 
 def write_timeline(result: Dict, path: str) -> None:
