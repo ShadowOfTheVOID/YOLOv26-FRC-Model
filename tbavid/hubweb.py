@@ -55,6 +55,21 @@ def lan_ip() -> str:
         return "127.0.0.1"
 
 
+def host_name() -> str:
+    """A name phones can use instead of the raw IP: <computer>.local, which
+    Macs and Windows advertise over the network by themselves (Bonjour /
+    mDNS), and iPhones and recent Androids resolve. Not every network passes
+    it through, so it is only ever shown ALONGSIDE the IP, never instead of
+    it -- the IP is the address that always works."""
+    try:
+        name = socket.gethostname().split(".")[0].strip()
+    except OSError:
+        return ""
+    # keep it a sane hostname label; .local is appended by the resolver's rule
+    name = "".join(c for c in name if c.isalnum() or c == "-").lower()
+    return f"{name}.local" if name else ""
+
+
 class Share:
     """The page on the network, behind a PIN."""
 
@@ -73,6 +88,11 @@ class Share:
 
     def url(self) -> str:
         return f"http://{lan_ip()}:{self.port}/"
+
+    def name_url(self) -> str:
+        """The .local address, or "" when this computer has no usable name."""
+        n = host_name()
+        return f"http://{n}:{self.port}/" if n else ""
 
     def start(self, pin: str = "", port: int = SHARE_PORT) -> dict:
         with self.lock:
@@ -100,7 +120,7 @@ class Share:
     def status(self, host: bool) -> dict:
         if not self.on:
             return {"on": False}
-        out = {"on": True, "url": self.url()}
+        out = {"on": True, "url": self.url(), "name_url": self.name_url()}
         if host:
             out["pin"] = self.pin
         return out
@@ -138,7 +158,7 @@ background:#0b0e14;color:#e7ebf3;font:16px system-ui,sans-serif}
 form{background:#141925;padding:28px;border-radius:14px;width:min(320px,90vw)}
 input{width:100%;box-sizing:border-box;font-size:28px;letter-spacing:6px;text-align:center;
 padding:10px;border-radius:10px;border:1px solid #2a3142;background:#0b0e14;color:#fff}
-button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;background:#5b7cfa;
+button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;background:#e11d2a;
 color:#fff;font-size:16px;font-weight:600}p{color:#9aa3b5;font-size:14px}#e{color:#f87171}</style>
 </head><body><form id="f"><b>Hub Counter</b><p>Enter the PIN shown on the counting computer.</p>
 <input id="p" inputmode="numeric" autocomplete="one-time-code" autofocus>

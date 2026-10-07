@@ -3835,6 +3835,49 @@ def test_camera_presets():
           len(blobs) == 1 and blobs[0][2] == 80 * 40)
 
 
+def test_share_hides_the_ip_behind_a_name():
+    """Sharing shows a .local hostname, but never instead of the IP.
+
+    Phones should not have to read a raw 192.168.x.x, so Share offers
+    <computer>.local (Bonjour/mDNS, which Macs and Windows advertise). Not
+    every network passes .local through, and the rule is that every device
+    on the Wi-Fi still gets in, so the IP is always carried too -- the name
+    is an addition, never a replacement, and the QR encodes the IP so a scan
+    always connects.
+    """
+    from tbavid import hubweb
+
+    saved = hubweb.socket.gethostname
+    try:
+        hubweb.socket.gethostname = lambda: "Scoring-Mac.lan"
+        check("a computer's name becomes a clean .local address",
+              hubweb.host_name() == "scoring-mac.local")
+        hubweb.socket.gethostname = lambda: ""
+        check("no name -> no .local (the IP is used)", hubweb.host_name() == "")
+    finally:
+        hubweb.socket.gethostname = saved
+
+    class Ctl:
+        def say(self, *a):
+            pass
+    sh = hubweb.Share(Ctl())
+    sh.httpd = object()                       # pretend it is running, without a socket
+    sh.pin = "123456"
+    hubweb.socket.gethostname = lambda: "field-laptop"
+    try:
+        st = sh.status(host=True)
+    finally:
+        hubweb.socket.gethostname = saved
+    check("status carries both the IP url and the .local name",
+          st["url"].startswith("http://") and "field-laptop.local" in st["name_url"]
+          and st["url"] != st["name_url"])
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    check("the share dialog leads with the name and keeps the IP as a backup",
+          "s.name_url||s.url" in page and "use <span" in page)
+    sh.httpd = None
+    check("not sharing -> nothing leaked", sh.status(host=True) == {"on": False})
+
+
 def test_hub_scoreboard_view():
     """The live scoreboard: bioarena's score when linked, the camera's otherwise.
 
@@ -4246,7 +4289,7 @@ def main() -> int:
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
                test_watchtower_home_api, test_app_update,
-               test_camera_presets):
+               test_camera_presets, test_share_hides_the_ip_behind_a_name):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

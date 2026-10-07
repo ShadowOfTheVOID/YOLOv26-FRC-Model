@@ -117,7 +117,7 @@ code{-webkit-user-select:text;user-select:text}
   <h1>Phones &amp; PINs</h1><div class="sub">Refs log fouls and the emcee calls the hub lights from their phones.</div>
   <div class="warnbox" id="netwarn" style="display:none;margin-top:14px">This computer is not on a network, so phones cannot reach it. Join the event Wi-Fi (or your own router), then reopen this tab.</div>
   <div class="card" style="margin-top:14px"><div class="phone"><div class="qr" id="qr"></div>
-    <div><div class="sub">On the same Wi-Fi, scan or open</div><div class="url" id="phoneurl">—</div>
+    <div><div class="sub">On the same Wi-Fi, scan or open</div><div class="url" id="phoneurl">—</div><div class="sub" id="phoneurl2" style="user-select:all"></div>
       <p class="note">Can't connect? Allow Watchtower when the firewall asks (Windows: tick Private networks), and use your own router: venue and school Wi-Fi often keep devices apart.</p></div></div></div>
   <div class="card"><h2>PINs</h2>
     <div class="form" id="form_pins"></div>
@@ -248,7 +248,8 @@ async function refresh(){
   $("setupwarn").style.display=todo.length?"":"none";
   $("setupwarn").innerHTML=todo.length?`Before the first match: ${todo.join(", ")} in <a href="#" style="color:var(--acc)" onclick="show('event');return false">Event &amp; schedule</a>.`:"";
   $("netwarn").style.display=s.on_network?"none":"";
-  $("phoneurl").textContent=s.phone_url;
+  $("phoneurl").textContent=s.phone_name||s.phone_url;
+  $("phoneurl2").textContent=s.phone_name?("or "+s.phone_url):"";
   if(s.phone_url!==qrFor){qrFor=s.phone_url;try{$("qr").innerHTML=await api().qr(s.phone_url);}catch(e){}}
 }
 async function renderUpdate(running){let u;try{u=await api().update_status();}catch(e){return;}

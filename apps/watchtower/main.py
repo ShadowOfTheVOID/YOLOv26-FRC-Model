@@ -156,9 +156,15 @@ class App:
         st = self.ctl.state()
         live = st.get("live") or {}
         ip = lan_ip()
+        from tbavid.hubweb import host_name
+        name = host_name()
         return {"name": self.ev["name"], "date": self.ev["date"], "teams": self.ev["teams"],
                 "pins": {k: str(v) for k, v in self.ev["pins"].items()},
-                "phone_url": f"http://{ip}:{self.ev['port']}", "on_network": ip != "127.0.0.1",
+                "phone_url": f"http://{ip}:{self.ev['port']}",
+                # The friendly .local name shown to refs, or "" -- the QR still
+                # carries the IP, so a scan connects even where .local does not.
+                "phone_name": f"http://{name}:{self.ev['port']}" if name else "",
+                "on_network": ip != "127.0.0.1",
                 "fms_ok": port_open(self.ev["port"]), "data_dir": str(self.d),
                 "hub": {"running": bool(st.get("running")), "linked": bool(live.get("linked")),
                         "counts": live.get("counts") or {"red": 0, "blue": 0},

@@ -9,6 +9,14 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Phones get a name, not a raw IP.** When you share the page on Wi-Fi (Hub
+  Counter) or open Phones & PINs (Watchtower), the address now leads with
+  `<computer>.local` -- which Macs and Windows announce on the network by
+  themselves and phones resolve -- instead of `192.168.x.x`. The IP is still
+  shown as a backup and the QR code still carries it, because not every
+  network passes `.local` through and every device on the Wi-Fi must still
+  get in. The page stays gated by its PIN; the name is a convenience, not a
+  security measure.
 - **The team's red and black**: app icons (Hub Counter a yellow fuel ball
   over a white hub on black, Watchtower a black lighthouse on red) and the
   pages' accent colour and logos (buttons, sliders, selection were blue).
