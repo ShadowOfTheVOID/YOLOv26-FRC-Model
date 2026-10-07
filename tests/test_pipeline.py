@@ -2851,6 +2851,10 @@ def test_frc_fms_sender():
           FL.is_fms_target("http://k@10.0.0.2:8000") and not FL.is_fms_target("10.0.100.5:8411"))
     check("the vision key rides in the URL",
           FL.split_target("http://s3cret@192.168.1.10:8000/") == ("http://192.168.1.10:8000", "s3cret"))
+    check("through our https proxy too: no port, key still in the user part",
+          FL.is_fms_target("https://k@watchtower.systemoverload.org")
+          and FL.split_target("https://s3cret@watchtower.systemoverload.org/")
+          == ("https://watchtower.systemoverload.org", "s3cret"))
     try:
         FL.FmsSender("http://192.168.1.10:8000", start=False)
         check("a URL without the vision key is refused", False)
@@ -3466,6 +3470,17 @@ def test_watchtower_settings():
     check("bad values are refused, each with its own reason",
           set(err) == {"event.date", "event.lunch", "game.n_shifts", "server.pins.emcee",
                        "server.pins.control", "tba.enabled"})
+    check("the public address is an optional setting, nothing built in",
+          St.KEY["server.public_url"][1] == "url" and St.clean_url("") == "")
+    check("a public address is tidied: https added to a bare name, trailing / dropped, a path kept",
+          St.clean_url(" watchtower.systemoverload.org/ ") == "https://watchtower.systemoverload.org"
+          and St.clean_url("http://10.0.0.5:8000/fms/") == "http://10.0.0.5:8000/fms"
+          and St.clean_url("") == "")
+    _, err = St.check({"server.public_url": "https://KEY@watchtower.systemoverload.org"})
+    _, err2 = St.check({"server.public_url": "ftp://x.org"})
+    _, err3 = St.check({"server.public_url": "https://x.org/?a=1"})
+    check("but a key, another scheme or a query is refused (the link goes to phones)",
+          set(err) == set(err2) == set(err3) == {"server.public_url"})
     pins = St.new_pins()
     check("new PINs are three different 6-digit numbers",
           len(set(pins.values())) == 3 and all(len(p) == 6 and p.isdigit() for p in pins.values()))

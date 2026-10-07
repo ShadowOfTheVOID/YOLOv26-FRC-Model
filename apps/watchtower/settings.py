@@ -45,6 +45,12 @@ FIELDS = [
     (("server", "pins", "control"), "pin", "Scorekeeper PIN"),
     (("server", "pins", "ref"), "pin", "Ref PIN"),
     (("server", "pins", "emcee"), "pin", "Emcee PIN"),
+    # Not Watchtower's either: the address phones are given when the FMS is
+    # also reachable through a reverse proxy or tunnel (our Caddy at
+    # watchtower.systemoverload.org, or any other). Empty unless set: nothing
+    # is built in. Watchtower itself still listens on the Wi-Fi; this only
+    # changes the link and QR on Phones & PINs.
+    (("server", "public_url"), "url", "Public address (optional, e.g. https://watchtower.systemoverload.org)"),
     # The Blue Alliance
     (("event", "tba_event_key"), "tbakey", "TBA event key"),
     (("tba", "enabled"), "bool", "Send schedule and results to TBA"),
@@ -95,7 +101,7 @@ def load(event_yaml: Path) -> dict:
         v = _get(cfg, path)
         if kind == "teams":
             v = [int(t) for t in v or []]
-        elif kind in ("text", "secret", "date", "time", "tbakey", "pin"):
+        elif kind in ("text", "secret", "date", "time", "tbakey", "pin", "url"):
             v = "" if v is None else str(v)
         out[name] = v
     return out
@@ -169,6 +175,29 @@ def parse_team_text(text: str) -> dict:
     return {"teams": nums, "names": names}
 
 
+def clean_url(s: str) -> str:
+    """'watchtower.systemoverload.org/' -> 'https://watchtower.systemoverload.org'.
+    A bare name gets https (what a proxy with a certificate serves); a path
+    is kept for a proxy that mounts the FMS under one. A user part, query or
+    fragment is refused: the link goes to phones, never a key."""
+    from urllib.parse import urlsplit
+    s = (s or "").strip()
+    if not s:
+        return ""
+    if "://" not in s:
+        s = "https://" + s
+    try:
+        u = urlsplit(s)
+        u.port                                         # raises on a bad port
+    except ValueError:
+        raise ValueError("not a web address") from None
+    if u.scheme not in ("http", "https") or not u.hostname or " " in s:
+        raise ValueError("like https://watchtower.systemoverload.org")
+    if u.username or u.password or u.query or u.fragment:
+        raise ValueError("just the address: no login, ? or # part")
+    return f"{u.scheme}://{u.netloc}{u.path.rstrip('/')}"
+
+
 def parse_teams(v) -> list:
     """'254, 1678 971' (any separators), TBA's CSV, JSON, or [254, ...] ->
     [254, 1678, 971], in order, no repeats."""
@@ -236,6 +265,8 @@ def _clean(kind: str, v):
         if s and not re.fullmatch(r"\d{4}[a-z0-9]+", s.lower()):
             raise ValueError("like 2026catstd")
         return (s or "").lower()
+    if kind == "url":
+        return clean_url(s or "")
     if kind == "points4":
         vals = [int(x) for x in (s.values() if isinstance(s, dict) else re.findall(r"-?\d+", str(s)))]
         if len(vals) != 4:

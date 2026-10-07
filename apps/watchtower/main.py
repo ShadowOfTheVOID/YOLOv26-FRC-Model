@@ -97,6 +97,7 @@ def read_event(d: Path) -> dict:
     return {"name": e.get("name", ""), "date": str(e.get("date") or ""),
             "teams": list(e.get("teams") or []),
             "pins": srv.get("pins") or {}, "key": srv.get("vision_key", ""),
+            "public_url": str(srv.get("public_url") or "").rstrip("/"),
             "port": int(srv.get("port") or FMS_PORT)}
 
 
@@ -164,6 +165,9 @@ class App:
                 # The friendly .local name shown to refs, or "" -- the QR still
                 # carries the IP, so a scan connects even where .local does not.
                 "phone_name": f"http://{name}:{self.ev['port']}" if name else "",
+                # Set in Phones & PINs when a proxy or tunnel serves this FMS
+                # under a public name: then that leads, and the QR carries it.
+                "public_url": self.ev.get("public_url", ""),
                 "on_network": ip != "127.0.0.1",
                 "fms_ok": port_open(self.ev["port"]), "data_dir": str(self.d),
                 "hub": {"running": bool(st.get("running")), "linked": bool(live.get("linked")),
