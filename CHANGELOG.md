@@ -11,6 +11,23 @@ the build rather than publishing an empty release.
 
 ## v0.5.3 — 2026-10-07
 
+- **Everything can be tested in the app (new step 5, Test)** — Hub
+  Counter and Watchtower's Hub cameras tab, no terminal needed:
+  - **Ball test**, bioarena's field acceptance: *Start ball test* while
+    counting, drop balls in, *Check* with your hand count per hub. Zero
+    difference on every hub passes, the spec's bar for letting the count
+    decide AUTO.
+  - **Speed**: capture-to-count latency of every count sent, median and
+    worst 1%, against the spec's budget (typical 80 ms, worst 200 ms).
+  - **Record the cameras** while counting, one .mp4 per camera in
+    `recordings/` beside the setup. Frames are written on their own thread
+    and dropped (and counted) rather than slowing the counter.
+  - **Test a recording against a hand count**: every way this camera can
+    count, side by side with the error of each -- what the hub counts now,
+    colour, the model alone and colour + model where there is a model, the
+    outline and the exit line, exits-confirm at 0.5-5 s -- the closest
+    marked, and *Use* to turn on exits-confirm at that delay. The same as
+    `run.py hubcount --hand` on the command line.
 - **Exit line and outline cross-check each other.** A hub with both shows,
   while counting, its exits against the outline count a moment earlier
   (`red exit 41 / outline 44 · 93%`), and warns when they drift apart

@@ -789,6 +789,26 @@ class Health:
         return 1000 * max(self.lags) if self.lags else 0.0
 
 
+# The bioarena spec's sensing budget, camera to count (section 5.2), and how
+# many recent counts the page's latency check looks at.
+SPEC_TYPICAL_MS = 80
+SPEC_P99_MS = 200
+LATENCY_MEMORY = 500
+
+
+def latency_summary(samples: Sequence[float]) -> Optional[Dict]:
+    """Median and 99th percentile of capture-to-sent latency, judged against
+    the spec: typical <= SPEC_TYPICAL_MS, p99 <= SPEC_P99_MS."""
+    if not samples:
+        return None
+    srt = sorted(samples)
+    med = srt[len(srt) // 2]
+    p99 = srt[min(len(srt) - 1, int(0.99 * (len(srt) - 1) + 0.5))]
+    return {"n": len(srt), "median_ms": round(med), "p99_ms": round(p99),
+            "ok": med <= SPEC_TYPICAL_MS and p99 <= SPEC_P99_MS,
+            "typical_ms": SPEC_TYPICAL_MS, "limit_ms": SPEC_P99_MS}
+
+
 STALE_S = 0.5    # a camera silent this long is blind; stop the heartbeat
 # Below this a camera is flagged as slow. The Einstein broadcasts replayed at
 # 60 / 30 / 20 fps (every 1st / 2nd / 3rd frame) measured 10.5% / 12.6% /
@@ -1296,8 +1316,12 @@ def run(sender, setup: Setup, realtime: bool = False,
     tally = HubTally(setup)
     health = {c.name: Health() for c in setup.cameras}
     model_off: List[str] = []      # cameras whose model was too slow
+    # Capture-to-sent milliseconds of every count sent, for the page's check
+    # against the spec's budget (SPEC_TYPICAL_MS / SPEC_P99_MS).
+    latency: List[float] = []
     if monitor is not None:
-        monitor.update(health=health, tally=tally, errors=[], model_off=model_off)
+        monitor.update(health=health, tally=tally, errors=[], model_off=model_off,
+                       latency=latency)
     log_lock = threading.Lock()
     log_file = open(log_path, "a", newline="") if log_path else None
     log = csv.writer(log_file) if log_file else None
@@ -1311,6 +1335,8 @@ def run(sender, setup: Setup, realtime: bool = False,
         sent = tally.rise(z.hub)
         if sent:
             sender.score(z.hub, sent, captured)
+            latency.append((time.monotonic() - captured) * 1000)
+            del latency[:-LATENCY_MEMORY]
         if log:
             with log_lock:
                 log.writerow([
@@ -1718,6 +1744,56 @@ def count_recording(setup: Setup, video: str, camera: str = "",
 
 
 CONFIRM_LAGS = (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0)
+
+
+def hand_test(setup: Setup, camera: str, video: str, hand: Dict[str, int],
+              progress: Optional[Callable[[float], None]] = None,
+              stop: Optional[threading.Event] = None) -> Dict:
+    """Count a recording with every way this setup can count, against a hand
+    count: the practice-field test, in the app. Per hub the camera covers:
+    what the hub counts now, then its parts -- colour alone, the model alone
+    and their blend where the camera has a model, the outline and the exit
+    line where it has both, and exits-confirm at each delay in CONFIRM_LAGS
+    (`"confirm"` rows carry the delay, so the page can apply one)."""
+    r = count_recording(setup, video, camera, progress=progress, stop=stop)
+    cam = next(c for c in setup.cameras if not camera or c.name == camera)
+    how = setup.combine
+    out = {"video": video, "camera": cam.name, "seconds": r["seconds"],
+           "hubs": {}}
+    for hub in HUB_NAMES:
+        zs = [z for z in cam.zones if z.hub == hub]
+        if not zs:
+            continue
+        true = hand.get(hub)
+        rows = []
+
+        def row(label, n, **kw):
+            d = {"label": label, "count": int(n)}
+            if true:
+                d["error"] = int(n) - true
+                d["pct"] = round(100 * abs(int(n) - true) / true, 1)
+            d.update(kw)
+            rows.append(d)
+        outl = [z for z in zs if not z.line]
+        exits = [z for z in zs if z.line]
+        final = r["red"] if hub == "red" else r["blue"]
+        row("what the hub counts now", final, current=True)
+        if outl:
+            row("outline, colour", combined([r["colour"][z.name] for z in outl], how[hub]))
+            if any(z.name in r["model"] for z in outl):
+                row("outline, model only", combined([r["model"].get(z.name, 0) for z in outl], how[hub]))
+                row("outline, colour + model", combined([r["zones"][z.name] for z in outl], how[hub]))
+        if exits:
+            row("exit line", combined([r["zones"][z.name] for z in exits], how[hub]))
+        ser = (r.get("series") or {}).get(hub)
+        if ser:
+            for lag in CONFIRM_LAGS:
+                row(f"exits confirm after {lag:g} s", confirm_counts(ser, lag), confirm=lag)
+        best = min((x for x in rows if "error" in x), key=lambda x: abs(x["error"]), default=None)
+        if best:
+            best["best"] = True
+        out["hubs"][hub] = {"hand": true, "rows": rows}
+    return out
 
 
 def confirm_counts(series: Sequence[Tuple[float, int, int]],

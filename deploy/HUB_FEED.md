@@ -344,6 +344,13 @@ chute, where it may count more than the outline and then wins.
 
 ## Practice field: outline + exit line test (for 2026-10-09)
 
+**All of this is in the app: step 5, Test** (Hub Counter, or Watchtower's
+Hub cameras tab). *Record* saves each camera while counting; *Test a
+recording against a hand count* prints the table below with the closest
+way of counting marked and a *Use* button for exits-confirm; *Ball test*
+is the spec's 20-ball acceptance; *Speed* checks the latency budget. The
+command-line steps below do the same from a checkout.
+
 What to bring back so the exit line can be judged on the real camera:
 
 1. Set the cameras where they will be on Saturday. In the page, draw each

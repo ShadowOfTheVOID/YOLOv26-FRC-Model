@@ -4411,6 +4411,90 @@ def test_hub_model_blend():
           and "model" not in HC.setup_to_dict(plain)["cameras"][0])
 
 
+def test_app_tests():
+    """Everything the practice field needs is on the page, not the command
+    line: the spec's ball test, the speed check against the spec's budget,
+    recording the cameras, and a recording against a hand count with every
+    way of counting side by side."""
+    from tbavid import hubcount as HC
+    from tbavid.hubapp import HubController
+
+    L = HC.latency_summary([3, 4, 5, 90, 4, 6] * 20)
+    check("speed check: median and worst 1% against the spec",
+          L["median_ms"] == 5 and L["p99_ms"] == 90 and L["ok"] is True)
+    check("a worst case over 200 ms fails it",
+          HC.latency_summary([5] * 90 + [400] * 10)["ok"] is False)
+    check("no counts yet, no verdict", HC.latency_summary([]) is None)
+
+    # Ball test against a stand-in sender.
+    class FakeSender:
+        counts = {"red": 10, "blue": 3}
+        last_reply, rtt_ms, session = None, None, "s"
+
+        def linked(self):
+            return False
+    ctl = HubController()
+    try:
+        ctl.start_ball_test()
+        check("the ball test needs the counter running", False)
+    except ValueError:
+        check("the ball test needs the counter running", True)
+    ctl.running, ctl.sender = True, FakeSender()
+    ctl.start_ball_test()
+    FakeSender.counts = {"red": 30, "blue": 5}
+    ctl.sender = FakeSender()
+    r = ctl.check_ball_test({"red": 20, "blue": 3, "x": 1})
+    check("ball test: counted since the start, against the hand count",
+          r["hubs"]["red"] == {"hand": 20, "counted": 20, "off": 0}
+          and r["hubs"]["blue"]["off"] == -1 and r["pass"] is False and "x" not in r["hubs"])
+    check("the page sees the test running",
+          ctl.state()["live"]["ball_test"] == {"red": 20, "blue": 2})
+    check("all hubs matching passes",
+          ctl.check_ball_test({"red": 20})["pass"] is True)
+    try:
+        ctl.running = False
+        ctl.start_recording()
+        check("recording needs the counter running", False)
+    except ValueError:
+        check("recording needs the counter running", True)
+
+    # A recording against a hand count: every way of counting, closest marked.
+    sq = [[100, 100], [200, 100], [200, 200], [100, 200]]
+    setup = HC.setup_from_dict({"cameras": [{"name": "c", "source": "x.mp4", "ball_area": 300,
+        "model": {"weights": "w.pt"},
+        "zones": [{"hub": "red", "outline": sq, "name": "o"},
+                  {"hub": "red", "line": [[0, 0], [10, 0]], "out": [5, 5], "name": "e"}]}]})
+    fake = {"red": 22, "blue": 0, "seconds": 60.0,
+            "zones": {"o": 22, "e": 18}, "colour": {"o": 24}, "model": {"o": 20},
+            "series": {"red": [(1.0, 5, 0), (3.0, 10, 4), (10.0, 22, 18)]}}
+    real = HC.count_recording
+    HC.count_recording = lambda *a, **k: fake
+    try:
+        t = HC.hand_test(setup, "c", "x.mp4", {"red": 20})
+    finally:
+        HC.count_recording = real
+    rows = {w["label"]: w for w in t["hubs"]["red"]["rows"]}
+    check("the test shows the current count and each part",
+          rows["what the hub counts now"]["count"] == 22
+          and rows["outline, colour"]["count"] == 24
+          and rows["outline, model only"]["count"] == 20
+          and rows["outline, colour + model"]["count"] == 22
+          and rows["exit line"]["count"] == 18
+          and rows["exits confirm after 2 s"]["confirm"] == 2.0)
+    check("each against the hand count, the closest marked",
+          rows["outline, model only"]["error"] == 0 and rows["outline, model only"].get("best")
+          and rows["outline, colour"]["pct"] == 20.0
+          and sum(1 for w in rows.values() if w.get("best")) == 1)
+    check("a hub with no zones on this camera is left out", "blue" not in t["hubs"])
+
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    from tbavid import hubweb
+    check("the page has the Test step and every action it calls exists",
+          'id="st5"' in page and all(a in hubweb.ACTIONS for a in
+              ("ball_test_start", "ball_test_check", "record_start", "record_stop",
+               "test_recording", "confirm")))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -4434,7 +4518,8 @@ def main() -> int:
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
                test_watchtower_home_api, test_app_update,
-               test_camera_presets, test_share_hides_the_ip_behind_a_name):
+               test_camera_presets, test_share_hides_the_ip_behind_a_name,
+               test_app_tests):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

@@ -294,6 +294,12 @@ ACTIONS = {
     "delete_zone": lambda c, b: c.delete_zone(b["camera"], b["zone"]),
     "combine": lambda c, b: c.set_combine(b["hub"], b["how"]),
     "confirm": lambda c, b: c.set_confirm(b["hub"], b.get("seconds", 0)),
+    "ball_test_start": lambda c, b: c.start_ball_test(),
+    "ball_test_check": lambda c, b: c.check_ball_test(b.get("hand", {})),
+    "record_start": lambda c, b: c.start_recording(),
+    "record_stop": lambda c, b: c.stop_recording(),
+    "test_recording": lambda c, b: c.job("test", lambda: c.test_recording(
+        b["camera"], b["video"], {k: int(v) for k, v in b["hand"].items() if str(v).strip()})),
     "grab": lambda c, b: c.job("picture", lambda: (c.grab(b["camera"], _at(b)), None)[1]),
     "measure": lambda c, b: c.job("measure", lambda: c.measure(b["camera"])),
     "find_cameras": lambda c, b: c.job("find cameras", probe_cameras),

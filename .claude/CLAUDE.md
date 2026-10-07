@@ -318,6 +318,11 @@ high-water of exits + outline entries in the last s seconds), OFF by default;
 `run.py hubcount --hand red=N` is the practice-field test (2026-10-09 plan in
 HUB_FEED.md "Practice field"). On broadcasts the exits are blind, so confirm
 is useless there (CV 37/106 of 159/810).
+Page step 5 "Test" (v0.5.3): ball test (HubController.start/check_ball_test,
+baseline of sender.counts), speed (hubcount.latency_summary over run()'s
+monitor["latency"], spec 80/200 ms), Record (hubapp.Recorder, mp4v on its own
+thread, drops rather than blocks), Test a recording (hubcount.hand_test: every
+counting method vs hand count, closest marked, Use applies confirm).
 Watchtower's optional `server.public_url` (Phones & PINs; e.g. our Caddy
 proxy https://watchtower.systemoverload.org, nothing built in): when set,
 phones get that link and its QR instead of the .local name; the raw IP stays
