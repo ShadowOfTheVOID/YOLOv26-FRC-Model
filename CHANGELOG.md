@@ -9,6 +9,12 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.1 — 2026-10-07
+
+The first release the v0.5.0 apps can install themselves: on Mac and
+Windows, open v0.5.0 and press **Update** on the Hub Counter page or
+Watchtower's Overview (with the cameras stopped).
+
 - **Watchtower through a public address.** Phones & PINs has a new optional
   *Public address* (e.g. `https://watchtower.systemoverload.org`, or any
   other proxy or tunnel that forwards to port 8000 on the Watchtower
@@ -23,8 +29,9 @@ the build rather than publishing an empty release.
   `https://KEY@watchtower.systemoverload.org` (that already worked; the
   page and `--target` help now say so).
 - **One-click updates start from v0.5.0.** v0.4.4 and earlier have no
-  updater, so v0.5.0 itself is a manual download from the release page;
-  from v0.5.0 on, the Update button installs each new release.
+  updater, so they need a manual download from the release page; from
+  v0.5.0 on, the Update button installs each new release. v0.5.0 -> v0.5.1
+  is the first real one-click update.
 
 ## v0.5.0 — 2026-10-07
 
