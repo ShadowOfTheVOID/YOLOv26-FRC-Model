@@ -59,13 +59,30 @@ Why each rule:
 - n rounds up only at 0.65 of a ball: a blob of 1.5 balls' area is more
   often one blurred ball than two.
 
+## Passes that clip the outline
+
+A ball passed back to the alliance zone while the hub is active can fly
+through the corner of a raised outline on its way down past the hub, and
+the downward-entry rule counted it (seen 2026-10-06 replaying a California
+Northern State Championship playoff match through Watchtower: passes beside
+the hub scored). Such a ball is
+taken back when the SAME track leaves the outline moving sideways --
+|vx| > |vy| -- and stays in sight outside for PASS_CONFIRM_FRAMES more
+frames: it flew on, it did not drop into the hub. Exits that move up (a
+bounce off the hood) or down (into the hub below the outline) leave the count
+alone, as before, and so does a track that is lost after it leaves. Because
+the feed never goes down, the ball is reported on entry as before -- the
+latency is unchanged -- and taken back as `owed`, absorbed by the next ball
+in. Unmeasured: no hand-counted recording with passes beside a hub is in the
+repository; the Einstein rules above were measured before this guard.
+
 An exit line (`ExitLineCounter`) keeps the signed rule -- a ball across it
 towards `out` is +1, one crossing back is -1 -- and the measured ball: the
 broadcasts cannot see the exits well enough to test anything else.
 
 The feed may never go down within a session (spec 4.2), so what is reported
 is the high-water mark of the net count. `owed` in the status line is how
-many signed exits are being absorbed by later entries (always 0 on outlines).
+many signed exits, or passes taken back, are being absorbed by later entries.
 """
 from __future__ import annotations
 
@@ -117,6 +134,12 @@ ROUND_UP = 0.35
 # 0.3 measured 16% / 6% / 10% on Einstein 4 / 5 / 1 and 0 measured 20% / 30%
 # / 34%; 0.5 was 17% / 12% / 5%.
 DEFAULT_BLUR = 0.3
+# A counted ball that leaves the outline sideways and is still tracked
+# outside this many frames later flew past: taken back (module docstring).
+# Two frames is 33 ms at 60 fps; a ball dropping into the hub is gone by
+# then. PASS_WINDOW_FRAMES bounds how long an entry waits to be taken back.
+PASS_CONFIRM_FRAMES = 2
+PASS_WINDOW_FRAMES = 60
 # Setup files saved under these rules say so; see setup_from_dict.
 RULES = 2
 
@@ -200,6 +223,11 @@ class CrossingCounter:
         self.entries = 0
         self.exits = 0
         self.seen: List[float] = []     # recent crossing blob areas
+        self.passes = 0         # balls taken back as passes beside the hub
+        self._next_id = 0
+        # track id -> {"n": balls counted, "age": frames, "out": frames
+        # outside since a sideways exit (0 = still inside)}
+        self._pending: Dict[int, Dict] = {}
 
     def one_ball(self) -> float:
         """One ball's area: learned from the crossings once enough are seen."""
@@ -260,20 +288,51 @@ class CrossingCounter:
             used_i.add(i)
             used_j.add(j)
             b, c = self.prev[i], cur[j]
+            c["id"] = b["id"]
             c["v"] = (c["c"][0] - b["c"][0], c["c"][1] - b["c"][1])
             way = self.crossed(b, c)
+            pend = self._pending.get(c["id"])
             if way:
                 big = b if b["a"] >= c["a"] else c
                 n = self.balls_in(big["a"], big["cov"], c["v"])
                 self.seen.append(big["a"])
                 del self.seen[:-LEARN_MEMORY]
                 if way > 0 and (self.signed or c["v"][1] > 0):
-                    self.net += n
-                    self.entries += n
+                    if pend is not None:
+                        pend["out"] = 0     # back in before it was taken back:
+                    else:                   # already counted once
+                        self.net += n
+                        self.entries += n
+                        if not self.signed:
+                            self._pending[c["id"]] = {"n": n, "age": 0, "out": 0}
                 elif way < 0:
                     self.exits += n
                     if self.signed:
                         self.net -= n
+                    elif pend is not None:
+                        vx, vy = c["v"]
+                        if abs(vx) > abs(vy):
+                            pend["out"] = 1  # sideways: watch it fly on
+                        else:
+                            del self._pending[c["id"]]
+            elif pend is not None and pend["out"] and not c["in"]:
+                pend["out"] += 1
+                if pend["out"] > PASS_CONFIRM_FRAMES:
+                    self.net -= pend["n"]
+                    self.passes += pend["n"]
+                    del self._pending[c["id"]]
+        for c in cur:
+            if "id" not in c:
+                c["id"] = self._next_id
+                self._next_id += 1
+        live = {c["id"] for c in cur}
+        for k in list(self._pending):
+            pend = self._pending[k]
+            pend["age"] += 1
+            # Lost (dropped into the hub, merged into a clump) or too old:
+            # the count stands.
+            if k not in live or pend["age"] > PASS_WINDOW_FRAMES:
+                del self._pending[k]
         self.prev = cur
         rise = max(0, self.net - self.reported)
         self.reported += rise

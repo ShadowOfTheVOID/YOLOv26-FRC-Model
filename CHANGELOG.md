@@ -9,6 +9,16 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Passes beside the hub are no longer scores.** A ball passed back to the
+  alliance zone while the hub is active could fly through the corner of a
+  hub's outline and count. Now, when that same ball leaves the outline
+  moving sideways and is still seen flying on outside, its count is taken
+  back. The feed never goes down, so it is still reported for a moment and
+  the next ball into that hub absorbs it (shown as `owed`). Balls bouncing
+  up off the hood and balls dropping out the bottom into the hub count as
+  before, and counting latency is unchanged. Not yet measured on a
+  hand-counted recording: check it on your replay before relying on it.
+
 ## v0.5.2 — 2026-10-07
 
 - **Watchtower: a Write key section for The Blue Alliance.** The TBA tab is

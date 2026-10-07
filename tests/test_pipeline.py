@@ -2390,6 +2390,33 @@ def test_hub_crossing_counter():
     check("a ball in then back out stays counted, the exit only noted",
           c.reported == 1 and c.exits == 1 and c.owed == 0)
 
+    # A pass back to the alliance zone clipping the outline on its way down
+    # past the hub counted (a 2026-10-06 replay through Watchtower).
+    # The same track leaving sideways and flying on is taken back.
+    lob = [(60, 80), (85, 90), (110, 102), (135, 112), (160, 120), (185, 127),
+           (210, 133), (235, 138), (260, 142)]
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    rises = fly(c, lob)
+    check("a pass through the outline's corner is reported on entry, then "
+          "taken back once it flies on outside",
+          rises[2] == 1 and c.reported == 1 and c.net == 0 and c.passes == 1
+          and c.owed == 1)
+    rises = fly(c, [(150, 60), (150, 85), (150, 110)])
+    check("the next real ball settles the pass without a second report",
+          sum(rises) == 0 and c.reported == 1 and c.owed == 0)
+    fly(c, [(170, 60), (170, 85), (170, 110)])
+    check("after which balls count again", c.reported == 2)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, [(150, 60), (150, 85), (150, 110), (150, 140), (150, 170),
+            (150, 205), (150, 230)])
+    check("a ball leaving through the bottom (into the hub) stays counted",
+          c.reported == 1 and c.owed == 0 and c.passes == 0)
+    c = HC.CrossingCounter(square, ball_area=280.0)
+    fly(c, lob[:7])
+    c.update([])
+    check("a ball lost just after a sideways exit stays counted (not seen "
+          "flying on)", c.reported == 1 and c.owed == 0 and c.passes == 0)
+
     # The experiment's signed rule, which exit lines still use: a pass-over
     # is reported on entry, its exit owed against the next ball in.
     c = HC.CrossingCounter(square, ball_area=280.0, signed=True)
