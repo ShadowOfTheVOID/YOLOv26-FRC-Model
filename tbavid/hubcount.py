@@ -76,6 +76,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from .camprofile import gate
 from .hubmodel import parse_model
 
 Point = Tuple[float, float]
@@ -420,14 +421,16 @@ class ZoneEye:
     STATIC_S = 3.0
     STATIC_FRAC = 0.5
 
-    def __init__(self, box, remove_static: bool = False, fps: float = 30.0):
+    def __init__(self, box, remove_static: bool = False, fps: float = 30.0,
+                 lo=LOOSE_LO, hi=LOOSE_HI):
         self.box = box
+        self.lo, self.hi = lo, hi        # the camera's colour gate (camprofile)
         self.remove_static = remove_static
         self.alpha = 1.0 / (self.STATIC_S * (fps or 30.0))
         self.freq = None
 
     def blobs(self, frame) -> List[Blob]:
-        m = yellow_mask(frame, self.box)
+        m = yellow_mask(frame, self.box, self.lo, self.hi)
         if self.remove_static:
             y = (m > 0).astype("float32")
             if self.freq is None:
@@ -573,8 +576,12 @@ NETWORK_OPTIONS = ("rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|"
                    "max_delay;0|stimeout;5000000|timeout;5000000")
 
 
-def open_source(source: str, fps: float = 0.0, size: str = ""):
+def open_source(source: str, fps: float = 0.0, size: str = "",
+                image: Optional[Dict] = None, out=print, name: str = ""):
     """A cv2.VideoCapture with the driver's queue cut to one frame.
+
+    `image` (camprofile): format, exposure, white balance and the rest, for
+    a local camera only -- a recording or stream has its picture baked in.
 
     A queue of frames is latency: at 30 fps each queued frame is 33 ms of the
     80 ms budget spent before the ball is even looked at (spec 5.2).
@@ -605,18 +612,26 @@ def open_source(source: str, fps: float = 0.0, size: str = ""):
     if not cap.isOpened():
         raise SystemExit(f"could not open video source {source!r}")
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    is_device = str(source).strip().isdigit()
+    if image and is_device:
+        from .camprofile import set_fourcc
+        set_fourcc(cap, (image or {}).get("fourcc"))
     if size:
         w, h = (int(v) for v in size.lower().split("x"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
     if fps:
         cap.set(cv2.CAP_PROP_FPS, fps)
+    if image and is_device:
+        from .camprofile import apply_image
+        apply_image(cap, image, out, name or f"camera {source}")
     return cap
 
 
 def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
             still_path: Optional[str], fps: float = 0.0, size: str = "",
-            out=print) -> Optional[float]:
+            out=print, image: Optional[Dict] = None,
+            colour: Optional[Dict] = None) -> Optional[float]:
     """Commissioning: the one-ball area, and a still to draw outlines on.
 
     The count is only as good as the area it divides by -- 3% on the area
@@ -625,7 +640,8 @@ def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
     """
     import cv2
 
-    cap = open_source(source, fps, size)
+    lo, hi = gate(colour)
+    cap = open_source(source, fps, size, image, out)
     ok, frame = cap.read()
     if not ok:
         raise SystemExit("the source gave no frames")
@@ -659,7 +675,7 @@ def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
             break
         frames += 1
         for box in boxes:
-            areas += isolated_ball_areas(frame, box)
+            areas += isolated_ball_areas(frame, box, lo, hi)
     cap.release()
     if not areas:
         out(f"no isolated ball near either hub in {frames} frames. Put a few "
@@ -774,7 +790,8 @@ class Camera:
     def __init__(self, name: str, source: str, ball_area: float,
                  zones: List[Zone], fps: float = 0.0, size: str = "",
                  blur: float = DEFAULT_BLUR, remove_static: bool = False,
-                 model: Optional[Dict] = None):
+                 model: Optional[Dict] = None, image: Optional[Dict] = None,
+                 colour: Optional[Dict] = None, preset: str = ""):
         self.name = name
         self.source = str(source)
         self.ball_area = float(ball_area)
@@ -783,6 +800,12 @@ class Camera:
         self.size = size
         self.blur = float(blur)
         self.remove_static = bool(remove_static)
+        # camprofile: picture settings for a local camera, the fuel colour
+        # gate, and the preset they came from (a label only).
+        from .camprofile import check_colour, check_image
+        self.image = check_image(image) if image else {}
+        self.colour = check_colour(colour) if colour else None
+        self.preset = str(preset or "")
         # hubmodel.parse_model's dict, or None for colour only. Exit lines
         # stay colour only: the model counter scores a ball that vanishes in
         # the outline's box, and an exit line has no box.
@@ -927,9 +950,13 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
             model = parse_model(c.get("model"))
         except ValueError as e:
             raise ValueError(f"camera {name!r}: {e}")
-        cams.append(Camera(name, c["source"], area, zones,
-                           float(c.get("fps") or 0), str(c.get("size") or ""),
-                           blur, bool(c.get("remove_static", False)), model))
+        try:
+            cams.append(Camera(name, c["source"], area, zones,
+                               float(c.get("fps") or 0), str(c.get("size") or ""),
+                               blur, bool(c.get("remove_static", False)), model,
+                               c.get("image"), c.get("colour"), c.get("preset", "")))
+        except ValueError as e:
+            raise ValueError(f"camera {name!r}: {e}")
     setup = Setup(cams, cfg.get("combine"), measuring)
     setup.notes = notes
     return setup
@@ -958,6 +985,12 @@ def setup_to_dict(setup: "Setup") -> Dict:
         d["blur"] = c.blur          # always: 0 is a choice, absent means 0.3
         if c.remove_static:
             d["remove_static"] = True
+        if c.preset:
+            d["preset"] = c.preset
+        if c.image:
+            d["image"] = dict(c.image)
+        if c.colour:
+            d["colour"] = dict(c.colour)
         if c.model:
             d["model"] = dict({k: c.model[k] for k in ("weights", "weight")},
                               **c.model["counter"],
@@ -1162,7 +1195,7 @@ def run(sender, setup: Setup, realtime: bool = False,
                 stop.set()
                 return
         try:
-            cap = open_source(cam.source, cam.fps, cam.size)
+            cap = open_source(cam.source, cam.fps, cam.size, cam.image, out, cam.name)
         except SystemExit as e:
             errors.append(f"{cam.name}: {e}")
             stop.set()
@@ -1198,7 +1231,7 @@ def run(sender, setup: Setup, realtime: bool = False,
                 cap.release()
                 stop.wait(min(2.0 * drops, 5.0))
                 try:
-                    cap = open_source(cam.source)
+                    cap = open_source(cam.source, cam.fps, cam.size, cam.image, out, cam.name)
                 except SystemExit as e:
                     out(f"{cam.name}: {e}")
                 # The picture after a gap is not the one before it: a ball
@@ -1230,9 +1263,10 @@ def run(sender, setup: Setup, realtime: bool = False,
             n += 1
             if not eyes:
                 h, w = frame.shape[:2]
+                lo, hi = gate(cam.colour)
                 eyes = {z.name: ZoneEye(region_of(z.counter.poly,
                                                   cam.ball_area, w, h),
-                                        cam.remove_static, file_fps)
+                                        cam.remove_static, file_fps, lo, hi)
                         for z in cam.zones}
             for z in cam.zones:
                 if z.counter.update(eyes[z.name].blobs(frame)):
@@ -1389,7 +1423,7 @@ def record_blobs(camera: Camera, video: str, remove_static: bool,
             h, w = frame.shape[:2]
             eyes = {z.name: ZoneEye(region_of(z.counter.poly,
                                               camera.ball_area, w, h),
-                                    remove_static, fps)
+                                    remove_static, fps, *gate(camera.colour))
                     for z in camera.zones}
         frames.append({name: eye.blobs(frame) for name, eye in eyes.items()})
         fi += 1
@@ -1460,7 +1494,7 @@ def count_recording(setup: Setup, video: str, camera: str = "",
         if eyes is None:
             h, w = frame.shape[:2]
             eyes = [(z, ZoneEye(region_of(z.counter.poly, cam.ball_area, w, h),
-                                cam.remove_static, fps)) for z in cam.zones]
+                                cam.remove_static, fps, *gate(cam.colour))) for z in cam.zones]
         for z, eye in eyes:
             z.counter.update(eye.blobs(frame))
         t = fi / fps

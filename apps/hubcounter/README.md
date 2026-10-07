@@ -57,6 +57,35 @@ None of the builds is signed, so each system warns once:
 - The page answers only on the computer it runs on until you press
   **Share** (below).
 
+## Camera presets and fuel colour
+
+Under step 1, pick a camera, then **Camera preset**:
+
+- **ELP OV4689 2.8-12 mm varifocal, 60 fps**: 1280x720 at 60 fps over MJPG,
+  exposure fixed at 8 ms and white balance at 4600 K, so a dim gym or the
+  field's coloured lights cannot pull it below 60 fps or shift the fuel's
+  colour. Zoom the lens in on the hub rather than raising the resolution.
+  These values have not been checked on the camera itself yet.
+- **USB webcam (standard)**: 1280x720 at 30 fps with the camera's automatic
+  picture.
+
+**Picture** (local cameras only) holds exposure, white balance, brightness,
+contrast, saturation, gain and the video format. Each change reopens the
+camera and refreshes the picture. Drivers differ in what they accept, and
+the activity log names any setting the camera ignored. macOS takes few of
+them.
+
+**Fuel colour** is what the counter takes as a ball. Turn on **Show what
+counts as fuel**: every ball should go magenta and little else. If shirts,
+the floor or the walls go magenta, raise the minimums or narrow the hue.
+If balls in shadow are missed, lower the minimums. **Back to standard**
+restores the gate the counter was tuned with.
+
+**Save as preset** stores the camera's size, frame rate, picture and fuel
+colour (not its outlines or ball size) in `camera-presets.json` beside the
+setup, for any camera and any setup on this computer. If a preset changes
+the picture size, measure the ball again.
+
 ## Open it on other devices: Share on Wi-Fi
 
 Press **Share** (top right). The page then also opens on any phone or

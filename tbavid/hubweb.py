@@ -206,7 +206,7 @@ def make_handler(ctl: HubController, allow_remote: bool = False,
             if u.path == "/api/ls":
                 return self._json(list_dir(q.get("path", "")))
             if u.path == "/frame.jpg":
-                frame = ctl.picture(q.get("cam", ""))
+                frame = ctl.picture(q.get("cam", ""), q.get("fuel") == "1")
                 if frame is None:
                     return self._send(404, b"no picture", "text/plain")
                 h, w = frame.shape[:2]
@@ -265,6 +265,9 @@ def _at(body) -> Optional[float]:
 ACTIONS = {
     "add_camera": lambda c, b: c.add_camera(b.get("source", ""), b.get("name", "")),
     "remove_camera": lambda c, b: c.remove_camera(b["name"]),
+    "apply_preset": lambda c, b: c.apply_preset(b["camera"], b["preset"]),
+    "save_preset": lambda c, b: c.save_preset(b["camera"], b.get("label", "")),
+    "delete_preset": lambda c, b: c.delete_preset(b["preset"]),
     "update_camera": lambda c, b: c.update_camera(b["name"], b.get("fields", {})),
     "add_zone": lambda c, b: c.add_zone(b["camera"], b["hub"], b["points"],
                                         b.get("kind", "outline")),

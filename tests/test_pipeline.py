@@ -3686,6 +3686,138 @@ def test_app_update():
         check(f"the {app} app checks at start", "Updater(" in src and "check_async()" in src)
 
 
+def test_camera_presets():
+    """Camera presets: format, picture settings and the fuel colour gate.
+
+    A webcam left to itself lengthens its shutter in a dim gym and drops to
+    15-24 fps (20 fps measured 25.1% error on the Einstein replays against
+    10.5% at 60), so the ELP OV4689 preset fixes exposure under one 60 fps
+    frame and asks for MJPG, without which USB 2 cannot carry 60 fps. Any
+    change to a camera makes it custom, and saved presets survive a restart.
+    """
+    import tempfile
+    from tbavid import camprofile as cp
+    from tbavid.hubapp import HubController
+    from tbavid.hubcount import LOOSE_HI, LOOSE_LO, setup_from_dict, setup_to_dict
+    from tbavid.hubweb import ACTIONS
+
+    check("the standard colour gate is the counter's own", cp.gate(None) == (LOOSE_LO, LOOSE_HI))
+    elp = cp.find(cp.BUILTIN, "elp-ov4689")
+    check("ELP OV4689: 60 fps over MJPG, exposure fixed under one frame, white balance fixed",
+          elp["fps"] == 60 and elp["image"]["fourcc"] == "MJPG"
+          and elp["image"]["auto_exposure"] is False and elp["image"]["exposure_ms"] < 1000 / 60
+          and elp["image"]["auto_wb"] is False)
+    web = cp.find(cp.BUILTIN, "usb-webcam")
+    check("the standard webcam preset keeps the camera's automatic picture",
+          web["image"]["auto_exposure"] and web["image"]["auto_wb"])
+    for bad in ({"hue_lo": 40, "hue_hi": 15}, {"sat_min": 300}, {"hue_hi": 200}):
+        try:
+            cp.check_colour(bad)
+            ok = False
+        except ValueError:
+            ok = True
+        check(f"colour {bad} refused", ok)
+    for bad in ({"exposure_ms": 0}, {"wb_kelvin": 100}, {"fourcc": "MJPEG"}):
+        try:
+            cp.check_image(bad)
+            ok = False
+        except ValueError:
+            ok = True
+        check(f"picture {bad} refused", ok)
+    check("exposure in each backend's units (V4L2 100 us steps, else log2 s)",
+          cp.exposure_value(8, "V4L2") == 80 and cp.exposure_value(8, "MSMF") == -7)
+
+    cfg = {"rules": 2, "cameras": [{"name": "a", "source": "0", "ball_area": 900,
+           "preset": "elp-ov4689", "image": elp["image"], "colour": {"hue_lo": 18},
+           "zones": [{"hub": "red", "outline": [[0, 0], [10, 0], [10, 10]]}]}]}
+    back = setup_to_dict(setup_from_dict(cfg))["cameras"][0]
+    check("a setup keeps its preset, picture and colour through save and load",
+          back["preset"] == "elp-ov4689" and back["image"]["exposure_ms"] == 8
+          and back["colour"] == dict(cp.STANDARD_COLOUR, hue_lo=18))
+    try:
+        setup_from_dict({"cameras": [dict(cfg["cameras"][0], colour={"hue_lo": 99, "hue_hi": 5})]})
+        ok = False
+    except ValueError as e:
+        ok = "'a'" in str(e)
+    check("a bad colour in a setup file names its camera", ok)
+
+    d = Path(tempfile.mkdtemp())
+    ctl = HubController(str(d / "cams.json"))
+    ctl.say = lambda t: None
+    ctl.cfg["cameras"].append({"name": "cam0", "source": "0", "ball_area": 900,
+                               "size": "1920x1080", "zones": []})
+    c = ctl.apply_preset("cam0", "elp-ov4689")
+    check("a preset sets size, fps, picture and colour", c["fps"] == 60 and c["size"] == "1280x720"
+          and c["image"]["fourcc"] == "MJPG" and c["preset"] == "elp-ov4689")
+    ctl.update_camera("cam0", {"name": "cam0", "fps": "60", "size": "1280x720"})
+    check("re-sending the same fields keeps the preset", ctl.camera("cam0").get("preset") == "elp-ov4689")
+    ctl.update_camera("cam0", {"image": {"exposure_ms": 12}})
+    c = ctl.camera("cam0")
+    check("a changed setting makes it custom and keeps the rest",
+          "preset" not in c and c["image"]["exposure_ms"] == 12 and c["image"]["fourcc"] == "MJPG")
+    ctl.update_camera("cam0", {"colour": {"sat_min": 80}})
+    p = ctl.save_preset("cam0", "Practice field")
+    check("a saved preset goes beside the setup file",
+          (d / "camera-presets.json").exists() and p["id"] == "practice-field")
+    again = HubController(str(d / "cams.json"))
+    saved = [x for x in again.state()["presets"] if not x["builtin"]]
+    check("and is there after a restart, with its settings",
+          [x["label"] for x in saved] == ["Practice field"]
+          and saved[0]["image"]["exposure_ms"] == 12 and saved[0]["colour"]["sat_min"] == 80)
+    try:
+        ctl.delete_preset("elp-ov4689")
+        ok = False
+    except ValueError:
+        ok = True
+    check("a built-in preset cannot be deleted", ok)
+    ctl.delete_preset("practice-field")
+    check("a saved one can, and the camera keeps its settings",
+          not cp.load_saved(ctl.presets_path) and ctl.camera("cam0")["image"]["exposure_ms"] == 12)
+    ctl.update_camera("cam0", {"colour_reset": True})
+    check("Back to standard drops the camera's own colour", "colour" not in ctl.camera("cam0"))
+    check("the page can apply, save and delete presets",
+          {"apply_preset", "save_preset", "delete_preset"} <= set(ACTIONS))
+
+    try:
+        import cv2  # noqa: F401  (CI has no cv2; the rest is checked there)
+        import numpy as np
+    except ImportError:
+        return
+
+    class Cap:
+        def __init__(self):
+            self.props = {}
+
+        def getBackendName(self):
+            return "V4L2"
+
+        def set(self, prop, v):
+            if prop == cv2.CAP_PROP_WB_TEMPERATURE:
+                return False
+            self.props[prop] = v
+            return True
+
+    said = []
+    cap = Cap()
+    res = cp.apply_image(cap, elp["image"], said.append, "cam0")
+    check("V4L2 gets manual exposure (1) at 80 x 100 us",
+          cap.props[cv2.CAP_PROP_AUTO_EXPOSURE] == 1 and cap.props[cv2.CAP_PROP_EXPOSURE] == 80)
+    check("a setting the driver ignores is reported, not assumed",
+          res["white balance"] == "ignored" and said and "white balance" in said[0])
+    from tbavid.hubapp import fuel_overlay
+    from tbavid.hubcount import ZoneEye
+    img = np.zeros((40, 80, 3), np.uint8)
+    img[:, :40] = cv2.cvtColor(np.uint8([[[30, 120, 200]]]), cv2.COLOR_HSV2BGR)[0, 0]   # fuel
+    img[:, 40:] = cv2.cvtColor(np.uint8([[[30, 40, 200]]]), cv2.COLOR_HSV2BGR)[0, 0]    # pale wall
+    over = fuel_overlay(img)
+    check("the overlay paints fuel magenta and leaves the wall",
+          tuple(over[20, 10]) != tuple(img[20, 10]) and tuple(over[20, 60]) == tuple(img[20, 60]))
+    lo, hi = cp.gate({"sat_min": 20})
+    blobs = ZoneEye((0, 0, 80, 40), lo=lo, hi=hi).blobs(img)
+    check("a camera's own colour gate is the one its zones count with",
+          len(blobs) == 1 and blobs[0][2] == 80 * 40)
+
+
 def test_hub_scoreboard_view():
     """The live scoreboard: bioarena's score when linked, the camera's otherwise.
 
@@ -4096,7 +4228,8 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
-               test_watchtower_home_api, test_app_update):
+               test_watchtower_home_api, test_app_update,
+               test_camera_presets):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

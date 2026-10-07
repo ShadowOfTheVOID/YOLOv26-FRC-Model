@@ -9,6 +9,20 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Camera presets, picture settings and fuel colour** (Hub Counter page,
+  step 1). Built in: **ELP OV4689 2.8-12 mm varifocal, 60 fps** (1280x720
+  MJPG at 60 fps, exposure fixed at 8 ms, white balance at 4600 K) and **USB
+  webcam (standard)** (1280x720 at 30 fps, automatic picture). Exposure,
+  white balance, brightness, contrast, saturation, gain and the video format
+  can be set per local camera, and settings a driver ignores are named in
+  the log. The fuel colour gate (hue range, minimum colour and brightness)
+  is adjustable per camera, with a magenta overlay of what counts as fuel.
+  **Save as preset** keeps all of it in `camera-presets.json` for reuse.
+  Why: a webcam on auto exposure drops to 15-24 fps in a dim gym (20 fps
+  measured 25.1% error on the Einstein replays, 60 fps 10.5%), 60 fps over
+  USB 2 needs MJPG, and auto white balance moves the fuel's hue. The ELP
+  values are a starting point, not yet checked on the camera; the standard
+  colour gate is unchanged, so existing setups count exactly as before.
 - **`attach-models` workflow**: copies `fuel_relabel.pt` / `scout_relabel.pt`
   (checksum-checked against this file) onto any existing release from the
   Actions tab, no computer needed. v0.4.4 went out without them because
