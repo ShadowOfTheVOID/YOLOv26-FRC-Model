@@ -121,7 +121,7 @@ code{-webkit-user-select:text;user-select:text}
       <p class="note">Can't connect? Allow Watchtower when the firewall asks (Windows: tick Private networks), and use your own router: venue and school Wi-Fi often keep devices apart.</p></div></div></div>
   <div class="card"><h2>Public address</h2>
     <div class="form" id="form_public"></div>
-    <p class="note">Optional. Set it when a reverse proxy or tunnel (ours is https://watchtower.systemoverload.org) forwards to port 8000 on this computer: phones are then given this address and the QR code above carries it, and the Wi-Fi address stays listed for when the proxy or internet is down. Empty = Wi-Fi only. A hub counter on another computer sends to this address with the vision key in front: https://KEY@watchtower.systemoverload.org.</p></div>
+    <p class="note">Optional. Set it when a reverse proxy or tunnel (ours is https://watchtower.systemoverload.org) forwards to port 8000 on this computer: phones are then sent through this address instead of the .local name, and the QR code above carries it; the Wi-Fi IP stays listed for when the website or internet is down. Empty = Wi-Fi only. A hub counter on another computer sends to this address with the vision key in front: https://KEY@watchtower.systemoverload.org.</p></div>
   <div class="card"><h2>PINs</h2>
     <div class="form" id="form_pins"></div>
     <div class="row" style="margin-top:12px"><button class="btn" onclick="regenPins()">Make new PINs</button></div>
@@ -255,12 +255,13 @@ async function refresh(){
   $("setupwarn").innerHTML=todo.length?`Before the first match: ${todo.join(", ")} in <a href="#" style="color:var(--acc)" onclick="show('event');return false">Event &amp; schedule</a>.`:"";
   $("netwarn").style.display=s.on_network?"none":"";
   // A public address (a proxy or tunnel in front of this FMS) works from any
-  // network, so it leads and the QR carries it; the Wi-Fi address stays as
-  // the fallback for when the internet or the proxy is down.
+  // network, so it replaces the .local name and the QR carries it.
   const pub=s.public_url||"",qrUrl=pub||s.phone_url;
   $("phonehow").textContent=pub?"From any network, scan or open":"On the same Wi-Fi, scan or open";
   $("phoneurl").textContent=pub||s.phone_name||s.phone_url;
-  $("phoneurl2").textContent=pub?("on the Wi-Fi: "+(s.phone_name||s.phone_url)):(s.phone_name?("or "+s.phone_url):"");
+  // With the website attached phones go through it, not the .local name;
+  // only the raw IP stays, for when the website or the internet is down.
+  $("phoneurl2").textContent=pub?("if the website is down, on the Wi-Fi: "+s.phone_url):(s.phone_name?("or "+s.phone_url):"");
   if(qrUrl!==qrFor){qrFor=qrUrl;try{$("qr").innerHTML=await api().qr(qrUrl);}catch(e){}}
 }
 async function renderUpdate(running){let u;try{u=await api().update_status();}catch(e){return;}

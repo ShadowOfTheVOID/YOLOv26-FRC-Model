@@ -3593,6 +3593,10 @@ def test_watchtower_home_api():
     check("Watchtower's Home holds our camera setup page as its Hub cameras tab",
           'id="tab_hub"' in page and 'id="hubframe"' in page
           and 'HUB_URL="http://127.0.0.1:8790/"' in page and "show('hub')" in page)
+    check("with a public address set, phones get it (and its QR) instead of the .local name",
+          'qrUrl=pub||s.phone_url' in page and '$("phoneurl").textContent=pub||' in page
+          and '$("phoneurl2").textContent=pub?("if the website is down, on the Wi-Fi: "+s.phone_url)' in page
+          and '"public_url": self.ev.get("public_url", "")' in src)
     hc = (root / "apps" / "hubcounter" / "main.py").read_text()
     check("the Hub Counter app opens in its own window, closing it quits, the browser only without a toolkit",
           "def run_window(" in hc and "win.events.closed += ctl.quit" in hc

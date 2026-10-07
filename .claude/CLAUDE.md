@@ -305,8 +305,12 @@ One-click updates (`tbavid/appupdate.py`, stdlib): both apps check GitHub's
 latest release at start against `app_version.txt` (the spec writes it from
 HUBCOUNTER_VERSION; 0.0.0 = never check). Update button only, refused while
 counting (the user chose that over automatic). Mac/Windows install via a
-helper script that waits for the app to exit; Linux/Pi get a link. Untested
-on real installs until the release after v0.4.4 exists.
+helper script that waits for the app to exit; Linux/Pi get a link. The user
+confirmed it works on a real install with v0.5.0 (2026-10-07).
+Watchtower's optional `server.public_url` (Phones & PINs; e.g. our Caddy
+proxy https://watchtower.systemoverload.org, nothing built in): when set,
+phones get that link and its QR instead of the .local name; the raw IP stays
+as the fallback. The app's own hub counter still posts to 127.0.0.1.
 Camera presets (`tbavid/camprofile.py`, stdlib; cams.json "preset"/"image"/
 "colour"): built-in ELP OV4689 60 fps (720p MJPG, 8 ms, 4600 K -- unchecked
 on the real camera) and USB webcam; saved ones in camera-presets.json beside

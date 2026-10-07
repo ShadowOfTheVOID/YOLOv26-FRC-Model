@@ -12,15 +12,18 @@ the build rather than publishing an empty release.
 - **Watchtower through a public address.** Phones & PINs has a new optional
   *Public address* (e.g. `https://watchtower.systemoverload.org`, or any
   other proxy or tunnel that forwards to port 8000 on the Watchtower
-  computer). When set, phones are given that address and the QR code
-  carries it, so refs and the emcee can connect from any network; the Wi-Fi
-  address stays listed for when the proxy or internet is down. Empty by
+  computer). When set, phones are given that address instead of the
+  `.local` name and the QR code carries it, so refs and the emcee connect
+  through the website from any network; only the raw Wi-Fi IP stays listed,
+  as the fallback for when the proxy or internet is down. Empty by
   default: nothing changes until it is set. Stored as `server.public_url`
   in event.yaml. The Watchtower app's own hub counter keeps sending to
   127.0.0.1, so counting never depends on the internet. A Hub Counter on
   another computer can send through the proxy with
   `https://KEY@watchtower.systemoverload.org` (that already worked; the
   page and `--target` help now say so).
+- **One-click updates confirmed** on a real install with v0.5.0 (until now
+  tested only against a stand-in for GitHub).
 
 ## v0.5.0 — 2026-10-07
 
