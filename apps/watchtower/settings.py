@@ -53,15 +53,17 @@ FIELDS = [
     (("server", "public_url"), "url", "Public address (optional, e.g. https://watchtower.systemoverload.org)"),
     # The Blue Alliance
     (("event", "tba_event_key"), "tbakey", "TBA event key"),
-    (("tba", "enabled"), "bool", "Send schedule and results to TBA"),
-    (("tba", "auth_id"), "text", "TBA auth ID"),
-    (("tba", "auth_secret"), "secret", "TBA auth secret"),
+    (("tba", "enabled"), "bool", "Send schedule and results to TBA with this write key"),
+    # Both halves of the write key are masked on the page (password
+    # fields): together they can rewrite the event's results on TBA.
+    (("tba", "auth_id"), "secret", "Write key: Auth ID"),
+    (("tba", "auth_secret"), "secret", "Write key: Auth Secret"),
     (("tba", "send_score_breakdown"), "bool", "Send score breakdowns (totals only is safer)"),
     # Not Watchtower's (it reads only its own tba keys): the app's own, a
     # fallback for "Import from TBA", which reads the event page's public
     # Scouting list first. From thebluealliance.com/account; $TBA_AUTH_KEY
     # is used when this is empty.
-    (("tba", "read_key"), "secret", "TBA Read API key (optional: only if the event page has no team list)"),
+    (("tba", "read_key"), "secret", "Read API key"),
     # Game rules
     (("game", "auto_s"), "int", "Auto (s)"),
     (("game", "auto_teleop_gap_s"), "int", "Pause after auto (s)"),
@@ -223,8 +225,8 @@ def check(values: dict) -> tuple:
                                       "(anyone with those could run the event)")
     if clean.get("tba.enabled") and not (clean.get("event.tba_event_key") and clean.get("tba.auth_id")
                                          and clean.get("tba.auth_secret")):
-        err["tba.enabled"] = ("Send to TBA: needs the TBA event key, auth ID and auth secret "
-                              "(from your event's page on TBA)")
+        err["tba.enabled"] = ("Send to TBA: needs the TBA event key and the write key's Auth ID and Auth Secret "
+                              "(see Write key on The Blue Alliance tab)")
     return clean, err
 
 

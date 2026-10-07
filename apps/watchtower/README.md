@@ -48,7 +48,7 @@ Watchtower combines our camera setup with Watchtower's own parts:
     the scorekeeper, ref and emcee PINs, with a button for new PINs.
   - **Event & schedule:** name, date, time zone, teams, qualification start,
     match cycle and lunch.
-  - **The Blue Alliance:** event key, auth ID and secret, sending on/off.
+  - **The Blue Alliance:** event key; a **Write key** section (Auth ID and Auth Secret, both masked, plus how to request one) that sends results; an optional **Read key** for importing teams.
   - **Game rules:** period and shift lengths, points, fouls and
     ranking-point thresholds.
 - **Scorekeeper and Field display**, Watchtower's own pages, each open in
