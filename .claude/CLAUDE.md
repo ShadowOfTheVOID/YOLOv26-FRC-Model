@@ -305,8 +305,9 @@ One-click updates (`tbavid/appupdate.py`, stdlib): both apps check GitHub's
 latest release at start against `app_version.txt` (the spec writes it from
 HUBCOUNTER_VERSION; 0.0.0 = never check). Update button only, refused while
 counting (the user chose that over automatic). Mac/Windows install via a
-helper script that waits for the app to exit; Linux/Pi get a link. The user
-confirmed it works on a real install with v0.5.0 (2026-10-07).
+helper script that waits for the app to exit; Linux/Pi get a link. v0.5.0 is the
+first build with it (0.4.4 -> 0.5.0 is a manual download); the first real
+one-click update is 0.5.0 -> the next release.
 Watchtower's optional `server.public_url` (Phones & PINs; e.g. our Caddy
 proxy https://watchtower.systemoverload.org, nothing built in): when set,
 phones get that link and its QR instead of the .local name; the raw IP stays

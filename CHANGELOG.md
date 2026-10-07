@@ -22,8 +22,9 @@ the build rather than publishing an empty release.
   another computer can send through the proxy with
   `https://KEY@watchtower.systemoverload.org` (that already worked; the
   page and `--target` help now say so).
-- **One-click updates confirmed** on a real install with v0.5.0 (until now
-  tested only against a stand-in for GitHub).
+- **One-click updates start from v0.5.0.** v0.4.4 and earlier have no
+  updater, so v0.5.0 itself is a manual download from the release page;
+  from v0.5.0 on, the Update button installs each new release.
 
 ## v0.5.0 — 2026-10-07
 
