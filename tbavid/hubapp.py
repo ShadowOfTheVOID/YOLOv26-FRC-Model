@@ -247,6 +247,14 @@ def encode(frame, scale: float = 1.0, fmt: str = ".jpg") -> bytes:
 
 # -- the controller -------------------------------------------------------------
 
+def _lan_ip() -> str:
+    from .hubweb import lan_ip
+    try:
+        return lan_ip()
+    except Exception:
+        return ""
+
+
 class Recorder:
     """One camera to an .mp4 while it counts. Frames are written on a thread
     of their own and dropped (and counted) if the disk falls behind, so a
@@ -677,7 +685,11 @@ class HubController:
 
     # -- the feed ------------------------------------------------------------------
     def start(self, target: str = DEFAULT_TARGET, practice: bool = False,
-              realtime: bool = True, log_csv: bool = True) -> None:
+              realtime: bool = True, log_csv: bool = True,
+              partner_port: int = 0) -> None:
+        """`partner_port`: this is the main box of a one-camera-per-box setup;
+        take the partner box's feed on that UDP port and send both hubs on
+        (hubfeed.RelayIn). 0 = one box."""
         from . import hubcount, hubfeed
         if self.running:
             raise ValueError("already running")
@@ -721,6 +733,15 @@ class HubController:
         if any(source_kind(c.source) == "stream" for c in setup.cameras):
             self.say("counting from a stream: " + STREAM_WARNING)
 
+        relay = None
+        if partner_port:
+            relay = hubfeed.RelayIn(int(partner_port))
+            try:
+                relay.open()
+            except OSError as e:
+                raise ValueError(f"cannot take the partner box's counts on port "
+                                 f"{partner_port}: {e}") from None
+
         def on_frame(name, frame):
             with self.lock:
                 self.live_frames[name] = frame
@@ -732,7 +753,7 @@ class HubController:
             try:
                 hubcount.run(self.sender, setup, realtime=realtime,
                              log_path=log_path, out=self.say, stop=self.stop_evt,
-                             on_frame=on_frame, monitor=self.monitor)
+                             on_frame=on_frame, monitor=self.monitor, relay=relay)
             except Exception as e:
                 self.say(f"error: {e}")
             finally:
@@ -873,6 +894,9 @@ class HubController:
                "problems": problems(cfg), "pictures": pictures,
                "builtin_model": bundled_model() is not None,
                "default_target": self.default_target,
+               # This box's address, for the partner box's "Send counts to"
+               # in a one-camera-per-box setup (hubfeed.RelayIn).
+               "this_ip": _lan_ip(),
                "update": self.updater.status() if self.updater else None,
                "presets": self.presets(),
                "standard_colour": dict(STANDARD_COLOUR),
@@ -914,6 +938,8 @@ class HubController:
             live["recording"] = [r.path for r in self.recorders.values()]
         if bt is not None and s is not None:
             live["ball_test"] = {h: s.counts[h] - bt["base"][h] for h in HUBS}
+        relay = self.monitor.get("relay")
+        live["partner"] = relay.state() if relay is not None else None
         live["model_behind"] = dict(self.monitor.get("model_dropped") or {})
         live["model_off"] = list(self.monitor.get("model_off") or [])
         out["live"] = live

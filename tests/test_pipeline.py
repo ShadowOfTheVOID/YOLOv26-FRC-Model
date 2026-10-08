@@ -4495,6 +4495,54 @@ def test_app_tests():
                "test_recording", "confirm")))
 
 
+def test_two_boxes_one_feed():
+    """One camera per box: the partner box sends its feed to the main box,
+    which folds it into the one feed bioarena accepts (one address, both hubs
+    in one datagram -- a second sender would be dropped, or read as restarts)."""
+    import json as _json
+    from tbavid import hubfeed as HF
+    t = [100.0]
+    relay = HF.RelayIn(clock=lambda: t[0])
+    def dg(session, seq, red, blue, age=None):
+        return HF.encode(session, seq, red, blue, age)
+    check("the partner's first datagram with nothing scored forwards nothing",
+          relay.handle(dg("p1", 1, 0, 0), "10.0.100.22") == [])
+    t[0] = 101.0
+    r = relay.handle(dg("p1", 2, 0, 3, age=40), "10.0.100.22")
+    check("a rise on the partner's hub is forwarded at once, its age carried",
+          r == [("blue", 3, 101.0 - 0.040)] and relay.online())
+    check("a duplicate or a count going backwards is dropped, as bioarena would",
+          relay.handle(dg("p1", 2, 0, 5), "10.0.100.22") is None
+          and relay.handle(dg("p1", 3, 0, 1), "10.0.100.22") is None)
+    r = relay.handle(dg("p2", 1, 0, 2), "10.0.100.22")
+    check("the partner restarting keeps what it had sent: its new 2 adds to 3",
+          r == [("blue", 2, 101.0)] and relay.forwarded["blue"] == 5
+          and relay.rx.restarts == 1)
+    relay.reply_source = lambda: {"v": 1, "seq": 777, "match_state": "AUTO_PERIOD",
+                                  "credited": {"red": 1, "blue": 5}}
+    rep = _json.loads(relay.reply())
+    check("the partner gets bioarena's reply, with its own seq echoed",
+          rep["match_state"] == "AUTO_PERIOD" and rep["seq"] == 1)
+    t[0] = 103.0
+    check("a partner silent for 1 s is offline (it holds the main box's heartbeat)",
+          not relay.online() and relay.state()["counts"] == {"red": 0, "blue": 5})
+    strict = HF.RelayIn(partner="10.0.100.22", clock=lambda: t[0])
+    check("a partner address, when given, is the only one accepted",
+          strict.handle(dg("x", 1, 0, 1), "10.0.100.99") is None)
+
+    # The main box's feed: its own hub plus the partner's, one session.
+    sent = []
+    class Sock:
+        def sendto(self, data, addr): sent.append(_json.loads(data))
+        def recvfrom(self, n): raise BlockingIOError
+    fs = HF.FeedSender(("10.0.100.5", 8411), session="main", sock=Sock(), clock=lambda: t[0])
+    fs.score("red", 4, t[0])
+    for hub, n, cap in HF.RelayIn(clock=lambda: t[0]).handle(dg("p", 1, 0, 6, age=10), "x"):
+        fs.score(hub, n, cap)
+    check("bioarena sees one session carrying both hubs",
+          sent[-1]["session"] == "main" and sent[-1]["red"] == 4 and sent[-1]["blue"] == 6)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -4519,7 +4567,7 @@ def main() -> int:
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
                test_watchtower_home_api, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
-               test_app_tests):
+               test_app_tests, test_two_boxes_one_feed):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

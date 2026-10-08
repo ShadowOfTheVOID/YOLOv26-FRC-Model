@@ -955,6 +955,29 @@ bioarena keeps the match's score and loses only the balls scored while it was
 down. If the camera stops delivering frames it stops the heartbeat, so
 bioarena shows OFFLINE instead of frozen counts behind an ONLINE badge.
 
+## One camera per box (two computers, one feed)
+
+bioarena accepts one counter address and one datagram carrying both hubs,
+so two boxes cannot both send to it. The partner box sends to the main box,
+which sends both hubs on:
+
+1. **Main box** (wired to the field switch, the address bioarena is set
+   to): its camera and its hub's outline. Step 4: *Send counts to*
+   `10.0.100.5:8411`, switch on **Main box: also send a partner box's
+   counts** (port 8412). The page shows the address the partner needs.
+2. **Partner box** (on the same network): its camera and the other hub's
+   outline. Step 4: *Send counts to* `<main box IP>:8412`. Start it.
+3. Start the main box. Its chip shows `partner box online · red 0 blue 12`,
+   and the partner's page shows *Connected* with the match state from
+   bioarena.
+
+Each box counts only its own hub: a hub both count is counted twice. If
+the partner stops for 1 s the main box stops its heartbeat and bioarena
+shows OFFLINE, as for a dead camera; when the partner comes back (even
+restarted) its earlier counts are kept. Command line: `run.py hubfeed
+--setup main.json --partner-port 8412` and `run.py hubfeed --setup
+partner.json --target <main-ip>:8412`.
+
 ## Several cameras (`--setup`)
 
 The Einstein tests say one camera in front of a hub cannot tell a ball that

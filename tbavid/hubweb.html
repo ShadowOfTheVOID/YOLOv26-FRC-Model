@@ -236,6 +236,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
         <div class="chips" id="schips"></div>
         <div class="chips" id="xcheck"></div>
+        <div class="chips" id="pchip"></div>
       </div>
     </div>
 
@@ -353,6 +354,10 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <h2><span class="n">4</span>Run</h2>
       <label class="field"><span>Send counts to <span class="muted">(bioarena host:port, or Watchtower https://KEY@watchtower.systemoverload.org or http://KEY@host:8000)</span></span><input class="input tnum" id="target" value="10.0.100.5:8411" oninput="this.dataset.edited=1"></label>
       <label class="switch"><span>Practice with a test receiver</span><input type="checkbox" id="practice"><i></i></label>
+      <label class="switch"><span>Main box: also send a partner box's counts <span class="muted">(one camera per box)</span></span><input type="checkbox" id="partner" onchange="renderPartnerHint()"><i></i></label>
+      <div id="partnerbox" style="display:none;margin:-2px 0 8px">
+        <div class="row" style="align-items:center;gap:8px"><span class="muted">Listen on UDP port</span><input class="input tnum" id="partner_port" type="number" value="8412" style="width:90px"></div>
+        <p class="muted" style="margin:6px 0 0" id="partnerhint"></p></div>
       <label class="switch"><span>Play recordings at real speed</span><input type="checkbox" id="realtime" checked><i></i></label>
       <label class="switch"><span>Save a CSV log of every count</span><input type="checkbox" id="csv" checked><i></i></label>
       <div style="margin-top:10px">
@@ -547,6 +552,8 @@ function renderLive(){const v=S.live,F=fieldName();
   else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
   $("xcheck").innerHTML=Object.entries(v.check||{}).map(([h,c])=>`<span class="chip"${c.warn?' style="color:#f5a524"':""} title="exits now against the outline ${c.lag_s} s ago${c.confirming?" · exits confirm this hub":""}">${h} exit ${c.exit} / outline ${c.due}${c.ratio!=null?` <b class="tnum">${Math.round(c.ratio*100)}%</b>`:""}${c.warn?" · check the cameras":""}</span>`).join("");
   renderTests(v);
+  const P=v.partner;$("pchip").innerHTML=P?`<span class="chip"${P.online?"":' style="color:#f5a524"'}>partner box ${P.online?"online":"OFFLINE"}${P.source?" · "+esc(P.source):""} · red <b class="tnum">${P.counts.red}</b> blue <b class="tnum">${P.counts.blue}</b>${P.age_ms!=null?` · ${P.age_ms} ms`:""}${P.restarts?` · restarted ${P.restarts}×`:""}</span>`:"";
+  if($("partnerbox").style.display!=="none")renderPartnerHint();
   $("schips").innerHTML=Object.entries(v.cameras).map(([n,c])=>`<span class="chip">${esc(n)} <b class="tnum">${Math.round(c.fps)}</b> fps</span>`).join("");}
 function handleJob(){const j=S.job;
   if(j.running){$("prog").style.display=j.progress!=null?"block":"none";$("prog").firstChild.style.width=((j.progress||0)*100)+"%";
@@ -685,9 +692,11 @@ async function addStream(){
   if(!url)return;
   try{const c=await api("add_camera",{source:url});cur=c.name;lastPic="";hint("Connecting to the stream…");grab();}catch(e){}}
 async function removeCam(name){if(await confirmBox("Remove camera",`Remove <b>${esc(name)}</b> and its outlines?`,"Remove")){await api("remove_camera",{name});if(cur===name)cur=null;lastPic="";refresh();}}
-async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked});
+async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked,partner_port:$("partner").checked?Number($("partner_port").value)||8412:0});
   hint(`Running. Leave it on across matches — ${fieldName()} marks each match's start itself.`);}catch(e){}}
 function stop(){api("stop");hint("");}
+function renderPartnerHint(){const on=$("partner").checked;$("partnerbox").style.display=on?"":"none";
+  $("partnerhint").innerHTML=`On the partner box (the other hub's camera), set <b>Send counts to</b> <code>${esc((S&&S.this_ip)||"this box's IP")}:${esc($("partner_port").value||"8412")}</code> and press Start there. This box sends both hubs to bioarena; if the partner goes quiet for 1 s, bioarena shows OFFLINE.`;}
 async function shareDialog(){
   const sh=S&&S.share||{on:false};
   if(!sh.on){

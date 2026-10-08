@@ -810,6 +810,7 @@ def latency_summary(samples: Sequence[float]) -> Optional[Dict]:
 
 
 STALE_S = 0.5    # a camera silent this long is blind; stop the heartbeat
+PARTNER = "partner box"   # how a silent partner box is named among stale cameras
 # Below this a camera is flagged as slow. The Einstein broadcasts replayed at
 # 60 / 30 / 20 fps (every 1st / 2nd / 3rd frame) measured 10.5% / 12.6% /
 # 25.1% mean error: balls jump too far between frames to be followed across
@@ -1293,7 +1294,8 @@ def run(sender, setup: Setup, realtime: bool = False,
         log_path: Optional[str] = None, out=print,
         stop: Optional[threading.Event] = None,
         on_frame: Optional[Callable] = None,
-        monitor: Optional[Dict] = None) -> HubTally:
+        monitor: Optional[Dict] = None,
+        relay=None) -> HubTally:
     """Count from every camera into `sender` until stopped.
 
     One capture thread per camera; a camera with several zones decodes each
@@ -1311,6 +1313,10 @@ def run(sender, setup: Setup, realtime: bool = False,
     every frame it counted, for a live preview; it must return at once.
     `monitor`, if given, is filled with the live `health` and `tally` so a
     display can read them.
+
+    `relay` (hubfeed.RelayIn): this is the main box of a one-camera-per-box
+    setup; the partner box's counts are added to this box's feed as they
+    arrive, and a silent partner holds the heartbeat like a dead camera.
     """
     stop = stop or threading.Event()
     tally = HubTally(setup)
@@ -1491,6 +1497,21 @@ def run(sender, setup: Setup, realtime: bool = False,
 
     threads = [threading.Thread(target=loop, args=(c,), daemon=True,
                                 name=f"cam {c.name}") for c in setup.cameras]
+    if relay is not None:
+        relay.reply_source = lambda: getattr(sender, "last_reply", None)
+        if monitor is not None:
+            monitor["relay"] = relay
+        mine = setup.hubs()
+        if len(mine) > 1:
+            out("! this box counts both hubs and also takes a partner box's counts: "
+                "a hub both boxes count is counted twice")
+
+        def partner_rise(hub: str, n: int, captured: float) -> None:
+            sender.score(hub, n, captured)
+            latency.append((time.monotonic() - captured) * 1000)
+            del latency[:-LATENCY_MEMORY]
+        threads.append(threading.Thread(target=relay.run, args=(partner_rise, stop, out),
+                                        daemon=True, name="partner box"))
     for t in threads:
         t.start()
 
@@ -1501,6 +1522,8 @@ def run(sender, setup: Setup, realtime: bool = False,
             now = time.monotonic()
             stale = [s for s, hl in health.items()
                      if now - hl.last_frame > STALE_S]
+            if relay is not None and not relay.online():
+                stale.append(PARTNER)
             sender.info = info_line(health, tally)
             if now - began > 3.0:
                 # Not before: cameras take a second or two to open.
