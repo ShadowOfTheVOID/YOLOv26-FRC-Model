@@ -9,6 +9,29 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Counting restarts itself.** A camera unplugged, a USB hub browning out
+  or an error in a counter used to stop counting until someone noticed and
+  pressed Start, with bioarena showing OFFLINE for the rest of the match.
+  Now the hub counter restarts after 1 s (doubling to 10 s while it keeps
+  failing), with the same session: counts carry on from where they were,
+  and the heartbeat is held while it is down, so bioarena sees OFFLINE for
+  the gap, never a wrong count. The page says *Restarting the counter* and
+  why. Recordings that end are not restarted, and Stop stops for good.
+  Checked in a browser with a camera that cannot open: restarts at 1, 2,
+  4 s, Stop ends it.
+- **The setup is locked while counting.** Outlines, cameras, presets,
+  combine/confirm and Open are refused until *Unlock the setup* (from this
+  computer and from a shared phone alike). Changes never reached the
+  running count, but the next Start or restart would have counted with
+  them. **Stop now asks first.**
+- **The computer stays awake while counting** (caffeinate on macOS,
+  SetThreadExecutionState on Windows, systemd-inhibit on Linux), and lets
+  go on Stop. Closing a Mac's lid still sleeps it.
+- **Louder warnings**: a partner box gone quiet, and an exits/outline
+  cross-check out of range, now show in the page's status line, not only
+  as chips. The command-line `run.py hubfeed` does not restart itself; use
+  the app on match day.
+
 ## v0.5.4 — 2026-10-08
 
 - **One camera per box: two computers, one feed.** bioarena takes counts
