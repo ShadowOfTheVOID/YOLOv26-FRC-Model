@@ -247,6 +247,58 @@ def encode(frame, scale: float = 1.0, fmt: str = ".jpg") -> bytes:
 
 # -- the controller -------------------------------------------------------------
 
+def _lan_ip() -> str:
+    from .hubweb import lan_ip
+    try:
+        return lan_ip()
+    except Exception:
+        return ""
+
+
+class Recorder:
+    """One camera to an .mp4 while it counts. Frames are written on a thread
+    of their own and dropped (and counted) if the disk falls behind, so a
+    recording can never slow the counter, which must keep inside the feed's
+    latency budget."""
+
+    def __init__(self, path: str, fps: float, queue_frames: int = 120):
+        import queue
+        self.path, self.fps = path, max(1.0, float(fps))
+        self.frames = self.dropped = 0
+        self.q = queue.Queue(maxsize=queue_frames)
+        self.writer = None
+        self.thread = threading.Thread(target=self._run, daemon=True, name=f"record {path}")
+        self.thread.start()
+
+    def offer(self, frame) -> None:
+        try:
+            self.q.put_nowait(frame)
+        except Exception:
+            self.dropped += 1
+
+    def _run(self) -> None:
+        import cv2
+        while True:
+            frame = self.q.get()
+            if frame is None:
+                break
+            if self.writer is None:
+                h, w = frame.shape[:2]
+                self.writer = cv2.VideoWriter(self.path, cv2.VideoWriter_fourcc(*"mp4v"),
+                                              self.fps, (w, h))
+            self.writer.write(frame)
+            self.frames += 1
+        if self.writer is not None:
+            self.writer.release()
+
+    def close(self) -> None:
+        try:
+            self.q.put(None, timeout=30)
+        except Exception:
+            pass
+        self.thread.join(timeout=30)
+
+
 class HubController:
     """The setup being edited, the jobs running on it, and the live feed.
 
@@ -284,6 +336,10 @@ class HubController:
         # Watchtower app points it at the Hub Counter app's file, so a preset
         # saved in either app is offered in both.
         self.presets_file: Optional[str] = None
+        # The spec's acceptance test, live: counts when it was started.
+        self.ball_test: Optional[Dict] = None
+        # Recording the cameras while counting (Recorder per camera).
+        self.recorders: Dict[str, "Recorder"] = {}
         if setup_path and os.path.exists(setup_path):
             self.load(setup_path)
 
@@ -629,7 +685,11 @@ class HubController:
 
     # -- the feed ------------------------------------------------------------------
     def start(self, target: str = DEFAULT_TARGET, practice: bool = False,
-              realtime: bool = True, log_csv: bool = True) -> None:
+              realtime: bool = True, log_csv: bool = True,
+              partner_port: int = 0) -> None:
+        """`partner_port`: this is the main box of a one-camera-per-box setup;
+        take the partner box's feed on that UDP port and send both hubs on
+        (hubfeed.RelayIn). 0 = one box."""
         from . import hubcount, hubfeed
         if self.running:
             raise ValueError("already running")
@@ -673,21 +733,35 @@ class HubController:
         if any(source_kind(c.source) == "stream" for c in setup.cameras):
             self.say("counting from a stream: " + STREAM_WARNING)
 
+        relay = None
+        if partner_port:
+            relay = hubfeed.RelayIn(int(partner_port))
+            try:
+                relay.open()
+            except OSError as e:
+                raise ValueError(f"cannot take the partner box's counts on port "
+                                 f"{partner_port}: {e}") from None
+
         def on_frame(name, frame):
             with self.lock:
                 self.live_frames[name] = frame
+                rec = self.recorders.get(name)
+            if rec is not None:
+                rec.offer(frame)
 
         def work():
             try:
                 hubcount.run(self.sender, setup, realtime=realtime,
                              log_path=log_path, out=self.say, stop=self.stop_evt,
-                             on_frame=on_frame, monitor=self.monitor)
+                             on_frame=on_frame, monitor=self.monitor, relay=relay)
             except Exception as e:
                 self.say(f"error: {e}")
             finally:
+                self.stop_recording()
                 with self.lock:
                     self.running = False
                     self.live_frames.clear()
+                    self.ball_test = None
                 if self.listen_stop:
                     self.listen_stop.set()
                     self.listen_stop = None
@@ -706,6 +780,90 @@ class HubController:
     def stop(self) -> None:
         if self.stop_evt:
             self.stop_evt.set()
+
+    # -- tests the page can run (the practice field, 2026-10-09) ---------------
+    def start_ball_test(self) -> Dict:
+        """The spec's field acceptance (section 9): drop balls in by hand,
+        then compare. Counts from now are what the test sees."""
+        if not self.running or self.sender is None:
+            raise ValueError("start counting first, then start the ball test")
+        with self.lock:
+            self.ball_test = {"base": dict(self.sender.counts), "at": time.time()}
+        self.say("ball test started: drop the balls in, count them by hand, then Check")
+        return self.ball_test
+
+    def check_ball_test(self, hand: Dict[str, int]) -> Dict:
+        with self.lock:
+            bt = self.ball_test
+        if bt is None or self.sender is None:
+            raise ValueError("no ball test running")
+        res = {}
+        for hub, n in hand.items():
+            if hub not in HUBS or n in (None, ""):
+                continue
+            seen = self.sender.counts[hub] - bt["base"][hub]
+            res[hub] = {"hand": int(n), "counted": seen, "off": seen - int(n)}
+            self.say(f"ball test {hub}: counted {seen}, by hand {int(n)} -> "
+                     + ("match" if seen == int(n) else f"off by {seen - int(n):+d}"))
+        return {"hubs": res, "pass": bool(res) and all(r["off"] == 0 for r in res.values())}
+
+    def start_recording(self) -> List[str]:
+        """Record every camera while it counts, to test with afterwards
+        (Test a recording). Files go beside the setup, in recordings/."""
+        if not self.running:
+            raise ValueError("start counting first: the recording is what the counter sees")
+        base = os.path.dirname(os.path.abspath(self.path)) if self.path else os.getcwd()
+        folder = os.path.join(base, "recordings")
+        os.makedirs(folder, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        health = self.monitor.get("health") or {}
+        made = []
+        with self.lock:
+            for c in self.cfg["cameras"]:
+                if c["name"] in self.recorders:
+                    continue
+                fps = health[c["name"]].fps() if c["name"] in health else 0
+                safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in c["name"])
+                path = os.path.join(folder, f"{safe}_{stamp}.mp4")
+                self.recorders[c["name"]] = Recorder(path, fps or float(c.get("fps") or 30))
+                made.append(path)
+        for m in made:
+            self.say(f"recording {m}")
+        return made
+
+    def stop_recording(self) -> List[str]:
+        with self.lock:
+            recs, self.recorders = self.recorders, {}
+        done = []
+        for r in recs.values():
+            r.close()
+            if r.frames:
+                done.append(r.path)
+                self.say(f"recorded {r.frames} frames to {r.path}"
+                         + (f" ({r.dropped} dropped: the disk could not keep up)" if r.dropped else ""))
+        return done
+
+    def test_recording(self, cam_name: str, video: str, hand: Dict[str, int]) -> Dict:
+        """Every way of counting this camera's zones, on a recording, against
+        a hand count (hubcount.hand_test)."""
+        from .hubcount import hand_test, setup_from_dict
+        with self.lock:
+            cfg = json.loads(json.dumps(self.cfg))
+        c = next((x for x in cfg["cameras"] if x["name"] == cam_name), None)
+        if c is None:
+            raise ValueError(f"no camera {cam_name!r}")
+        issues = problems({"cameras": [c]})
+        if issues:
+            raise ValueError(" ".join(issues))
+        setup = setup_from_dict({"combine": cfg.get("combine"), "confirm": cfg.get("confirm"),
+                                 "cameras": [c]})
+        r = hand_test(setup, cam_name, video, hand, progress=self.progress)
+        for hub, h in r["hubs"].items():
+            best = next((x for x in h["rows"] if x.get("best")), None)
+            if best:
+                self.say(f"test {hub}: closest is {best['label']} ({best['count']}, "
+                         f"{best['error']:+d} against {h['hand']} by hand)")
+        return r
 
     # Set by the web server: its Share (the page on Wi-Fi, behind a PIN).
     share = None
@@ -736,6 +894,9 @@ class HubController:
                "problems": problems(cfg), "pictures": pictures,
                "builtin_model": bundled_model() is not None,
                "default_target": self.default_target,
+               # This box's address, for the partner box's "Send counts to"
+               # in a one-camera-per-box setup (hubfeed.RelayIn).
+               "this_ip": _lan_ip(),
                "update": self.updater.status() if self.updater else None,
                "presets": self.presets(),
                "standard_colour": dict(STANDARD_COLOUR),
@@ -770,6 +931,15 @@ class HubController:
             # Hubs with an outline and an exit line: the exits against the
             # outline a moment ago (hubcount.HubTally.check).
             live["check"] = {h: c for h in HUBS for c in [tally.check(h)] if c}
+        from .hubcount import latency_summary
+        live["latency"] = latency_summary(list(self.monitor.get("latency") or []))
+        with self.lock:
+            bt = self.ball_test
+            live["recording"] = [r.path for r in self.recorders.values()]
+        if bt is not None and s is not None:
+            live["ball_test"] = {h: s.counts[h] - bt["base"][h] for h in HUBS}
+        relay = self.monitor.get("relay")
+        live["partner"] = relay.state() if relay is not None else None
         live["model_behind"] = dict(self.monitor.get("model_dropped") or {})
         live["model_off"] = list(self.monitor.get("model_off") or [])
         out["live"] = live

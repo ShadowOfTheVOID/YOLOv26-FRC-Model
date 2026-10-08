@@ -135,6 +135,7 @@ details.log summary::-webkit-details-marker{display:none}
 .step.done h2 .n{background:var(--ok);border-color:transparent;color:#fff}
 .step h2 .opt{margin-left:auto;font-weight:600;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
 .muted{color:var(--muted);font-size:12.5px}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}.tbl th{text-align:left;color:var(--muted);font-weight:500;padding:4px 6px;border-bottom:1px solid var(--line)}.tbl td{padding:5px 6px;border-bottom:1px solid var(--line)}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
 .item{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;transition:.12s}
@@ -235,6 +236,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
         <div class="chips" id="schips"></div>
         <div class="chips" id="xcheck"></div>
+        <div class="chips" id="pchip"></div>
       </div>
     </div>
 
@@ -352,12 +354,31 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <h2><span class="n">4</span>Run</h2>
       <label class="field"><span>Send counts to <span class="muted">(bioarena host:port, or Watchtower https://KEY@watchtower.systemoverload.org or http://KEY@host:8000)</span></span><input class="input tnum" id="target" value="10.0.100.5:8411" oninput="this.dataset.edited=1"></label>
       <label class="switch"><span>Practice with a test receiver</span><input type="checkbox" id="practice"><i></i></label>
+      <label class="switch"><span>Main box: also send a partner box's counts <span class="muted">(one camera per box)</span></span><input type="checkbox" id="partner" onchange="renderPartnerHint()"><i></i></label>
+      <div id="partnerbox" style="display:none;margin:-2px 0 8px">
+        <div class="row" style="align-items:center;gap:8px"><span class="muted">Listen on UDP port</span><input class="input tnum" id="partner_port" type="number" value="8412" style="width:90px"></div>
+        <p class="muted" style="margin:6px 0 0" id="partnerhint"></p></div>
       <label class="switch"><span>Play recordings at real speed</span><input type="checkbox" id="realtime" checked><i></i></label>
       <label class="switch"><span>Save a CSV log of every count</span><input type="checkbox" id="csv" checked><i></i></label>
       <div style="margin-top:10px">
         <button class="go" id="start" onclick="start()">START</button>
         <button class="go stop" id="stop" onclick="stop()" style="display:none">STOP</button>
       </div>
+    </section>
+
+    <section class="card step" id="st5">
+      <h2><span class="n">5</span>Test</h2>
+      <p class="muted" style="margin:0 0 10px">Check the counter on your own cameras before trusting it with a match.</p>
+      <div class="field"><span>Ball test <span class="muted">(bioarena's acceptance test: drop balls in by hand, then compare; zero difference passes)</span></span>
+        <div class="row" style="margin-top:6px"><button class="btn" id="bt_start" onclick="ballTestStart()">Start ball test</button><button class="btn" id="bt_check" onclick="ballTestCheck()" style="display:none">Check</button></div>
+        <div class="muted tnum" id="bt_live" style="margin-top:6px"></div></div>
+      <div class="field" style="margin-top:12px"><span>Speed <span class="muted">(camera to count, against the spec: typical ≤ 80 ms, worst ≤ 200 ms)</span></span>
+        <div class="tnum" id="lat_live" style="margin-top:4px">Start counting to measure.</div></div>
+      <div class="field" style="margin-top:12px"><span>Record the cameras <span class="muted">(while counting; saved in recordings/ beside the setup)</span></span>
+        <div class="row" style="margin-top:6px"><button class="btn" id="rec_btn" onclick="recordToggle()">● Record</button></div>
+        <div class="muted" id="rec_live" style="margin-top:6px;word-break:break-all"></div></div>
+      <div class="field" style="margin-top:12px"><span>Test a recording <span class="muted">(every way of counting — colour, model, outline, exit line, exits confirm — against your hand count)</span></span>
+        <div class="row" style="margin-top:6px"><button class="btn" onclick="pickFile('test')"><svg><use href="#i-film"/></svg>Test a recording against a hand count</button></div></div>
     </section>
   </div>
 </div>
@@ -497,7 +518,7 @@ function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
     d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in")+both:(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
     d.querySelector(".x").onclick=()=>api("delete_zone",{camera:cur,zone:z.name}).then(refresh);L.appendChild(d);}}
 function renderSteps(){const cams=S.cfg.cameras;
-  const done=[cams.length>0,cams.length>0&&cams.every(c=>c.zones.length),cams.length>0&&cams.every(c=>c.ball_area>0),S.running];
+  const done=[cams.length>0,cams.length>0&&cams.every(c=>c.zones.length),cams.length>0&&cams.every(c=>c.ball_area>0),S.running,testPassed];
   done.forEach((d,i)=>{const s=$("st"+(i+1));s.classList.toggle("done",d);s.querySelector(".n").textContent=d?"✓":i+1;});}
 let behindSeen={},behindAt={};
 function modelBehind(v){const now=Date.now();for(const[n,k]of Object.entries(v.model_behind||{})){if(k>(behindSeen[n]||0))behindAt[n]=now;behindSeen[n]=k;}
@@ -530,6 +551,9 @@ function renderLive(){const v=S.live,F=fieldName();
     setStatus(delayed?"warn":"ok",`Connected to ${F}`,parts.join(" · ")+(delayed?" · counting from a delayed stream":""));}
   else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
   $("xcheck").innerHTML=Object.entries(v.check||{}).map(([h,c])=>`<span class="chip"${c.warn?' style="color:#f5a524"':""} title="exits now against the outline ${c.lag_s} s ago${c.confirming?" · exits confirm this hub":""}">${h} exit ${c.exit} / outline ${c.due}${c.ratio!=null?` <b class="tnum">${Math.round(c.ratio*100)}%</b>`:""}${c.warn?" · check the cameras":""}</span>`).join("");
+  renderTests(v);
+  const P=v.partner;$("pchip").innerHTML=P?`<span class="chip"${P.online?"":' style="color:#f5a524"'}>partner box ${P.online?"online":"OFFLINE"}${P.source?" · "+esc(P.source):""} · red <b class="tnum">${P.counts.red}</b> blue <b class="tnum">${P.counts.blue}</b>${P.age_ms!=null?` · ${P.age_ms} ms`:""}${P.restarts?` · restarted ${P.restarts}×`:""}</span>`:"";
+  if($("partnerbox").style.display!=="none")renderPartnerHint();
   $("schips").innerHTML=Object.entries(v.cameras).map(([n,c])=>`<span class="chip">${esc(n)} <b class="tnum">${Math.round(c.fps)}</b> fps</span>`).join("");}
 function handleJob(){const j=S.job;
   if(j.running){$("prog").style.display=j.progress!=null?"block":"none";$("prog").firstChild.style.width=((j.progress||0)*100)+"%";
@@ -540,6 +564,7 @@ function handleJob(){const j=S.job;
   else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
     else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
   else if(j.name==="calibrate"&&j.result)showCalibration(j.result);
+  else if(j.name==="test"&&j.result)showTest(j.result);
   else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Red outline</b> or <b>Blue outline</b> and click around the hub's opening, top edge a few balls above the hood.":"");}}
 async function chooseCamera(found){if(!found.length){modal("No camera found","<p>Check the camera is plugged in. On a Mac, the terminal needs permission: <b>System Settings → Privacy &amp; Security → Camera</b>.</p>",[{label:"OK",cls:"primary"}]);return;}
   const body=`<p>Numbers can change when cameras are re-plugged — check the picture after adding.</p><div class="pick">`+
@@ -617,6 +642,34 @@ document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEac
 function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
 function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
 function findCams(){api("find_cameras");}
+let testPassed=false;
+function renderTests(v){const run=S.running,bt=v.ball_test;
+  $("bt_start").disabled=!run;$("bt_start").textContent=bt?"Restart ball test":"Start ball test";$("bt_check").style.display=bt?"":"none";
+  $("bt_live").textContent=!run?"Start counting first (step 4); practice mode is fine.":bt?`Counted since the start: red ${bt.red} · blue ${bt.blue}. Drop the balls in, count them by hand, then Check.`:"";
+  const L=v.latency;$("lat_live").innerHTML=!run?"Start counting to measure.":!L?"Waiting for the first ball…":
+    `median <b>${L.median_ms} ms</b> · worst 1% <b>${L.p99_ms} ms</b> over ${L.n} counts — `+(L.ok?`<span style="color:#22c55e">within the spec</span>`:`<span style="color:#f5a524">outside the spec (typical ≤ ${L.typical_ms}, worst ≤ ${L.limit_ms} ms): check the camera's frame rate, or turn the model's share down</span>`);
+  const rec=v.recording||[];$("rec_btn").disabled=!run&&!rec.length;$("rec_btn").textContent=rec.length?"■ Stop recording":"● Record";
+  $("rec_live").textContent=rec.length?"Recording: "+rec.join(", "):(!run?"Start counting first: the recording is what the counter sees.":"");}
+async function ballTestStart(){try{await api("ball_test_start",{});toast("Ball test started — drop the balls in");}catch(e){}refresh();}
+async function ballTestCheck(){const hubs=["red","blue"];
+  const body=`<p>How many balls did you drop into each hub since the test started? Leave a hub empty to skip it.</p>`+hubs.map(h=>`<label class="field" style="margin-top:8px"><span>${h.toUpperCase()} hub</span><input class="input" type="number" min="0" id="bt_${h}"></label>`).join("");
+  if(!await modal("Ball test",body,[{label:"Cancel",value:false},{label:"Check",cls:"primary",value:true}]))return;
+  const hand={};for(const h of hubs){const x=$("bt_"+h).value;if(x!=="")hand[h]=parseInt(x,10);}
+  let r;try{r=await api("ball_test_check",{hand});}catch(e){return;}
+  testPassed=testPassed||r.pass;
+  const rows=Object.entries(r.hubs).map(([h,x])=>`<tr><td>${h.toUpperCase()}</td><td class="tnum">${x.hand}</td><td class="tnum">${x.counted}</td><td class="tnum" style="color:${x.off?"#f5a524":"#22c55e"}">${x.off?(x.off>0?"+":"")+x.off:"match"}</td></tr>`).join("");
+  modal(r.pass?"Ball test passed":"Ball test: not yet",`<table class="tbl"><tr><th>Hub</th><th>By hand</th><th>Counted</th><th></th></tr>${rows}</table><p class="muted" style="margin-top:10px">${r.pass?"Every hub matched. That is the spec's bar for using the count to decide AUTO (bioarena's Counted mode).":"The spec asks for zero difference before the count decides AUTO. Check the outline (top edge 3–4 balls above the hood), the fuel colour (magenta overlay) and the frame rate, then run it again. Start ball test again to reset."}</p>`,[{label:"OK",cls:"primary"}]);}
+async function recordToggle(){try{if((S.live.recording||[]).length){const d=await api("record_stop",{});toast(d.length?"Saved "+d.length+" recording"+(d.length>1?"s":""):"Recording stopped");}
+  else{await api("record_start",{});toast("Recording the cameras");}}catch(e){}refresh();}
+async function showTest(r){
+  const hubs=Object.entries(r.hubs);
+  let body=`<p class="muted">${esc(r.video.split("/").pop())} · ${esc(r.camera)} · ${r.seconds} s</p>`;
+  for(const[h,x]of hubs){body+=`<h3 style="margin:12px 0 6px">${h.toUpperCase()} hub${x.hand?` — ${x.hand} by hand`:""}</h3><table class="tbl"><tr><th>Counting</th><th>Count</th><th>Off by</th><th></th></tr>`+
+    x.rows.map((w,i)=>`<tr${w.best?' style="background:rgba(34,197,94,.12)"':""}><td>${esc(w.label)}${w.current?" <span class='muted'>(current)</span>":""}${w.best?" <b>← closest</b>":""}</td><td class="tnum">${w.count}</td><td class="tnum">${w.error!=null?(w.error>0?"+":"")+w.error+" ("+w.pct+"%)":""}</td><td>${w.confirm!=null&&w.best?`<button class="btn sm" data-h="${h}" data-c="${w.confirm}">Use</button>`:""}</td></tr>`).join("")+"</table>";}
+  body+=`<p class="muted" style="margin-top:10px">Choose by the closest row. "Use" turns on exits confirm at that delay for the hub (step 2). If the model rows are closer than colour, keep the model on (step 3); if colour alone is closer, turn it off.</p>`;
+  const p=modal("Test result",body,[{label:"OK",cls:"primary"}]);
+  document.querySelectorAll("#mBody button[data-c]").forEach(b=>b.onclick=async()=>{await api("confirm",{hub:b.dataset.h,seconds:Number(b.dataset.c)});toast(`${b.dataset.h}: exits confirm after ${b.dataset.c} s`);closeModal(null);refresh();});
+  await p;}
 function setConfirm(hub,v){api("confirm",{hub,seconds:Number(v)||0}).then(refresh);}
 async function addWireless(){
   const url=await modal("Add a wireless camera",`<label class="field"><span>Camera address</span>
@@ -639,9 +692,11 @@ async function addStream(){
   if(!url)return;
   try{const c=await api("add_camera",{source:url});cur=c.name;lastPic="";hint("Connecting to the stream…");grab();}catch(e){}}
 async function removeCam(name){if(await confirmBox("Remove camera",`Remove <b>${esc(name)}</b> and its outlines?`,"Remove")){await api("remove_camera",{name});if(cur===name)cur=null;lastPic="";refresh();}}
-async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked});
+async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked,partner_port:$("partner").checked?Number($("partner_port").value)||8412:0});
   hint(`Running. Leave it on across matches — ${fieldName()} marks each match's start itself.`);}catch(e){}}
 function stop(){api("stop");hint("");}
+function renderPartnerHint(){const on=$("partner").checked;$("partnerbox").style.display=on?"":"none";
+  $("partnerhint").innerHTML=`On the partner box (the other hub's camera), set <b>Send counts to</b> <code>${esc((S&&S.this_ip)||"this box's IP")}:${esc($("partner_port").value||"8412")}</code> and press Start there. This box sends both hubs to bioarena; if the partner goes quiet for 1 s, bioarena shows OFFLINE.`;}
 async function shareDialog(){
   const sh=S&&S.share||{on:false};
   if(!sh.on){
@@ -661,7 +716,7 @@ async function save(){let p=null;if(!S.path){p=await ask("Save setup","File name
   await api("save",{path:p});savedCfg=JSON.stringify(S.cfg);toast("Setup saved");refresh();}
 async function openSetup(){const p=await ask("Open setup","Setup file",S&&S.path||"cams.json");if(p){await api("load",{path:p});cur=null;lastPic="";savedCfg=null;refresh();}}
 async function pickFile(mode,path=""){pickMode=mode;const L=await(await fetch("/api/ls?path="+encodeURIComponent(path))).json();
-  const title=mode==="add"?"Add a recording":mode==="model"?"Pick the fuel model":"Pick the hand-counted recording";
+  const title=mode==="add"?"Add a recording":mode==="model"?"Pick the fuel model":mode==="test"?"Pick the recording to test":"Pick the hand-counted recording";
   const files=mode==="model"?(L.models||[]):L.videos;
   let body=`<div class="crumbs">${esc(L.path)}${L.error?" — "+esc(L.error):""}</div><div class="pick">`+
     `<div class="item" data-d="${esc(L.parent)}"><span class="icon"><svg><use href="#i-up"/></svg></span><span class="t">Up one folder</span></div>`+
@@ -676,8 +731,10 @@ async function chose(p){if(pickMode==="model"){setModel(p);return;}
   if(pickMode==="add"){try{const c=await api("add_camera",{source:p});cur=c.name;lastPic="";grab();}catch(e){}return;}
   const c=cam();if(!c)return;const hubs=[...new Set(c.zones.map(z=>z.hub))];
   const body=`<p>How many balls went into each hub in this recording, counted by hand?</p>`+hubs.map(h=>`<label class="field" style="margin-top:8px"><span>${h.toUpperCase()} hub</span><input class="input" type="number" min="0" id="hand_${h}"></label>`).join("");
-  const ok=await modal("Hand count",body,[{label:"Cancel",value:false},{label:"Calibrate",cls:"primary",value:true}]);if(!ok)return;
-  const hand={};for(const h of hubs)hand[h]=parseInt($("hand_"+h).value,10)||0;api("calibrate",{camera:cur,video:p,hand});}
+  const test=pickMode==="test";
+  const ok=await modal("Hand count",body+(test?`<p class="muted" style="margin-top:10px">Uses the outlines, exit lines and model of the camera selected in step 1 (${esc(c.name)}): pick a recording made by that camera.</p>`:""),[{label:"Cancel",value:false},{label:test?"Test":"Calibrate",cls:"primary",value:true}]);if(!ok)return;
+  const hand={};for(const h of hubs)hand[h]=parseInt($("hand_"+h).value,10)||0;
+  if(test)api("test_recording",{camera:cur,video:p,hand});else api("calibrate",{camera:cur,video:p,hand});}
 (function loop(){refresh().finally(()=>setTimeout(loop,S&&S.running?250:700));})();
 </script>
 </body>

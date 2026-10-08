@@ -333,3 +333,111 @@ def listen(port: int = FMS_PORT, bind: str = "0.0.0.0",
     finally:
         sock.close()
     return rx
+
+
+# -- two boxes, one feed ------------------------------------------------------
+#
+# bioarena takes counts from ONE configured address (spec 4.1/6.1), one
+# datagram carrying both hubs. One box per hub -- a camera and a computer at
+# each end of the field -- therefore cannot both send to it: the second
+# address is dropped, and if it were not, each box's `blue: 0` / `red: 0`
+# would read as the other one restarting. So the partner box sends the very
+# same feed, unchanged, to the MAIN box (`--target <main-ip>:8412`), and the
+# main box folds it into the one feed it sends to bioarena.
+#
+# The main box applies bioarena's own acceptance rules to the partner
+# (`Receiver`: sessions, seq, counts never backwards, a restart carries what
+# was already counted), forwards every rise the moment it arrives with the
+# partner's `age_ms` carried into its own, and replies with bioarena's last
+# reply, so the partner's page shows the match too. A partner that goes
+# quiet for 1 s holds the main box's heartbeat, exactly as a dead camera
+# does: bioarena sees OFFLINE rather than a count missing a hub.
+
+RELAY_PORT = 8412
+
+
+class RelayIn:
+    """The main box's end of a two-box setup: the partner's counts in."""
+
+    def __init__(self, port: int = RELAY_PORT, partner: Optional[str] = None,
+                 bind: str = "0.0.0.0", clock: Callable[[], float] = time.monotonic):
+        self.port, self.bind, self.clock = port, bind, clock
+        self.rx = Receiver(partner, clock)
+        self.forwarded = {h: 0 for h in HUBS}
+        self.source: Optional[str] = None
+        # Called for the reply: the main box's last reply from bioarena.
+        self.reply_source: Callable[[], Optional[Dict]] = lambda: None
+        self.sock = None
+
+    def handle(self, data: bytes, source: str):
+        """One datagram from the partner -> [(hub, balls, captured_at)] to
+        send on, or None if it was dropped. Pure apart from the clock."""
+        ok, _ = self.rx.accept(data, source)
+        if not ok:
+            return None
+        self.source = source
+        totals = self.rx.match_counts()     # carried across partner restarts
+        # This datagram's own age: Receiver keeps the last one it saw, which
+        # would date a rise by an older ball's age.
+        a = json.loads(data).get("age_ms")
+        age = a / 1000.0 if isinstance(a, int) and not isinstance(a, bool) and a >= 0 else 0.0
+        rises = []
+        for h in HUBS:
+            n = totals[h] - self.forwarded[h]
+            if n > 0:
+                self.forwarded[h] = totals[h]
+                rises.append((h, n, self.clock() - age))
+        return rises
+
+    def reply(self) -> bytes:
+        msg = dict(self.reply_source() or self.rx.status())
+        msg["v"], msg["seq"] = VERSION, self.rx.seq
+        return json.dumps(msg, separators=(",", ":")).encode()
+
+    def online(self) -> bool:
+        return self.rx.online()
+
+    def state(self) -> Dict:
+        return {"online": self.online(), "port": self.port, "source": self.source,
+                "session": self.rx.session, "counts": dict(self.forwarded),
+                "age_ms": self.rx.age_ms, "info": self.rx.info,
+                "restarts": self.rx.restarts,
+                "dropped": dict(self.rx.dropped)}
+
+    def open(self) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.bind, self.port))
+        sock.settimeout(0.1)
+        self.sock = sock
+
+    def run(self, on_rise: Callable[[str, int, float], None],
+            stop: threading.Event, out=print) -> None:
+        if self.sock is None:
+            self.open()
+        out(f"taking a partner box's counts on udp {self.bind}:{self.port}")
+        was = False
+        try:
+            while not stop.is_set():
+                try:
+                    data, addr = self.sock.recvfrom(4096)
+                except socket.timeout:
+                    if was and not self.online():
+                        out("partner box OFFLINE: nothing for 1 s (heartbeat held)")
+                        was = False
+                    continue
+                rises = self.handle(data, addr[0])
+                if rises is None:
+                    continue
+                if not was:
+                    out(f"partner box ONLINE: {addr[0]} session {self.rx.session}")
+                    was = True
+                for h, n, captured in rises:
+                    on_rise(h, n, captured)
+                try:
+                    self.sock.sendto(self.reply(), addr)
+                except OSError:
+                    pass
+        finally:
+            self.sock.close()
+            self.sock = None

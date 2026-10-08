@@ -9,6 +9,41 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.4 — 2026-10-08
+
+- **One camera per box: two computers, one feed.** bioarena takes counts
+  from one address, both hubs in one message, so a second box sending to it
+  is dropped (or read as the first one restarting). Now the box at the
+  other hub sends its feed to the *main* box instead -- *Send counts to*
+  `<main box IP>:8412` -- and the main box, with **Main box: also send a
+  partner box's counts** switched on in step 4, adds it to the one feed it
+  sends to bioarena. Each rise is passed on the moment it arrives, its age
+  carried; the partner restarting keeps what it had already counted (the
+  same rules bioarena applies); the partner's page shows bioarena's reply
+  through the main box; and a partner quiet for 1 s holds the main box's
+  heartbeat, so bioarena shows OFFLINE rather than a count missing a hub --
+  the same as a camera dropping out. A chip on the main box shows the
+  partner: online, its counts, its latency. Command line: `run.py hubfeed
+  --partner-port 8412` on the main box. Measured over real sockets with a
+  stand-in bioarena: both hubs in one feed, 1 ms median / 2 ms worst added.
+- **Everything can be tested in the app (new step 5, Test)** — Hub
+  Counter and Watchtower's Hub cameras tab, no terminal needed:
+  - **Ball test**, bioarena's field acceptance: *Start ball test* while
+    counting, drop balls in, *Check* with your hand count per hub. Zero
+    difference on every hub passes, the spec's bar for letting the count
+    decide AUTO.
+  - **Speed**: capture-to-count latency of every count sent, median and
+    worst 1%, against the spec's budget (typical 80 ms, worst 200 ms).
+  - **Record the cameras** while counting, one .mp4 per camera in
+    `recordings/` beside the setup. Frames are written on their own thread
+    and dropped (and counted) rather than slowing the counter.
+  - **Test a recording against a hand count**: every way this camera can
+    count, side by side with the error of each -- what the hub counts now,
+    colour, the model alone and colour + model where there is a model, the
+    outline and the exit line, exits-confirm at 0.5-5 s -- the closest
+    marked, and *Use* to turn on exits-confirm at that delay. The same as
+    `run.py hubcount --hand` on the command line.
+
 ## v0.5.3 — 2026-10-07
 
 - **Exit line and outline cross-check each other.** A hub with both shows,

@@ -841,7 +841,11 @@ def cmd_hubfeed(args, cfg):
         n = len(setup.zones(hub))
         if n > 1:
             print(f"  {hub}: {n} zones combined by {setup.combine[hub]}")
-    hubcount.run(sender, setup, realtime=args.realtime, log_path=args.log)
+    relay = None
+    if args.partner_port:
+        relay = hubfeed.RelayIn(args.partner_port)
+        print(f"main box: the partner box sends to <this box's IP>:{args.partner_port}")
+    hubcount.run(sender, setup, realtime=args.realtime, log_path=args.log, relay=relay)
     if hasattr(sender, "close"):
         sender.close()
         if sender.pending():
@@ -1310,6 +1314,10 @@ def main(argv=None):
     p.add_argument("--ball-area", dest="ball_area", type=float, default=0.0,
                    help="pixel area of one ball under the colour gate; "
                         "measure it with --measure")
+    p.add_argument("--partner-port", dest="partner_port", type=int, default=0,
+                   help="main box of a one-camera-per-box setup: take the partner "
+                        "box's feed on this UDP port (8412) and send both hubs on; "
+                        "the partner runs with --target <this box's IP>:8412")
     p.add_argument("--target", default="10.0.100.5:8411",
                    help="bioarena's HOST:PORT (default 10.0.100.5:8411), or "
                         "Watchtower / frc-fms as http://VISIONKEY@HOST:8000 or "

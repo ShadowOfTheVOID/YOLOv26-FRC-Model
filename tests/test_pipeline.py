@@ -4411,6 +4411,138 @@ def test_hub_model_blend():
           and "model" not in HC.setup_to_dict(plain)["cameras"][0])
 
 
+def test_app_tests():
+    """Everything the practice field needs is on the page, not the command
+    line: the spec's ball test, the speed check against the spec's budget,
+    recording the cameras, and a recording against a hand count with every
+    way of counting side by side."""
+    from tbavid import hubcount as HC
+    from tbavid.hubapp import HubController
+
+    L = HC.latency_summary([3, 4, 5, 90, 4, 6] * 20)
+    check("speed check: median and worst 1% against the spec",
+          L["median_ms"] == 5 and L["p99_ms"] == 90 and L["ok"] is True)
+    check("a worst case over 200 ms fails it",
+          HC.latency_summary([5] * 90 + [400] * 10)["ok"] is False)
+    check("no counts yet, no verdict", HC.latency_summary([]) is None)
+
+    # Ball test against a stand-in sender.
+    class FakeSender:
+        counts = {"red": 10, "blue": 3}
+        last_reply, rtt_ms, session = None, None, "s"
+
+        def linked(self):
+            return False
+    ctl = HubController()
+    try:
+        ctl.start_ball_test()
+        check("the ball test needs the counter running", False)
+    except ValueError:
+        check("the ball test needs the counter running", True)
+    ctl.running, ctl.sender = True, FakeSender()
+    ctl.start_ball_test()
+    FakeSender.counts = {"red": 30, "blue": 5}
+    ctl.sender = FakeSender()
+    r = ctl.check_ball_test({"red": 20, "blue": 3, "x": 1})
+    check("ball test: counted since the start, against the hand count",
+          r["hubs"]["red"] == {"hand": 20, "counted": 20, "off": 0}
+          and r["hubs"]["blue"]["off"] == -1 and r["pass"] is False and "x" not in r["hubs"])
+    check("the page sees the test running",
+          ctl.state()["live"]["ball_test"] == {"red": 20, "blue": 2})
+    check("all hubs matching passes",
+          ctl.check_ball_test({"red": 20})["pass"] is True)
+    try:
+        ctl.running = False
+        ctl.start_recording()
+        check("recording needs the counter running", False)
+    except ValueError:
+        check("recording needs the counter running", True)
+
+    # A recording against a hand count: every way of counting, closest marked.
+    sq = [[100, 100], [200, 100], [200, 200], [100, 200]]
+    setup = HC.setup_from_dict({"cameras": [{"name": "c", "source": "x.mp4", "ball_area": 300,
+        "model": {"weights": "w.pt"},
+        "zones": [{"hub": "red", "outline": sq, "name": "o"},
+                  {"hub": "red", "line": [[0, 0], [10, 0]], "out": [5, 5], "name": "e"}]}]})
+    fake = {"red": 22, "blue": 0, "seconds": 60.0,
+            "zones": {"o": 22, "e": 18}, "colour": {"o": 24}, "model": {"o": 20},
+            "series": {"red": [(1.0, 5, 0), (3.0, 10, 4), (10.0, 22, 18)]}}
+    real = HC.count_recording
+    HC.count_recording = lambda *a, **k: fake
+    try:
+        t = HC.hand_test(setup, "c", "x.mp4", {"red": 20})
+    finally:
+        HC.count_recording = real
+    rows = {w["label"]: w for w in t["hubs"]["red"]["rows"]}
+    check("the test shows the current count and each part",
+          rows["what the hub counts now"]["count"] == 22
+          and rows["outline, colour"]["count"] == 24
+          and rows["outline, model only"]["count"] == 20
+          and rows["outline, colour + model"]["count"] == 22
+          and rows["exit line"]["count"] == 18
+          and rows["exits confirm after 2 s"]["confirm"] == 2.0)
+    check("each against the hand count, the closest marked",
+          rows["outline, model only"]["error"] == 0 and rows["outline, model only"].get("best")
+          and rows["outline, colour"]["pct"] == 20.0
+          and sum(1 for w in rows.values() if w.get("best")) == 1)
+    check("a hub with no zones on this camera is left out", "blue" not in t["hubs"])
+
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    from tbavid import hubweb
+    check("the page has the Test step and every action it calls exists",
+          'id="st5"' in page and all(a in hubweb.ACTIONS for a in
+              ("ball_test_start", "ball_test_check", "record_start", "record_stop",
+               "test_recording", "confirm")))
+
+
+def test_two_boxes_one_feed():
+    """One camera per box: the partner box sends its feed to the main box,
+    which folds it into the one feed bioarena accepts (one address, both hubs
+    in one datagram -- a second sender would be dropped, or read as restarts)."""
+    import json as _json
+    from tbavid import hubfeed as HF
+    t = [100.0]
+    relay = HF.RelayIn(clock=lambda: t[0])
+    def dg(session, seq, red, blue, age=None):
+        return HF.encode(session, seq, red, blue, age)
+    check("the partner's first datagram with nothing scored forwards nothing",
+          relay.handle(dg("p1", 1, 0, 0), "10.0.100.22") == [])
+    t[0] = 101.0
+    r = relay.handle(dg("p1", 2, 0, 3, age=40), "10.0.100.22")
+    check("a rise on the partner's hub is forwarded at once, its age carried",
+          r == [("blue", 3, 101.0 - 0.040)] and relay.online())
+    check("a duplicate or a count going backwards is dropped, as bioarena would",
+          relay.handle(dg("p1", 2, 0, 5), "10.0.100.22") is None
+          and relay.handle(dg("p1", 3, 0, 1), "10.0.100.22") is None)
+    r = relay.handle(dg("p2", 1, 0, 2), "10.0.100.22")
+    check("the partner restarting keeps what it had sent: its new 2 adds to 3",
+          r == [("blue", 2, 101.0)] and relay.forwarded["blue"] == 5
+          and relay.rx.restarts == 1)
+    relay.reply_source = lambda: {"v": 1, "seq": 777, "match_state": "AUTO_PERIOD",
+                                  "credited": {"red": 1, "blue": 5}}
+    rep = _json.loads(relay.reply())
+    check("the partner gets bioarena's reply, with its own seq echoed",
+          rep["match_state"] == "AUTO_PERIOD" and rep["seq"] == 1)
+    t[0] = 103.0
+    check("a partner silent for 1 s is offline (it holds the main box's heartbeat)",
+          not relay.online() and relay.state()["counts"] == {"red": 0, "blue": 5})
+    strict = HF.RelayIn(partner="10.0.100.22", clock=lambda: t[0])
+    check("a partner address, when given, is the only one accepted",
+          strict.handle(dg("x", 1, 0, 1), "10.0.100.99") is None)
+
+    # The main box's feed: its own hub plus the partner's, one session.
+    sent = []
+    class Sock:
+        def sendto(self, data, addr): sent.append(_json.loads(data))
+        def recvfrom(self, n): raise BlockingIOError
+    fs = HF.FeedSender(("10.0.100.5", 8411), session="main", sock=Sock(), clock=lambda: t[0])
+    fs.score("red", 4, t[0])
+    for hub, n, cap in HF.RelayIn(clock=lambda: t[0]).handle(dg("p", 1, 0, 6, age=10), "x"):
+        fs.score(hub, n, cap)
+    check("bioarena sees one session carrying both hubs",
+          sent[-1]["session"] == "main" and sent[-1]["red"] == 4 and sent[-1]["blue"] == 6)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -4434,7 +4566,8 @@ def main() -> int:
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
                test_watchtower_home_api, test_app_update,
-               test_camera_presets, test_share_hides_the_ip_behind_a_name):
+               test_camera_presets, test_share_hides_the_ip_behind_a_name,
+               test_app_tests, test_two_boxes_one_feed):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
