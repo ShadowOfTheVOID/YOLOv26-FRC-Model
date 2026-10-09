@@ -9,6 +9,8 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.5 — 2026-10-09
+
 - **Counting restarts itself.** A camera unplugged, a USB hub browning out
   or an error in a counter used to stop counting until someone noticed and
   pressed Start, with bioarena showing OFFLINE for the rest of the match.

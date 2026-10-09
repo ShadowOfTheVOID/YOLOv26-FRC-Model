@@ -328,7 +328,7 @@ baseline of sender.counts), speed (hubcount.latency_summary over run()'s
 monitor["latency"], spec 80/200 ms), Record (hubapp.Recorder, mp4v on its own
 thread, drops rather than blocks), Test a recording (hubcount.hand_test: every
 counting method vs hand count, closest marked, Use applies confirm).
-Streamlined setup (2026-10-09, Unreleased): step 5's "Check a recording"
+Streamlined setup (2026-10-09, v0.5.5): step 5's "Check a recording"
 (hubapp.check_recording) = hand_test + calibrate on one recording; a change is
 offered only when worth_changing (beats current by >2 balls or 5%). The step-3
 Calibrate button is gone. Step 2 hides combine/confirm unless a hub has >1

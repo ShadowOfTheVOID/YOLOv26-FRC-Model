@@ -69,6 +69,12 @@ def main(program: str) -> int:
         # Home (browser mode here: --no-browser): its address carries the
         # launch token; the API refuses calls without it and answers with it.
         link = os.path.join(d, "webview", "home-url.txt")
+        # main() writes it after both servers are up, so a fast start (macOS
+        # CI, 2026-10-09) found the pages answering and no file yet.
+        for _ in range(30):
+            if os.path.isfile(link) or proc.poll() is not None:
+                break
+            time.sleep(0.5)
         assert os.path.isfile(link), "no Home address written"
         url = open(link).read().strip()
         token = url.split("t=", 1)[1]
