@@ -323,6 +323,16 @@ baseline of sender.counts), speed (hubcount.latency_summary over run()'s
 monitor["latency"], spec 80/200 ms), Record (hubapp.Recorder, mp4v on its own
 thread, drops rather than blocks), Test a recording (hubcount.hand_test: every
 counting method vs hand count, closest marked, Use applies confirm).
+Streamlined setup (2026-10-09, Unreleased): step 5's "Check a recording"
+(hubapp.check_recording) = hand_test + calibrate on one recording; a change is
+offered only when worth_changing (beats current by >2 balls or 5%). The step-3
+Calibrate button is gone. Step 2 hides combine/confirm unless a hub has >1
+outline / outline+exit. tbavid/camcheck.py (numpy only): camera's "reference"
+grey thumbnail in cams.json, phase correlation -> ok/moved/different/size;
+checked on grab, grab_all (page runs it on opening a setup) and every 10 s
+while counting; "Move the outlines" = shift_zones. Untested on a real venue
+camera. Bugs fixed then: SystemExit from open_source hung the job queue;
+empty hand-count hub sent as 0; test_recording dropped "rules" (blur 0 -> 0.3).
 v0.5.4 two boxes, one feed: hubfeed.RelayIn on the main box (UDP 8412, the
 partner sends the unchanged spec feed there; Receiver rules, forwards rises
 with the datagram's own age_ms, replies with bioarena's last reply; silent

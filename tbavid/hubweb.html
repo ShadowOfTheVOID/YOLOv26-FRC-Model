@@ -172,6 +172,9 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .seg{display:inline-flex;padding:3px;border-radius:10px;background:var(--bg2);border:1px solid var(--line)}
 .seg button{border:0;background:none;padding:5px 12px;border-radius:7px;font-size:12px;font-weight:600;color:var(--ink2);cursor:pointer}
 .seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.align{margin-top:12px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line));
+  background:color-mix(in srgb,var(--warn) 10%,var(--panel));font-size:13px}
+.align .row{margin-top:8px}
 .comb{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
 .divider{height:1px;background:var(--line);margin:12px 0}
 
@@ -265,6 +268,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <button class="btn" onclick="addStream()"><svg><use href="#i-live"/></svg>Add stream</button>
       </div>
       <div id="camform" style="display:none">
+        <div id="align" class="align" style="display:none"></div>
         <div class="divider"></div>
         <div class="fields" id="form">
           <label class="field full"><span>Name</span><input class="input" id="f_name"></label>
@@ -316,17 +320,26 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <button class="btn red" onclick="draw('red')"><svg><use href="#i-pen"/></svg>Red outline</button>
         <button class="btn blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Blue outline</button>
       </div>
-      <div class="muted" style="margin:10px 0 6px">Or an exit line — untested: balls pile up at the exit and stop crossing one by one. Only for a camera aimed right at the chute, and check it with 20 balls.</div>
-      <div class="row">
-        <button class="btn sm red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
-        <button class="btn sm blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
+      <details class="adv" id="exitbox"><summary>Exit line <span class="muted">(untested)</span></summary>
+        <div class="muted" style="margin:10px 0 6px">Balls pile up at the exit and stop crossing one by one. Only for a camera aimed right at the chute, and check it with 20 balls. A hub with both an outline and an exit line takes the larger of the two, never their total: they count the same balls.</div>
+        <div class="row">
+          <button class="btn sm red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
+          <button class="btn sm blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
+        </div>
+      </details>
+      <!-- Shown only for a hub they apply to (renderZoneOptions): with one
+           outline per hub there is nothing to combine, and confirm needs an
+           outline and an exit line on the same hub. -->
+      <div id="combbox" style="display:none">
+        <div class="comb" id="comb_red"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
+        <div class="comb" id="comb_blue"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
+        <p class="muted" style="margin:8px 0 0">Sum when the outlines see different balls (other sides of the hub); max or median when several watch the same ones.</p>
       </div>
-      <div class="comb"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
-      <div class="comb"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
-      <p class="muted" style="margin:8px 0 0">Sum when cameras see different balls; max or median when several watch the same ones. A hub with both an outline and an exit line takes the larger of the two, never their total: they count the same balls.</p>
-      <div class="comb"><span class="muted">Red: exits confirm entries after</span><input class="input tnum" id="confirm_red" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('red',this.value)"><span class="muted">s</span></div>
-      <div class="comb"><span class="muted">Blue: exits confirm entries after</span><input class="input tnum" id="confirm_blue" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('blue',this.value)"><span class="muted">s</span></div>
-      <p class="muted" style="margin:8px 0 0">Only with an outline <i>and</i> an exit line on the hub. An entry that has not come out of an exit within the delay is taken back. Leave it off unless a hand-counted test recording showed it closer (<code>run.py hubcount --hand</code>): an exit line that misses balls makes it count low.</p>
+      <div id="confbox" style="display:none">
+        <div class="comb" id="conf_red"><span class="muted">Red: exits confirm entries after</span><input class="input tnum" id="confirm_red" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('red',this.value)"><span class="muted">s</span></div>
+        <div class="comb" id="conf_blue"><span class="muted">Blue: exits confirm entries after</span><input class="input tnum" id="confirm_blue" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('blue',this.value)"><span class="muted">s</span></div>
+        <p class="muted" style="margin:8px 0 0">An entry that has not come out of an exit within the delay is taken back. Leave it off: step 5's check turns it on when a hand-counted recording shows it clearly closer.</p>
+      </div>
     </section>
 
     <section class="card step" id="st3">
@@ -335,11 +348,11 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <label class="field" style="flex:1"><span>One ball, in pixels</span><input class="input big tnum" id="f_ball_area" type="number" min="0" placeholder="not measured"></label>
         <button class="btn primary" onclick="measure()"><svg><use href="#i-ruler"/></svg>Measure</button>
       </div>
-      <p class="muted" style="margin:8px 0 0">Put a few balls near the hub, apart from each other, then measure (5 s).</p>
-      <details class="adv"><summary>Calibration <span class="muted">(optional)</span></summary>
+      <p class="muted" style="margin:8px 0 0">Put a few balls near the hub, apart from each other, then measure (5 s). Once measured, a ruler of ball widths follows the pointer while you draw an outline.</p>
+      <details class="adv"><summary>Calibration <span class="muted" id="calstate">(standard)</span></summary>
+        <p class="muted" style="margin:10px 0 0">Leave these alone: step 5's <b>Check a recording</b> sets them when a hand-counted recording shows a clearly better setting.</p>
         <div class="slider" style="margin-top:10px"><span class="muted" style="width:92px">Blur correction</span><input type="range" id="f_blur" min="0" max="1" step="0.1"><b class="tnum" id="blurv">0</b></div>
         <label class="switch"><span>Ignore yellow that stays still</span><input type="checkbox" id="f_remove_static"><i></i></label>
-        <button class="btn sm" onclick="pickFile('calibrate')"><svg><use href="#i-tune"/></svg>Calibrate from a hand-counted recording</button>
       </details>
       <details class="adv" id="modelbox"><summary>Fuel model <span class="muted" id="modelstate">(off)</span></summary>
         <p class="muted" style="margin:10px 0 8px">Blends a trained model's count with the colour count. On four Einstein matches: 6.8% error against 10.1% for colour alone; on the Central Valley broadcast it was worse (34.5%), so check it on your camera. Fast enough on Apple silicon or an NVIDIA GPU; on a slower computer it turns itself off after about 10 s and counts by colour.</p>
@@ -377,8 +390,8 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <div class="field" style="margin-top:12px"><span>Record the cameras <span class="muted">(while counting; saved in recordings/ beside the setup)</span></span>
         <div class="row" style="margin-top:6px"><button class="btn" id="rec_btn" onclick="recordToggle()">● Record</button></div>
         <div class="muted" id="rec_live" style="margin-top:6px;word-break:break-all"></div></div>
-      <div class="field" style="margin-top:12px"><span>Test a recording <span class="muted">(every way of counting — colour, model, outline, exit line, exits confirm — against your hand count)</span></span>
-        <div class="row" style="margin-top:6px"><button class="btn" onclick="pickFile('test')"><svg><use href="#i-film"/></svg>Test a recording against a hand count</button></div></div>
+      <div class="field" style="margin-top:12px"><span>Check a recording <span class="muted">(every way of counting, and the calibration, against your hand count; offers only changes that are clearly better)</span></span>
+        <div class="row" style="margin-top:6px"><button class="btn" onclick="pickFile('test')"><svg><use href="#i-film"/></svg>Check a recording against a hand count</button></div></div>
     </section>
   </div>
 </div>
@@ -432,7 +445,8 @@ async function refresh(){
   const dirty=JSON.stringify(S.cfg)!==savedCfg||!S.path;
   $("savestate").className="pill "+(dirty?"dirty":"saved");$("savestate").textContent=dirty?"Not saved":"Saved";
   if(!cam()&&S.cfg.cameras.length)cur=S.cfg.cameras[0].name;
-  renderCams();renderZones();renderSteps();renderLive();renderModel();renderUpdate();handleJob();
+  renderCams();renderZones();renderZoneOptions();renderAlign();renderSteps();renderLive();renderModel();renderUpdate();handleJob();
+  autoPictures();
   const pic=cur&&S.pictures[cur];
   if(pic){const key=cur+":"+pic+":"+(S.running?Date.now():S.job.id);if(S.running||key!==lastPic){lastPic=key;loadImg();}}
   else{$("pic").style.display="none";$("empty").style.display="";}
@@ -445,6 +459,7 @@ function renderCams(){const L=$("cams");L.innerHTML="";
     d.innerHTML=`<span class="icon"><svg><use href="#i-${{file:'film',stream:'live',camera:'cam',wireless:'wifi'}[kind]}"/></svg></span><span class="t">${esc(c.name)}</span>`+
       (kind==="stream"?`<span class="tag warn" title="${esc(S.stream_warning)}">delayed</span>`:"")+
       (kind==="wireless"?`<span class="tag blue" title="${esc(S.wireless_warning)}">Wi-Fi</span>`:"")+
+      (alignBad(c.name)?`<span class="tag warn" title="${esc(S.alignment[c.name].words)}">${S.alignment[c.name].status==="moved"?"moved":"check"}</span>`:"")+
       (c.ball_area?`<span class="tag ok">${Math.round(c.ball_area)} px</span>`:`<span class="tag warn">measure</span>`)+`<button class="x" title="Remove">✕</button>`;
     d.onclick=e=>{if(e.target.classList.contains("x")){removeCam(c.name);return;}cur=c.name;lastPic="";fillForm();refresh();if(!S.pictures[c.name])grab();};
     L.appendChild(d);}
@@ -456,6 +471,7 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";}
 function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
   $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;
+  $("calstate").textContent=(+c.blur===S.default_blur&&!c.remove_static)?"(standard)":`(blur ${(+c.blur||0).toFixed(1)}${c.remove_static?", still yellow ignored":""})`;
   renderModel();const m=c.model;if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}
   fillProfile(c);}
 /* ---------- presets, picture, fuel colour (tbavid/camprofile.py) ---------- */
@@ -517,6 +533,33 @@ function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
     const pt=(S.live.parts||{})[z.name];const both=pt?` (colour ${pt.colour} · model ${pt.model})`:"";
     d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in")+both:(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
     d.querySelector(".x").onclick=()=>api("delete_zone",{camera:cur,zone:z.name}).then(refresh);L.appendChild(d);}}
+/* Combine and confirm only where they mean something: one outline per hub
+   has nothing to combine, and confirm needs an outline and an exit line on
+   the same hub. Seven controls stood in step 2 for every setup. */
+function renderZoneOptions(){const zs=S.cfg.cameras.flatMap(c=>c.zones);let comb=false,conf=false;
+  for(const h of["red","blue"]){const outl=zs.filter(z=>z.hub===h&&!z.line).length,ex=zs.filter(z=>z.hub===h&&z.line).length;
+    const many=outl>1||ex>1||(S.cfg.combine[h]&&S.cfg.combine[h]!=="sum");
+    const both=(outl>0&&ex>0)||!!(S.cfg.confirm||{})[h];
+    $("comb_"+h).style.display=many?"":"none";$("conf_"+h).style.display=both?"":"none";comb=comb||many;conf=conf||both;}
+  $("combbox").style.display=comb?"":"none";$("confbox").style.display=conf?"":"none";
+  if(zs.some(z=>z.line))$("exitbox").open=true;}
+/* Has the camera moved since its outlines were drawn? (tbavid/camcheck.py) */
+function alignBad(n){const a=S.alignment&&S.alignment[n];return !!a&&a.status!=="ok";}
+function renderAlign(){const c=cam(),box=$("align");const a=c&&S.alignment&&S.alignment[c.name];
+  if(!a||a.status==="ok"){box.style.display="none";box.dataset.k="";return;}
+  const k=c.name+a.status+a.dx+a.dy;if(box.dataset.k===k){box.style.display="";return;}box.dataset.k=k;
+  const run=S.running?" Stop and start again to count with the moved outlines.":"";
+  box.innerHTML=`<b>${a.status==="moved"?"Camera moved":a.status==="size"?"Picture size changed":"Different picture"}</b> — ${esc(a.words)}.`+
+    `<div class="row">`+(a.status==="moved"?`<button class="btn sm primary" onclick="shiftZones(${a.dx},${a.dy})">Move the outlines ${a.dx>=0?"+":""}${Math.round(a.dx)}, ${a.dy>=0?"+":""}${Math.round(a.dy)} px</button>`:"")+
+    `<button class="btn sm" onclick="keepReference()">The outlines fit — keep this picture</button></div>`+
+    `<p class="muted" style="margin:6px 0 0">Look at the outlines on the picture before choosing.${run}</p>`;box.style.display="";}
+async function shiftZones(dx,dy){try{await api("shift_zones",{camera:cur,dx,dy});toast("Outlines moved"+(S.running?" — restart counting to use them":""));}catch(e){}refresh();}
+async function keepReference(){try{await api("reference",{camera:cur});toast("Kept: the outlines fit this picture");}catch(e){}refresh();}
+/* Opening a setup (or the app) at the venue: every camera's picture, each
+   checked against its outlines, without clicking each camera. Once per file. */
+let autoFor=null;
+function autoPictures(){const key=S.path||"";if(autoFor===key||S.running||S.job.running||!S.cfg.cameras.length)return;
+  autoFor=key;if(S.cfg.cameras.every(c=>S.pictures[c.name]))return;api("grab_all").catch(()=>{});}
 function renderSteps(){const cams=S.cfg.cameras;
   const done=[cams.length>0,cams.length>0&&cams.every(c=>c.zones.length),cams.length>0&&cams.every(c=>c.ball_area>0),S.running,testPassed];
   done.forEach((d,i)=>{const s=$("st"+(i+1));s.classList.toggle("done",d);s.querySelector(".n").textContent=d?"✓":i+1;});}
@@ -563,8 +606,9 @@ function handleJob(){const j=S.job;
   if(j.name==="find cameras")chooseCamera(j.result||[]);
   else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
     else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
-  else if(j.name==="calibrate"&&j.result)showCalibration(j.result);
-  else if(j.name==="test"&&j.result)showTest(j.result);
+  else if(j.name==="check"&&j.result)showCheck(j.result);
+  else if(j.name==="pictures"){lastPic="";const bad=S.cfg.cameras.filter(c=>alignBad(c.name)).map(c=>c.name);
+    hint(bad.length?`Check <b>${esc(bad.join(", "))}</b>: the picture does not match its outlines.`:"");}
   else if(j.name==="picture"){const c=cam();hint(c&&!c.zones.length?"Next: press <b>Red outline</b> or <b>Blue outline</b> and click around the hub's opening, top edge a few balls above the hood.":"");}}
 async function chooseCamera(found){if(!found.length){modal("No camera found","<p>Check the camera is plugged in. On a Mac, the terminal needs permission: <b>System Settings → Privacy &amp; Security → Camera</b>.</p>",[{label:"OK",cls:"primary"}]);return;}
   const body=`<p>Numbers can change when cameras are re-plugged — check the picture after adding.</p><div class="pick">`+
@@ -572,11 +616,6 @@ async function chooseCamera(found){if(!found.length){modal("No camera found","<p
   const p=modal("Add a camera",body,[{label:"Cancel",value:null}]);
   document.querySelectorAll("#mBody .item").forEach(e=>e.onclick=()=>{closeModal(null);api("add_camera",{source:e.dataset.i}).then(c=>{cur=c.name;lastPic="";grab();});});
   await p;}
-async function showCalibration(r){const rows=Object.entries(r.hand).map(([h,n])=>`<div class="item"><span class="tag ${h}">${h.toUpperCase()}</span><span class="t">${r.counts[h]||0} counted</span><span class="s">${n} by hand · ${r.uncorrected[h]||0} without</span></div>`).join("");
-  const ok=await modal("Calibration result",`<p>Best setting: blur <b>${r.blur}</b>, ignore still yellow <b>${r.remove_static?"on":"off"}</b>.</p><div class="pick">${rows}</div><p class="muted">Fitted to one recording. Check it on a second one before trusting it.</p>`,
-    [{label:"Keep current",value:false},{label:"Use these settings",cls:"primary",value:true}]);
-  if(ok){await api("apply_calibration",{camera:r.camera,blur:r.blur,remove_static:r.remove_static});toast("Calibration applied");refresh();}}
-
 /* ---------- picture & drawing ---------- */
 $("img").addEventListener("load",sizeCanvas);
 function loadImg(){const n=new Image();n.onload=()=>{$("empty").style.display="none";$("pic").style.display="";$("img").src=n.src;};
@@ -606,7 +645,15 @@ function overlay(){const cv=$("cv"),g=cv.getContext("2d");g.clearRect(0,0,cv.wid
     P.forEach(([x,y])=>{g.beginPath();g.arc(x*k,y*k,6,0,7);g.fillStyle="#fff";g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke();});}
   else if(drawing){const col=COL[drawing.hub];g.setLineDash([6,4]);g.lineWidth=2;g.strokeStyle=col;g.beginPath();
     drawing.pts.forEach(([x,y],i)=>i?g.lineTo(x*k,y*k):g.moveTo(x*k,y*k));if(drawing.hover&&drawing.pts.length)g.lineTo(drawing.hover[0],drawing.hover[1]);g.stroke();g.setLineDash([]);
-    drawing.pts.forEach(([x,y],i)=>{g.beginPath();g.arc(x*k,y*k,i===0?7:5,0,7);g.fillStyle=i===0?"#fff":col;g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke();});}}
+    drawing.pts.forEach(([x,y],i)=>{g.beginPath();g.arc(x*k,y*k,i===0?7:5,0,7);g.fillStyle=i===0?"#fff":col;g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke();});
+    if(drawing.hover&&c.ball_area>0)ballRuler(g,drawing.hover[0],drawing.hover[1],Math.sqrt(4*c.ball_area/Math.PI)*k);}}
+/* Four ball widths hanging below the pointer: the outline's top edge goes
+   3-4 balls above the hood (HUB_FEED.md, Central Valley 38.9% -> 6.4%), and
+   "3-4 balls" was a guess by eye. Put the pointer where the top corner goes;
+   the hood should sit between the 3rd and 4th ball. */
+function ballRuler(g,x,y,d){if(d<3)return;g.save();g.lineWidth=1.5;
+  for(let i=0;i<4;i++){g.beginPath();g.arc(x,y+d*(i+.5),d/2,0,7);g.strokeStyle=i>=2?"#22c55e":"rgba(255,255,255,.75)";g.stroke();}
+  g.font="600 11px -apple-system,Segoe UI,sans-serif";g.fillStyle="#22c55e";g.fillText("hood here",x+d/2+6,y+d*3.6);g.restore();}
 function roundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
 $("cv").addEventListener("click",e=>{if(!drawing)return;const r=e.target.getBoundingClientRect(),k=scale();
   const p=[(e.clientX-r.left)/k,(e.clientY-r.top)/k];
@@ -661,14 +708,27 @@ async function ballTestCheck(){const hubs=["red","blue"];
   modal(r.pass?"Ball test passed":"Ball test: not yet",`<table class="tbl"><tr><th>Hub</th><th>By hand</th><th>Counted</th><th></th></tr>${rows}</table><p class="muted" style="margin-top:10px">${r.pass?"Every hub matched. That is the spec's bar for using the count to decide AUTO (bioarena's Counted mode).":"The spec asks for zero difference before the count decides AUTO. Check the outline (top edge 3–4 balls above the hood), the fuel colour (magenta overlay) and the frame rate, then run it again. Start ball test again to reset."}</p>`,[{label:"OK",cls:"primary"}]);}
 async function recordToggle(){try{if((S.live.recording||[]).length){const d=await api("record_stop",{});toast(d.length?"Saved "+d.length+" recording"+(d.length>1?"s":""):"Recording stopped");}
   else{await api("record_start",{});toast("Recording the cameras");}}catch(e){}refresh();}
-async function showTest(r){
-  const hubs=Object.entries(r.hubs);
-  let body=`<p class="muted">${esc(r.video.split("/").pop())} · ${esc(r.camera)} · ${r.seconds} s</p>`;
-  for(const[h,x]of hubs){body+=`<h3 style="margin:12px 0 6px">${h.toUpperCase()} hub${x.hand?` — ${x.hand} by hand`:""}</h3><table class="tbl"><tr><th>Counting</th><th>Count</th><th>Off by</th><th></th></tr>`+
-    x.rows.map((w,i)=>`<tr${w.best?' style="background:rgba(34,197,94,.12)"':""}><td>${esc(w.label)}${w.current?" <span class='muted'>(current)</span>":""}${w.best?" <b>← closest</b>":""}</td><td class="tnum">${w.count}</td><td class="tnum">${w.error!=null?(w.error>0?"+":"")+w.error+" ("+w.pct+"%)":""}</td><td>${w.confirm!=null&&w.best?`<button class="btn sm" data-h="${h}" data-c="${w.confirm}">Use</button>`:""}</td></tr>`).join("")+"</table>";}
-  body+=`<p class="muted" style="margin-top:10px">Choose by the closest row. "Use" turns on exits confirm at that delay for the hub (step 2). If the model rows are closer than colour, keep the model on (step 3); if colour alone is closer, turn it off.</p>`;
-  const p=modal("Test result",body,[{label:"OK",cls:"primary"}]);
+/* The one hand-count check (HubController.check_recording): the counting
+   methods, then the calibration. "Use" / "Apply" appear only where the
+   change beats the current setting by more than a couple of balls; fitting
+   one recording otherwise just overfits it. */
+async function showCheck(r){const t=r.test,cal=r.calibration;
+  let body=`<p class="muted">${esc(t.video.split(/[\/\\]/).pop())} · ${esc(t.camera)} · ${t.seconds} s</p>`;
+  for(const[h,x]of Object.entries(t.hubs)){body+=`<h3 style="margin:12px 0 6px">${h.toUpperCase()} hub${x.hand!=null?` — ${x.hand} by hand`:" — not counted by hand"}</h3><table class="tbl"><tr><th>Counting</th><th>Count</th><th>Off by</th><th></th></tr>`+
+    x.rows.map(w=>`<tr${w.best?' style="background:rgba(34,197,94,.12)"':""}><td>${esc(w.label)}${w.current?" <span class='muted'>(current)</span>":""}${w.best?" <b>← closest</b>":""}</td><td class="tnum">${w.count}</td><td class="tnum">${w.error!=null?(w.error>0?"+":"")+w.error+" ("+w.pct+"%)":""}</td><td>${w.confirm!=null&&w.best&&w.worth?`<button class="btn sm" data-h="${h}" data-c="${w.confirm}">Use</button>`:""}</td></tr>`).join("")+"</table>";
+    const b=x.rows.find(w=>w.best);
+    if(b&&!b.current&&!b.worth)body+=`<p class="muted" style="margin:6px 0 0">The closest is within a couple of balls of the current setting: keep the current one.</p>`;
+    else if(b&&b.worth&&b.confirm==null){const exits=x.rows.some(w=>w.label==="exit line");
+      body+=`<p class="muted" style="margin:6px 0 0">${!exits&&b.label==="outline, colour"?"Colour alone was clearly closer: turn the fuel model off (step 3) if a second recording agrees.":
+        !exits&&b.label==="outline, model only"?"The model alone was clearly closer: raise the model's share (step 3) if a second recording agrees.":
+        `“${esc(b.label)}” was clearly closer than the current setting. Change step 2 or 3 to match only if a second recording agrees.`}</p>`;}}
+  if(cal){const same=cal.current_error!=null&&!cal.worth;
+    body+=`<h3 style="margin:14px 0 6px">Calibration (colour)</h3><p>Best: blur <b>${cal.blur}</b>, ignore still yellow <b>${cal.remove_static?"on":"off"}</b> — off by ${cal.error} in all against ${cal.current_error!=null?cal.current_error+" now":"the current setting"}.</p>`+
+      (same?`<p class="muted">Not clearly better than the current setting: keep it.</p>`:`<div class="row"><button class="btn sm primary" id="calapply">Apply blur ${cal.blur}${cal.remove_static?", ignore still yellow":""}</button></div>`)+
+      `<p class="muted" style="margin-top:6px">Fitted to one recording. Check it on a second one before trusting it.</p>`;}
+  const p=modal("Check result",body,[{label:"OK",cls:"primary"}]);
   document.querySelectorAll("#mBody button[data-c]").forEach(b=>b.onclick=async()=>{await api("confirm",{hub:b.dataset.h,seconds:Number(b.dataset.c)});toast(`${b.dataset.h}: exits confirm after ${b.dataset.c} s`);closeModal(null);refresh();});
+  const ca=$("calapply");if(ca)ca.onclick=async()=>{await api("apply_calibration",{camera:cal.camera,blur:cal.blur,remove_static:cal.remove_static});toast("Calibration applied");closeModal(null);refresh();};
   await p;}
 function setConfirm(hub,v){api("confirm",{hub,seconds:Number(v)||0}).then(refresh);}
 async function addWireless(){
@@ -716,7 +776,7 @@ async function save(){let p=null;if(!S.path){p=await ask("Save setup","File name
   await api("save",{path:p});savedCfg=JSON.stringify(S.cfg);toast("Setup saved");refresh();}
 async function openSetup(){const p=await ask("Open setup","Setup file",S&&S.path||"cams.json");if(p){await api("load",{path:p});cur=null;lastPic="";savedCfg=null;refresh();}}
 async function pickFile(mode,path=""){pickMode=mode;const L=await(await fetch("/api/ls?path="+encodeURIComponent(path))).json();
-  const title=mode==="add"?"Add a recording":mode==="model"?"Pick the fuel model":mode==="test"?"Pick the recording to test":"Pick the hand-counted recording";
+  const title=mode==="add"?"Add a recording":mode==="model"?"Pick the fuel model":mode==="test"?"Pick the recording to check":"Pick the hand-counted recording";
   const files=mode==="model"?(L.models||[]):L.videos;
   let body=`<div class="crumbs">${esc(L.path)}${L.error?" — "+esc(L.error):""}</div><div class="pick">`+
     `<div class="item" data-d="${esc(L.parent)}"><span class="icon"><svg><use href="#i-up"/></svg></span><span class="t">Up one folder</span></div>`+
@@ -731,10 +791,11 @@ async function chose(p){if(pickMode==="model"){setModel(p);return;}
   if(pickMode==="add"){try{const c=await api("add_camera",{source:p});cur=c.name;lastPic="";grab();}catch(e){}return;}
   const c=cam();if(!c)return;const hubs=[...new Set(c.zones.map(z=>z.hub))];
   const body=`<p>How many balls went into each hub in this recording, counted by hand?</p>`+hubs.map(h=>`<label class="field" style="margin-top:8px"><span>${h.toUpperCase()} hub</span><input class="input" type="number" min="0" id="hand_${h}"></label>`).join("");
-  const test=pickMode==="test";
-  const ok=await modal("Hand count",body+(test?`<p class="muted" style="margin-top:10px">Uses the outlines, exit lines and model of the camera selected in step 1 (${esc(c.name)}): pick a recording made by that camera.</p>`:""),[{label:"Cancel",value:false},{label:test?"Test":"Calibrate",cls:"primary",value:true}]);if(!ok)return;
-  const hand={};for(const h of hubs)hand[h]=parseInt($("hand_"+h).value,10)||0;
-  if(test)api("test_recording",{camera:cur,video:p,hand});else api("calibrate",{camera:cur,video:p,hand});}
+  const ok=await modal("Hand count",body+`<p class="muted" style="margin-top:10px">Uses the outlines, exit lines and model of the camera selected in step 1 (${esc(c.name)}): pick a recording made by that camera. Leave a hub empty if you did not count it. It plays the recording up to three times (every way of counting, then the calibration), so a few minutes of video takes a few minutes.</p>`,[{label:"Cancel",value:false},{label:"Check",cls:"primary",value:true}]);if(!ok)return;
+  // a hub left empty is left out, not counted as 0 balls
+  const hand={};for(const h of hubs){const x=$("hand_"+h).value.trim();if(x!=="")hand[h]=parseInt(x,10);}
+  if(!Object.keys(hand).length){toast("Type the hand count for at least one hub","warn");return;}
+  api("check_recording",{camera:cur,video:p,hand}).catch(()=>{});}
 (function loop(){refresh().finally(()=>setTimeout(loop,S&&S.running?250:700));})();
 </script>
 </body>

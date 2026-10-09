@@ -266,12 +266,20 @@ def make_handler(ctl: HubController, allow_remote: bool = False,
             action = path.rsplit("/", 1)[-1]
             if share is not None and action in HOST_ONLY:
                 return self._json({"error": "only the counting computer can do that"}, 403)
+            if action not in ACTIONS:
+                return self._json({"error": f"unknown: {action}"}, 404)
             try:
                 result = ACTIONS[action](ctl, body)
+            # KeyError: a camera renamed or removed in another tab, or a field
+            # missing from the request. It used to read "unknown: 'no camera'"
+            # with a 404, and anything else (a TypeError) dropped the
+            # connection with no reply, so the page's toast said nothing.
             except KeyError as e:
-                return self._json({"error": f"unknown: {e}"}, 404)
-            except (ValueError, OSError) as e:
+                return self._json({"error": str(e.args[0]) if e.args else "missing field"}, 400)
+            except (ValueError, OSError, TypeError) as e:
                 return self._json({"error": str(e)}, 400)
+            except Exception as e:
+                return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
             self._json({"ok": True, "result": result})
 
     return Handler
@@ -299,12 +307,18 @@ ACTIONS = {
     "record_start": lambda c, b: c.start_recording(),
     "record_stop": lambda c, b: c.stop_recording(),
     "test_recording": lambda c, b: c.job("test", lambda: c.test_recording(
-        b["camera"], b["video"], {k: int(v) for k, v in b["hand"].items() if str(v).strip()})),
+        b["camera"], b["video"], b.get("hand") or {})),
+    # The one hand-count check (test + calibration), and applying its picks.
+    "check_recording": lambda c, b: c.job("check", lambda: c.check_recording(
+        b["camera"], b["video"], b.get("hand") or {})),
+    "grab_all": lambda c, b: c.job("pictures", c.grab_all),
+    "reference": lambda c, b: c.set_reference(b["camera"]),
+    "shift_zones": lambda c, b: c.shift_zones(b["camera"], b["dx"], b["dy"]),
     "grab": lambda c, b: c.job("picture", lambda: (c.grab(b["camera"], _at(b)), None)[1]),
     "measure": lambda c, b: c.job("measure", lambda: c.measure(b["camera"])),
     "find_cameras": lambda c, b: c.job("find cameras", probe_cameras),
     "calibrate": lambda c, b: c.job("calibrate", lambda: c.calibrate(
-        b["camera"], b["video"], {k: int(v) for k, v in b["hand"].items()})),
+        b["camera"], b["video"], b.get("hand") or {})),
     "apply_calibration": lambda c, b: c.update_camera(
         b["camera"], {"blur": b["blur"], "remove_static": b["remove_static"]}),
     "start": lambda c, b: c.start(b.get("target", ""), bool(b.get("practice")),

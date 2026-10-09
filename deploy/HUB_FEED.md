@@ -151,16 +151,33 @@ right-hand side:
    hub's opening on the picture; double-click, right-click or Enter to
    finish, Esc to cancel. A camera can have several outlines; choose how each
    hub combines them (sum / max / median, see below).
+   Once the ball is measured, four ball widths hang below the pointer while
+   drawing: put the pointer where the top corner goes and the hood should
+   sit between the 3rd and 4th ball. *Combine by* appears only for a hub
+   with more than one outline; exit lines are under *Exit line (untested)*.
 3. **Measure ball** with a few balls sitting apart near the hub (5 s).
-4. **Calibrate (optional)**: pick a recording from this camera, type how
-   many balls you counted going into each hub, and it tries every blur
-   correction with and without ignoring still yellow, and offers the setting
-   nearest your count.
-5. **START.** The picture turns live, with each outline's count on it; the
+4. **START.** The picture turns live, with each outline's count on it; the
    big boxes are what bioarena is being sent; the line beside them says
    whether bioarena is answering and each camera's frame rate, and turns red
    with *NO PICTURE* if a camera stops. Tick *Practice: send to a test
    receiver here* to try it all without bioarena.
+5. **Test.** *Check a recording against a hand count* (record one in this
+   step while counting) plays it with every way of counting and every
+   blur / still-yellow setting, and offers a change only where it beats the
+   current setting by more than 2 balls or 5% of the hand count. Leave a hub
+   you did not count empty.
+
+**Camera moved?** Each camera keeps a small grey copy of the picture its
+outlines were drawn on (`"reference"` in cams.json, `tbavid/camcheck.py`).
+Opening a setup fetches every camera's picture and compares it; so does
+*Refresh picture*, and a running counter every 10 s. A camera shifted by
+more than half a ball shows **Camera moved** and a button that moves the
+outlines by the measured amount (a shift only; a turned or zoomed camera
+needs new outlines). *Different picture* means camera numbers swapped or
+the camera turned far; *Picture size changed* means redraw and re-measure.
+*The outlines fit -- keep this picture* takes the current picture as the
+new reference. Measured on test scenes: shifts within 1-3 px, through a
+40% light change and noise; not yet on a real venue camera.
 
 **Wireless cameras.** Three ways:
 
@@ -345,7 +362,7 @@ chute, where it may count more than the outline and then wins.
 ## Practice field: outline + exit line test (for 2026-10-09)
 
 **All of this is in the app: step 5, Test** (Hub Counter, or Watchtower's
-Hub cameras tab). *Record* saves each camera while counting; *Test a
+Hub cameras tab). *Record* saves each camera while counting; *Check a
 recording against a hand count* prints the table below with the closest
 way of counting marked and a *Use* button for exits-confirm; *Ball test*
 is the spec's 20-ball acceptance; *Speed* checks the latency budget. The
