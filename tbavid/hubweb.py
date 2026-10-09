@@ -267,6 +267,8 @@ def make_handler(ctl: HubController, allow_remote: bool = False,
             if share is not None and action in HOST_ONLY:
                 return self._json({"error": "only the counting computer can do that"}, 403)
             try:
+                if action in EDITS:
+                    ctl.editable()
                 result = ACTIONS[action](ctl, body)
             except KeyError as e:
                 return self._json({"error": f"unknown: {e}"}, 404)
@@ -281,6 +283,12 @@ def _at(body) -> Optional[float]:
     v = body.get("at")
     return float(v) if v not in (None, "") else None
 
+
+# What changes the setup: refused while counting until the page unlocks it
+# (HubController.locked), from this computer and from a shared phone alike.
+EDITS = {"add_camera", "remove_camera", "apply_preset", "delete_preset",
+         "update_camera", "add_zone", "delete_zone", "combine", "confirm",
+         "apply_calibration", "load"}
 
 ACTIONS = {
     "add_camera": lambda c, b: c.add_camera(b.get("source", ""), b.get("name", "")),
@@ -312,6 +320,7 @@ ACTIONS = {
                                   bool(b.get("log", True)),
                                   int(b.get("partner_port") or 0)),
     "stop": lambda c, b: c.stop(),
+    "lock": lambda c, b: c.set_lock(bool(b.get("on", True))),
     "save": lambda c, b: c.save(b.get("path") or None),
     "quit": lambda c, b: c.quit(),
     # One-click update (the Hub Counter app sets c.updater; tbavid/appupdate.py).

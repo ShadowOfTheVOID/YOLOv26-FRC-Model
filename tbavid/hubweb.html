@@ -363,6 +363,8 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <div style="margin-top:10px">
         <button class="go" id="start" onclick="start()">START</button>
         <button class="go stop" id="stop" onclick="stop()" style="display:none">STOP</button>
+        <button class="btn" id="lockbtn" onclick="toggleLock()" style="display:none;margin-top:8px"></button>
+        <p class="muted" id="lockhint" style="margin:6px 0 0;display:none"></p>
       </div>
     </section>
 
@@ -453,7 +455,10 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   if(!document.activeElement||!document.activeElement.closest(".step"))fillForm();
   for(const h of["red","blue"]){const e=$("confirm_"+h);if(e&&document.activeElement!==e)e.value=(S.cfg.confirm||{})[h]||"";}
   document.querySelectorAll(".seg").forEach(g=>{const v=S.cfg.combine[g.dataset.hub]||"sum";g.querySelectorAll("button").forEach(b=>b.className=b.textContent===v?"on":"");});
-  $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";}
+  $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";
+  $("lockbtn").style.display=$("lockhint").style.display=S.running?"":"none";
+  $("lockbtn").textContent=S.locked?"Unlock the setup":"Lock the setup";
+  $("lockhint").textContent=S.locked?"Setup locked while counting: outlines, cameras and settings cannot be changed by a stray click.":"Setup unlocked: changes apply at the next Start.";}
 function fillForm(){const c=cam();if(!c)return;for(const k of["name","source","fps","size","ball_area"])$("f_"+k).value=c[k]||"";
   $("f_blur").value=c.blur||0;$("blurv").textContent=(+c.blur||0).toFixed(1);$("f_remove_static").checked=!!c.remove_static;
   renderModel();const m=c.model;if(m){$("f_model_weight").value=m.weight;$("mwv").textContent=(+m.weight).toFixed(1);}
@@ -541,10 +546,13 @@ async function installUpdate(){if(!confirm("Update now? The app closes, installs
 function renderLive(){const v=S.live,F=fieldName();
   for(const h of["red","blue"]){const e=$(h);if(v.counts[h]!==lastCounts[h]){e.textContent=v.counts[h];e.classList.remove("bump");void e.offsetWidth;if(v.counts[h]>lastCounts[h])e.classList.add("bump");lastCounts[h]=v.counts[h];}}
   if(!S.running)setStatus("","Stopped",S.problems.length?S.problems[0]:`Ready. Press Start to send counts to ${F}.`);
+  else if(v.restarting)setStatus("bad","Restarting the counter",`It stopped by itself (${v.restarting}). Counts are kept; ${F} shows OFFLINE until it is back.`);
+  else if(v.partner&&!v.partner.online)setStatus("bad","Partner box OFFLINE",`Nothing from the partner box for over 1 s — ${F} shows the feed OFFLINE. Check that box is counting and sends to ${S.this_ip}:${v.partner.port}.`);
   else if(v.stale.length)setStatus("bad","No picture",`${v.stale.join(", ")} stopped sending frames — ${F} shows it OFFLINE.`);
   else if((v.model_off||[]).length)setStatus("warn","Fuel model turned off",v.model_off.join(", ")+" — too slow to keep up, so it was dropped for this run. Counting by colour only.");
   else if(modelBehind(v).length)setStatus("warn","Model falling behind",modelBehind(v).join(", ")+" — the model is skipping frames, so its half of the count runs low. Use Apple silicon or a GPU, or turn the model off.");
   else if(Object.keys(v.slow||{}).length)setStatus("warn","Camera too slow",Object.entries(v.slow).map(([n,f])=>`${n} ${Math.round(f)} fps`).join(", ")+" — counts run low under 30 fps. Add light or lower the resolution.");
+  else if(Object.values(v.check||{}).some(c=>c.warn))setStatus("warn","Check the cameras",Object.entries(v.check).filter(([h,c])=>c.warn).map(([h,c])=>`${h}: exits ${c.exit} against outline ${c.due}`).join(", ")+" — one of the two is losing balls. Still counting.");
   else if(v.linked){const r=v.reply||{};const delayed=Object.values(S.kinds).includes("stream");
     // a Wi-Fi camera is not flagged here: its delay is small and shown as fps
     const parts=[(r.match_state||"").replace(/_/g," ").toLowerCase(),r.shift||"",`${v.rtt_ms} ms`].filter(Boolean);
@@ -694,7 +702,9 @@ async function addStream(){
 async function removeCam(name){if(await confirmBox("Remove camera",`Remove <b>${esc(name)}</b> and its outlines?`,"Remove")){await api("remove_camera",{name});if(cur===name)cur=null;lastPic="";refresh();}}
 async function start(){try{await api("start",{target:$("target").value,practice:$("practice").checked,realtime:$("realtime").checked,log:$("csv").checked,partner_port:$("partner").checked?Number($("partner_port").value)||8412:0});
   hint(`Running. Leave it on across matches — ${fieldName()} marks each match's start itself.`);}catch(e){}}
-function stop(){api("stop");hint("");}
+async function stop(){if(!await confirmBox("Stop counting",`Counting stops and ${fieldName()} shows the feed OFFLINE until you press Start again.`,"Stop"))return;api("stop");hint("");}
+async function toggleLock(){if(S.locked&&!await confirmBox("Unlock the setup","Changes do not reach the running count; they apply at the next Start. Unlock?","Unlock"))return;
+  try{await api("lock",{on:!S.locked});}catch(e){}refresh();}
 function renderPartnerHint(){const on=$("partner").checked;$("partnerbox").style.display=on?"":"none";
   $("partnerhint").innerHTML=`On the partner box (the other hub's camera), set <b>Send counts to</b> <code>${esc((S&&S.this_ip)||"this box's IP")}:${esc($("partner_port").value||"8412")}</code> and press Start there. This box sends both hubs to bioarena; if the partner goes quiet for 1 s, bioarena shows OFFLINE.`;}
 async function shareDialog(){

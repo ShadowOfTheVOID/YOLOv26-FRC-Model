@@ -322,6 +322,15 @@ class HubController:
         self.sender = None
         self.monitor: Dict = {}
         self.stop_evt: Optional[threading.Event] = None
+        # Set only by stop()/quit(): run() also sets stop_evt when a camera
+        # or the model fails, and that is what restarts, not what ends.
+        self.user_stop: Optional[threading.Event] = None
+        self.restarts = 0
+        self.restarting: Optional[str] = None    # why, while waiting to
+        # Editing the setup is refused while counting until unlocked: a
+        # click on the wrong outline mid-match is a setup that the next
+        # Start (or a restart) silently counts with.
+        self.locked = True
         self.listen_stop: Optional[threading.Event] = None
         self.feed_target = ""
         # What the page's address box starts with. The Watchtower app sets
@@ -749,17 +758,62 @@ class HubController:
             if rec is not None:
                 rec.offer(frame)
 
+        # A camera unplugged, a USB hub browning out, a bug in a counter:
+        # run() returns (or raises) and, before this, counting stayed
+        # stopped until someone noticed and pressed Start -- bioarena
+        # showing OFFLINE for the rest of the match. Restart it instead,
+        # with the same sender: the session and counts carry on (run()
+        # only ever adds to sender.counts), and the heartbeat is held while
+        # it is down, so bioarena sees OFFLINE for the gap, never a wrong
+        # count. Recordings end on their own; those are not restarted.
+        restart = not all(source_kind(c.source) == "file" for c in setup.cameras)
+        self.user_stop = user_stop = threading.Event()
+        self.restarts = 0
+        self.restarting = None
+        self.locked = True
+
         def work():
+            from .keepawake import hold
+            release, note = hold()       # on this thread: Windows needs that
+            self.say(note)
+            delay = RESTART_FIRST_S
             try:
-                hubcount.run(self.sender, setup, realtime=realtime,
-                             log_path=log_path, out=self.say, stop=self.stop_evt,
-                             on_frame=on_frame, monitor=self.monitor, relay=relay)
-            except Exception as e:
-                self.say(f"error: {e}")
+                while True:
+                    began = time.monotonic()
+                    why = "it stopped"
+                    try:
+                        hubcount.run(self.sender, setup, realtime=realtime,
+                                     log_path=log_path, out=self.say, stop=self.stop_evt,
+                                     on_frame=on_frame, monitor=self.monitor, relay=relay)
+                        errs = self.monitor.get("errors") or []
+                        if errs:
+                            why = errs[-1]
+                    except Exception as e:
+                        why = f"error: {e}"
+                        self.say(why)
+                    if user_stop.is_set() or not restart:
+                        break
+                    if time.monotonic() - began > RESTART_RESET_S:
+                        delay = RESTART_FIRST_S
+                    with self.lock:
+                        self.restarts += 1
+                        self.restarting = why
+                    self.say(f"counting stopped by itself ({why}) -- restarting in "
+                             f"{delay:g} s, counts kept (restart {self.restarts})")
+                    if user_stop.wait(delay):
+                        break
+                    delay = min(delay * 2, RESTART_MAX_S)
+                    with self.lock:
+                        if user_stop.is_set():
+                            break
+                        self.stop_evt = threading.Event()
+                        self.restarting = None
             finally:
+                release()
                 self.stop_recording()
                 with self.lock:
                     self.running = False
+                    self.restarting = None
                     self.live_frames.clear()
                     self.ball_test = None
                 if self.listen_stop:
@@ -778,8 +832,25 @@ class HubController:
         threading.Thread(target=work, daemon=True).start()
 
     def stop(self) -> None:
-        if self.stop_evt:
-            self.stop_evt.set()
+        with self.lock:
+            if self.user_stop:
+                self.user_stop.set()
+            if self.stop_evt:
+                self.stop_evt.set()
+
+    def set_lock(self, on: bool) -> bool:
+        with self.lock:
+            self.locked = bool(on)
+        self.say("setup locked while counting" if on else
+                 "setup UNLOCKED: changes apply at the next Start")
+        return self.locked
+
+    def editable(self) -> None:
+        """Raise if the setup is locked: counting, and not unlocked."""
+        with self.lock:
+            if self.running and self.locked:
+                raise ValueError("The setup is locked while counting. Unlock it "
+                                 "first (changes apply at the next Start).")
 
     # -- tests the page can run (the practice field, 2026-10-09) ---------------
     def start_ball_test(self) -> Dict:
@@ -889,6 +960,7 @@ class HubController:
                         for n, f in {**self.frames, **self.live_frames}.items()}
         kinds = {c["name"]: source_kind(c["source"]) for c in cfg["cameras"]}
         out = {"cfg": cfg, "path": self.path, "running": running, "job": job,
+               "locked": running and self.locked,
                "kinds": kinds, "stream_warning": STREAM_WARNING,
                "wireless_warning": WIRELESS_WARNING,
                "problems": problems(cfg), "pictures": pictures,
@@ -942,6 +1014,8 @@ class HubController:
         live["partner"] = relay.state() if relay is not None else None
         live["model_behind"] = dict(self.monitor.get("model_dropped") or {})
         live["model_off"] = list(self.monitor.get("model_off") or [])
+        with self.lock:
+            live["restarts"], live["restarting"] = self.restarts, self.restarting
         out["live"] = live
         return out
 
@@ -972,6 +1046,12 @@ class HubController:
                           bool(getattr(self, "practice", False)),
                           slow_cameras(health) if running else {})
 
+
+# Restarting after counting stops by itself: 1 s, then doubling to 10 s;
+# back to 1 s once a run has lasted a minute.
+RESTART_FIRST_S = 1.0
+RESTART_MAX_S = 10.0
+RESTART_RESET_S = 60.0
 
 BOARD_REPLY_KEYS = ("match_state", "match_time_s", "shift", "hub_active",
                     "match_count", "credited", "auto_count")

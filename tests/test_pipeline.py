@@ -4543,6 +4543,117 @@ def test_two_boxes_one_feed():
           sent[-1]["session"] == "main" and sent[-1]["red"] == 4 and sent[-1]["blue"] == 6)
 
 
+def test_counter_keeps_going_on_match_day():
+    """Counting that stops by itself restarts with the same session and
+    counts; the setup is locked while counting; the machine is held awake.
+    Before, a camera unplugged mid-match stopped counting until someone
+    pressed Start, and bioarena showed OFFLINE for the rest of the match."""
+    import json
+    import os
+    import shutil as _sh
+    import time
+    from tbavid import hubapp, hubcount, hubweb, keepawake
+    from tbavid.hubapp import HubController
+
+    sq = [[100, 100], [200, 100], [200, 200], [100, 200]]
+    cfg = {"cameras": [{"name": "cam0", "source": "0", "ball_area": 300,
+                        "zones": [{"hub": "red", "outline": sq, "name": "o"}]}]}
+    calls, held = [], []
+
+    def fake_run(sender, setup, stop=None, monitor=None, **k):
+        calls.append(stop)
+        monitor.update(errors=[])
+        sender.score("red", 2, time.monotonic())
+        if len(calls) == 1:
+            raise RuntimeError("usb hub browned out")
+        if len(calls) == 2:
+            monitor["errors"] = ["cam0 (0): the source stopped giving frames"]
+            stop.set()
+            return
+        stop.wait(5)
+
+    def fake_hold(why="counting fuel"):
+        held.append("hold")
+        return (lambda: held.append("release")), "keeping the computer awake"
+
+    real = (hubcount.run, keepawake.hold, hubapp.RESTART_FIRST_S)
+    hubcount.run, keepawake.hold, hubapp.RESTART_FIRST_S = fake_run, fake_hold, 0.05
+
+    def wait_for(cond, s=5.0):
+        end = time.monotonic() + s
+        while time.monotonic() < end and not cond():
+            time.sleep(0.01)
+        return cond()
+    try:
+        ctl = HubController()
+        ctl.cfg = json.loads(json.dumps(cfg))
+        ctl.start("127.0.0.1:9", log_csv=False)
+        session = ctl.sender.session
+        check("a crash and a lost camera are both restarted",
+              wait_for(lambda: len(calls) == 3))
+        check("each restart runs on a fresh stop event", len({id(e) for e in calls}) == 3)
+        check("same session, counts carried on across restarts",
+              ctl.sender.session == session and ctl.sender.counts["red"] == 6)
+        live = ctl.state()["live"]
+        check("the page sees the restarts", live["restarts"] == 2 and live["restarting"] is None)
+        check("why it restarted is in the log",
+              any("usb hub browned out" in m[2] for m in ctl.messages_since(0))
+              and any("stopped giving frames" in m[2] and "restarting" in m[2]
+                      for m in ctl.messages_since(0)))
+        check("the machine is held awake while counting", held == ["hold"])
+
+        check("the setup is locked while counting", ctl.state()["locked"] is True)
+        try:
+            ctl.editable()
+            check("an edit is refused while locked", False)
+        except ValueError:
+            check("an edit is refused while locked", True)
+        check("every setup edit the page can make is behind the lock",
+              {"update_camera", "add_zone", "delete_zone", "remove_camera", "load",
+               "confirm", "combine"} <= hubweb.EDITS and hubweb.EDITS <= set(hubweb.ACTIONS)
+              and "lock" in hubweb.ACTIONS)
+        hubweb.ACTIONS["lock"](ctl, {"on": False})
+        ctl.editable()
+        check("unlocked, edits go through", ctl.state()["locked"] is False)
+
+        ctl.stop()
+        check("Stop ends it for good", wait_for(lambda: not ctl.running))
+        time.sleep(0.2)
+        check("no restart after Stop", len(calls) == 3)
+        check("let go of the machine when stopped", held == ["hold", "release"])
+        check("stopped, the setup is editable again",
+              ctl.state()["locked"] is False and ctl.editable() is None)
+
+        # A recording that ends is finished, not failed: not restarted.
+        calls.clear()
+        rec = HubController()
+        rec.cfg = json.loads(json.dumps(cfg))
+        rec.cfg["cameras"][0]["source"] = "match.mp4"
+        hubcount.run = lambda sender, setup, stop=None, monitor=None, **k: calls.append(1)
+        rec.start("127.0.0.1:9", log_csv=False)
+        check("a recording that ends is not restarted",
+              wait_for(lambda: not rec.running) and calls == [1])
+    finally:
+        hubcount.run, keepawake.hold, hubapp.RESTART_FIRST_S = real
+
+    which = _sh.which
+    try:
+        _sh.which = lambda n: "/usr/bin/" + n
+        mac = keepawake._command("x", "darwin")
+        lin = keepawake._command("x", "linux")
+        _sh.which = lambda n: None
+        none = keepawake._command("x", "linux")
+    finally:
+        _sh.which = which
+    check("Mac: caffeinate tied to our pid; Linux: systemd-inhibit; else nothing",
+          mac[:2] == ["caffeinate", "-di"] and mac[-1] == str(os.getpid())
+          and lin[0] == "systemd-inhibit" and "--what=idle:sleep" in lin and none is None)
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    check("the page has the lock, asks before Stop, and says when a partner is OFFLINE",
+          'id="lockbtn"' in page and '"Stop counting"' in page
+          and "Partner box OFFLINE" in page and "Restarting the counter" in page)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -4567,7 +4678,8 @@ def main() -> int:
                test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
                test_watchtower_home_api, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
-               test_app_tests, test_two_boxes_one_feed):
+               test_app_tests, test_two_boxes_one_feed,
+               test_counter_keeps_going_on_match_day):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
