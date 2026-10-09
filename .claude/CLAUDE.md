@@ -318,6 +318,11 @@ high-water of exits + outline entries in the last s seconds), OFF by default;
 `run.py hubcount --hand red=N` is the practice-field test (2026-10-09 plan in
 HUB_FEED.md "Practice field"). On broadcasts the exits are blind, so confirm
 is useless there (CV 37/106 of 159/810).
+Match-day safety (Unreleased, after v0.5.4): HubController.start's worker
+restarts hubcount.run when it stops by itself (same sender, so session and
+counts carry on; recordings are not restarted; user_stop vs stop_evt), the
+setup is locked while counting (hubweb.EDITS refused via ctl.editable()),
+and tbavid/keepawake.py holds the machine awake from the counting thread.
 Page step 5 "Test" (v0.5.4; v0.5.3 was tagged before it merged): ball test (HubController.start/check_ball_test,
 baseline of sender.counts), speed (hubcount.latency_summary over run()'s
 monitor["latency"], spec 80/200 ms), Record (hubapp.Recorder, mp4v on its own

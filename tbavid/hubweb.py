@@ -269,6 +269,8 @@ def make_handler(ctl: HubController, allow_remote: bool = False,
             if action not in ACTIONS:
                 return self._json({"error": f"unknown: {action}"}, 404)
             try:
+                if action in EDITS:
+                    ctl.editable()
                 result = ACTIONS[action](ctl, body)
             # KeyError: a camera renamed or removed in another tab, or a field
             # missing from the request. It used to read "unknown: 'no camera'"
@@ -289,6 +291,14 @@ def _at(body) -> Optional[float]:
     v = body.get("at")
     return float(v) if v not in (None, "") else None
 
+
+# What changes the setup: refused while counting until the page unlocks it
+# (HubController.locked), from this computer and from a shared phone alike.
+EDITS = {"add_camera", "remove_camera", "apply_preset", "delete_preset",
+         "update_camera", "add_zone", "delete_zone", "combine", "confirm",
+         "apply_calibration", "load",
+         # camcheck: moving the outlines, or taking a new reference picture
+         "shift_zones", "reference"}
 
 ACTIONS = {
     "add_camera": lambda c, b: c.add_camera(b.get("source", ""), b.get("name", "")),
@@ -326,6 +336,7 @@ ACTIONS = {
                                   bool(b.get("log", True)),
                                   int(b.get("partner_port") or 0)),
     "stop": lambda c, b: c.stop(),
+    "lock": lambda c, b: c.set_lock(bool(b.get("on", True))),
     "save": lambda c, b: c.save(b.get("path") or None),
     "quit": lambda c, b: c.quit(),
     # One-click update (the Hub Counter app sets c.updater; tbavid/appupdate.py).
