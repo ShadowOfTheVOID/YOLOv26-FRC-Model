@@ -4495,6 +4495,216 @@ def test_app_tests():
                "test_recording", "confirm")))
 
 
+def test_hub_setup_streamlined():
+    """Setup and calibration made shorter (2026-10-09), and the bugs found
+    on the way: a camera that would not open locked every later job, a hub
+    left empty in a hand count was fitted as 0 balls, and the recording test
+    ran a calibrated blur 0 as 0.3."""
+    import json
+    import os
+    import threading
+    import time
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from tbavid import camcheck as K
+    from tbavid import hubapp as A
+    from tbavid import hubweb as W
+    from tbavid.hubcount import RULES, setup_from_dict, setup_to_dict
+
+    # -- camcheck: the shift, a different view, a new size --------------------
+    rng = np.random.default_rng(7)
+    world = np.full((900, 1500, 3), 90, np.uint8)
+    for _ in range(80):
+        x, y = int(rng.integers(0, 1400)), int(rng.integers(0, 800))
+        world[y:y + int(rng.integers(20, 160)), x:x + int(rng.integers(20, 160))] = rng.integers(0, 255, 3)
+
+    def view(dx=0, dy=0, src=world):
+        # the scene as a camera moved so that it appears dx, dy further on
+        return src[100 - dy:820 - dy, 100 - dx:1380 - dx].copy()
+    ref = K.make_reference(view())
+    check("the reference is small enough to live in cams.json",
+          ref["w"] == 1280 and ref["h"] == 720 and ref["tw"] == 160 and len(ref["grey"]) < 30000)
+    same = K.compare(ref, view())
+    check("the same picture fits", same["status"] == "ok" and same["similarity"] > 0.9)
+    m = K.compare(ref, view(40, -25), ball_area=700)
+    check("a camera moved 40, -25 px is caught, and by how much (within 3 px)",
+          m["status"] == "moved" and abs(m["dx"] - 40) <= 3 and abs(m["dy"] + 25) <= 3)
+    small = K.compare(ref, view(6, 0), ball_area=700)
+    check("6 px (under half a 30 px ball) is not a move", small["status"] == "ok")
+    dim = np.clip(view(-30, 0) * 0.6 + rng.normal(0, 8, (720, 1280, 3)), 0, 255).astype(np.uint8)
+    d = K.compare(ref, dim, ball_area=700)
+    check("dimmer light and noise still measure the move",
+          d["status"] == "moved" and abs(d["dx"] + 30) <= 3)
+    other = np.full_like(world, 90)
+    for _ in range(80):
+        x, y = int(rng.integers(0, 1400)), int(rng.integers(0, 800))
+        other[y:y + int(rng.integers(20, 160)), x:x + int(rng.integers(20, 160))] = rng.integers(0, 255, 3)
+    check("another camera's picture is not taken for a move",
+          K.compare(ref, view(src=other))["status"] == "different")
+    check("a new picture size says so",
+          K.compare(ref, np.zeros((480, 640, 3), np.uint8))["status"] == "size")
+    check("no reference, no verdict", K.compare(None, view()) is None)
+
+    # -- the reference is kept with the setup -----------------------------------
+    cfg = {"rules": RULES, "cameras": [{"name": "c", "source": "0", "ball_area": 700,
+           "reference": ref, "zones": [{"hub": "red", "outline": [[0, 0], [9, 0], [9, 9]]}]}]}
+    check("a setup file keeps the reference through load and save",
+          setup_to_dict(setup_from_dict(cfg))["cameras"][0]["reference"] == ref)
+
+    # -- the controller: draw, move, shift back ---------------------------------
+    ctl = A.HubController()
+    ctl.add_camera("0")
+    ctl.frames["cam0"] = view()
+    ctl.update_camera("cam0", {"ball_area": 700})
+    ctl.add_zone("cam0", "red", [[400, 300], [600, 300], [600, 420], [400, 420]])
+    st = ctl.state()
+    check("drawing an outline keeps the picture it was drawn on",
+          ctl.camera("cam0").get("reference") and st["cfg"]["cameras"][0]["has_reference"]
+          and "reference" not in st["cfg"]["cameras"][0])
+    ctl.frames["cam0"] = view(40, -25)
+    r = ctl.check_alignment("cam0")
+    st = ctl.state()
+    check("a moved camera shows on the page, in words",
+          r["status"] == "moved" and st["alignment"]["cam0"]["status"] == "moved"
+          and "moved" in st["alignment"]["cam0"]["words"])
+    ctl.shift_zones("cam0", r["dx"], r["dy"])
+    pts = ctl.camera("cam0")["zones"][0]["outline"]
+    check("Move the outlines shifts every corner by the measured amount",
+          abs(pts[0][0] - 440) <= 3 and abs(pts[0][1] - 275) <= 3)
+    check("... and the moved picture is the new reference",
+          ctl.check_alignment("cam0")["status"] == "ok")
+    ctl.add_camera(os.path.abspath(__file__))
+    check("a recording is never checked (its picture changes with every cut)",
+          ctl.check_alignment("test_pipeline") is None)
+    ctl.delete_zone("cam0", ctl.camera("cam0")["zones"][0]["name"])
+    check("deleting the last outline drops the reference",
+          "reference" not in ctl.camera("cam0") and "cam0" not in ctl.alignment)
+
+    # -- a job that raises SystemExit (open_source) ends, and frees the queue ----
+    ctl.job("picture", lambda: (_ for _ in ()).throw(SystemExit("could not open video source '7'")))
+    for _ in range(50):
+        if not ctl.job_state["running"]:
+            break
+        time.sleep(0.02)
+    check("a camera that will not open ends its job with the reason",
+          not ctl.job_state["running"] and "could not open" in (ctl.job_state["error"] or ""))
+    check("... and the next job runs", ctl.job("measure", lambda: 1))
+    seen = []
+    ctl.grab = lambda name, at=None: (_ for _ in ()).throw(SystemExit("no camera")) if name == "cam0" else seen.append(name)
+    got = A.HubController.grab_all(ctl)
+    check("Refresh all pictures goes on past a camera that will not open",
+          got == ["test_pipeline"] and seen == ["test_pipeline"])
+    del ctl.grab
+
+    # -- hand counts --------------------------------------------------------------
+    check("a hub left empty is left out, not 0",
+          A.clean_hand({"red": "12", "blue": ""}) == {"red": 12})
+    for bad in ({"red": "", "blue": None}, {"red": -1}):
+        try:
+            A.clean_hand(bad)
+            check(f"a hand count of {bad} is refused", False)
+        except ValueError:
+            check(f"a hand count of {bad} is refused", True)
+    check("a change worth making beats the current by more than 2 balls",
+          A.worth_changing(4, 2, 20) is False and A.worth_changing(6, 2, 20) is True
+          and A.worth_changing(-9, 1, 100) is True and A.worth_changing(8, 1, 200) is False)
+
+    # -- the recording test counts with the camera's own blur ---------------------
+    import tbavid.hubcount as H
+    saved = H.hand_test
+    seen_blur = []
+    H.hand_test = lambda setup, cam, video, hand, progress=None: (
+        seen_blur.append(setup.cameras[0].blur) or {"hubs": {}})
+    try:
+        c2 = A.HubController()
+        c2.add_camera("0")
+        c2.update_camera("cam0", {"ball_area": 700, "blur": 0})
+        c2.add_zone("cam0", "red", [[0, 0], [9, 0], [9, 9]])
+        c2.test_recording("cam0", "x.mp4", {"red": 5})
+    finally:
+        H.hand_test = saved
+    check("Test a recording uses blur 0 when the camera is set to 0 (was 0.3)",
+          seen_blur == [0.0])
+
+    # -- the web surface ------------------------------------------------------------
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), W.make_handler(ctl))
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    def post(action, body):
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/{action}",
+                                     data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+    try:
+        code, body = post("update_camera", {"name": "nope", "fields": {}})
+        check("a camera that is not there is a 400 that names it",
+              code == 400 and "nope" in body["error"])
+        code, body = post("no_such_action", {})
+        check("an unknown action is a 404", code == 404)
+        code, body = post("shift_zones", {"camera": "cam0", "dx": "x", "dy": 0})
+        check("a bad number is a 400 with a reason, not a dropped connection",
+              code == 400 and body["error"])
+    finally:
+        httpd.shutdown()
+
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    check("the page calls the new actions and they exist",
+          all(f'"{a}"' in page and a in W.ACTIONS
+              for a in ("check_recording", "grab_all", "shift_zones", "reference")))
+    check("combine and confirm are shown only where they apply",
+          'id="combbox" style="display:none"' in page and "function renderZoneOptions" in page)
+
+    # -- merged with the restarting counter (PR #36) ------------------------------
+    check("moving the outlines and keeping a new reference are behind the lock",
+          {"shift_zones", "reference"} <= W.EDITS)
+    from tbavid import keepawake
+    runs, checked = [], []
+
+    def fake_run(sender, setup, stop=None, monitor=None, **k):
+        runs.append(stop)
+        monitor.update(errors=[])
+        if len(runs) == 1:
+            raise SystemExit("could not open video source '0'")
+        stop.wait(5)
+    real = (H.run, keepawake.hold, A.RESTART_FIRST_S, A.ALIGN_EVERY_S)
+    H.run, keepawake.hold = fake_run, lambda why="": ((lambda: None), "held")
+    A.RESTART_FIRST_S, A.ALIGN_EVERY_S = 0.05, 0.05
+    try:
+        c3 = A.HubController()
+        c3.add_camera("0")
+        c3.update_camera("cam0", {"ball_area": 700})
+        c3.add_zone("cam0", "red", [[0, 0], [9, 0], [9, 9]])
+        c3.check_alignment = lambda name, frame=None: checked.append(len(runs))
+        c3.live_frames["cam0"] = view()
+        c3.start("127.0.0.1:9", log_csv=False)
+        end = time.monotonic() + 3
+        while time.monotonic() < end and not (len(runs) >= 2 and checked and checked[-1] >= 2):
+            time.sleep(0.02)
+        check("a camera that will not open (SystemExit) is restarted, not the end",
+              len(runs) == 2 and c3.running and c3.restarts == 1)
+        c3.live_frames["cam0"] = view()
+        n = len(checked)
+        time.sleep(0.3)
+        check("the moved-camera check keeps running after a restart",
+              len(checked) > n and checked[-1] == 2)
+        c3.stop()
+        end = time.monotonic() + 3
+        while time.monotonic() < end and c3.running:
+            time.sleep(0.02)
+        n = len(checked)
+        time.sleep(0.3)
+        check("... and ends with the session", not c3.running and len(checked) == n)
+    finally:
+        H.run, keepawake.hold, A.RESTART_FIRST_S, A.ALIGN_EVERY_S = real
+
+
 def test_two_boxes_one_feed():
     """One camera per box: the partner box sends its feed to the main box,
     which folds it into the one feed bioarena accepts (one address, both hubs
@@ -4675,7 +4885,7 @@ def main() -> int:
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
-               test_hub_counter_app, test_hub_builtin_model, test_watchtower_settings,
+               test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
                test_watchtower_home_api, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,

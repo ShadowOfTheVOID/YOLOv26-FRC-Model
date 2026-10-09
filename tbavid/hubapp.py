@@ -27,6 +27,8 @@ HUBS = ("red", "blue")
 COMBINE = ("sum", "max", "median")
 DEFAULT_TARGET = "10.0.100.5:8411"
 VIDEO_EXT = (".mp4", ".mov", ".mkv", ".avi", ".m4v")
+# How often a running counter checks each camera against its outlines.
+ALIGN_EVERY_S = 10.0
 
 
 # -- pure helpers ------------------------------------------------------------
@@ -255,6 +257,53 @@ def _lan_ip() -> str:
         return ""
 
 
+def alignment_words(r: Dict) -> str:
+    """camcheck's verdict as the page and the log say it."""
+    st = r.get("status")
+    if st == "moved":
+        return (f"the camera has moved {r['dx']:+.0f}, {r['dy']:+.0f} px since the "
+                f"outlines were drawn -- move the outlines, or redraw them")
+    if st == "different":
+        return ("this is not the picture the outlines were drawn on (another "
+                "camera, or one turned far) -- check the camera, or redraw")
+    if st == "size":
+        return (f"the picture size changed ({r.get('was')} -> {r.get('now')}) -- "
+                f"redraw the outlines and measure the ball again")
+    return "the outlines still fit"
+
+
+# A setting from a hand-counted recording is applied only when it beats the
+# current one by more than this many balls (or 5% of the hand count, if
+# more): fitting one recording overfits -- more knobs measured 27-28% held
+# out against 13% for the defaults (HUB_FEED.md) -- and HUB_FEED.md's
+# practice-field rule is "only if it beats the current by more than a ball
+# or two".
+WORTH_BALLS = 2
+WORTH_FRAC = 0.05
+
+
+def worth_changing(current_err: float, best_err: float, hand_total: float) -> bool:
+    """Is a fitted setting enough better than the current one to apply?"""
+    margin = max(WORTH_BALLS, WORTH_FRAC * max(0.0, float(hand_total)))
+    return abs(best_err) < abs(current_err) - margin
+
+
+def clean_hand(hand: Dict) -> Dict[str, int]:
+    """A hand count from the page: hubs left empty are left out. They used
+    to arrive as 0, and calibration then fitted the setting that counted
+    nothing in that hub."""
+    out = {}
+    for h, n in (hand or {}).items():
+        if h in HUBS and n not in (None, "") and str(n).strip() != "":
+            v = int(float(n))
+            if v < 0:
+                raise ValueError("a hand count cannot be negative")
+            out[h] = v
+    if not out:
+        raise ValueError("type how many balls you counted in at least one hub")
+    return out
+
+
 class Recorder:
     """One camera to an .mp4 while it counts. Frames are written on a thread
     of their own and dropped (and counted) if the disk falls behind, so a
@@ -349,6 +398,9 @@ class HubController:
         self.ball_test: Optional[Dict] = None
         # Recording the cameras while counting (Recorder per camera).
         self.recorders: Dict[str, "Recorder"] = {}
+        # camcheck: each camera's picture against the one its outlines were
+        # drawn on ("ok" / "moved" / "different" / "size"), by camera name.
+        self.alignment: Dict[str, Dict] = {}
         if setup_path and os.path.exists(setup_path):
             self.load(setup_path)
 
@@ -377,7 +429,11 @@ class HubController:
             result, error = None, None
             try:
                 result = fn()
-            except Exception as e:                  # shown, never swallowed
+            # SystemExit too: hubcount.open_source says "could not open video
+            # source" with it (for the command line). Uncaught, it ended the
+            # worker without a word and left the job "running" for good, so
+            # one unplugged camera made the page refuse every job after it.
+            except (Exception, SystemExit) as e:    # shown, never swallowed
                 error = str(e)
                 self.say(f"{name} failed: {e}")
             with self.lock:
@@ -401,6 +457,7 @@ class HubController:
             self.cfg = cfg
             self.path = path
             self.frames.clear()
+            self.alignment.clear()
         for note in setup.notes:
             self.say(note)
         self.say(f"opened {path}")
@@ -510,6 +567,7 @@ class HubController:
             self.cfg["cameras"] = [c for c in self.cfg["cameras"]
                                    if c["name"] != name]
             self.frames.pop(name, None)
+            self.alignment.pop(name, None)
 
     def update_camera(self, name: str, fields: Dict) -> Dict:
         """Change a camera's settings; returns it (its name may change)."""
@@ -521,8 +579,12 @@ class HubController:
                                  if x is not c], new)
                 if name in self.frames:
                     self.frames[new] = self.frames.pop(name)
+                if name in self.alignment:
+                    self.alignment[new] = self.alignment.pop(name)
                 c["name"] = new
             if "source" in fields and str(fields["source"]).strip():
+                if str(fields["source"]).strip() != str(c["source"]):
+                    self.alignment.pop(c["name"], None)
                 c["source"] = str(fields["source"]).strip()
             before = (float(c.get("fps") or 0), str(c.get("size") or ""))
             for k in ("fps", "ball_area"):
@@ -602,12 +664,78 @@ class HubController:
             c["zones"].append(zone)
         what = "exit line" if kind == "exit" else f"outline ({len(pts)} corners)"
         self.say(f"{zone['name']}: {what} saved")
+        # The picture it was drawn on is what later pictures are checked
+        # against (camcheck): the newest outline sets it.
+        self.set_reference(cam_name, quiet=True)
         return zone
 
     def delete_zone(self, cam_name: str, zone_name: str) -> None:
         with self.lock:
             c = self.camera(cam_name)
             c["zones"] = [z for z in c["zones"] if z["name"] != zone_name]
+            if not c["zones"]:
+                c.pop("reference", None)
+                self.alignment.pop(c["name"], None)
+
+    # -- has the camera moved? (camcheck) ----------------------------------------
+    def set_reference(self, cam_name: str, quiet: bool = False) -> bool:
+        """Keep the camera's current picture as the one its outlines fit."""
+        from .camcheck import make_reference
+        frame = self.picture(cam_name)
+        if frame is None:
+            if not quiet:
+                raise ValueError("no picture from this camera yet: refresh it first")
+            return False
+        ref = make_reference(frame)
+        with self.lock:
+            c = self.camera(cam_name)
+            c["reference"] = ref
+            self.alignment[c["name"]] = {"status": "ok", "dx": 0.0, "dy": 0.0,
+                                         "similarity": 1.0}
+        if not quiet:
+            self.say(f"{cam_name}: this picture is now the one the outlines fit")
+        return True
+
+    def check_alignment(self, cam_name: str, frame=None) -> Optional[Dict]:
+        """Compare a camera's picture with its reference; None when there is
+        nothing to compare (no reference, or a recording or stream, whose
+        picture changes with every cut)."""
+        from .camcheck import compare
+        with self.lock:
+            c = next((x for x in self.cfg["cameras"] if x["name"] == cam_name), None)
+            if c is None or not c.get("reference") or not c.get("zones") \
+                    or source_kind(c["source"]) not in ("camera", "wireless"):
+                return None
+            ref, area = c["reference"], float(c.get("ball_area") or 0)
+        if frame is None:
+            frame = self.picture(cam_name)
+        if frame is None:
+            return None
+        r = compare(ref, frame, area)
+        with self.lock:
+            before = (self.alignment.get(cam_name) or {}).get("status")
+            self.alignment[cam_name] = r
+        if r and r["status"] != before and r["status"] != "ok":
+            self.say(f"! {cam_name}: {alignment_words(r)}")
+        return r
+
+    def shift_zones(self, cam_name: str, dx: float, dy: float) -> Dict:
+        """Move every outline and exit line of a camera by (dx, dy) frame
+        pixels -- what camcheck measured -- and keep the picture as the new
+        reference."""
+        from .camcheck import shift_points
+        dx, dy = float(dx), float(dy)
+        with self.lock:
+            c = self.camera(cam_name)
+            for z in c["zones"]:
+                if z.get("line"):
+                    z["line"] = shift_points(z["line"], dx, dy)
+                    z["out"] = shift_points([z["out"]], dx, dy)[0]
+                else:
+                    z["outline"] = shift_points(z["outline"], dx, dy)
+        self.say(f"{cam_name}: outlines moved by {dx:+.0f}, {dy:+.0f} px")
+        self.set_reference(cam_name, quiet=True)
+        return c
 
     def set_confirm(self, hub: str, seconds) -> None:
         """Exits confirm a hub's outline entries after `seconds`; 0 = off
@@ -645,7 +773,28 @@ class HubController:
                            c.get("size", ""), at_s, c.get("image"), self.say)
         with self.lock:
             self.frames[c["name"]] = frame
+        self.check_alignment(c["name"], frame)
         return frame
+
+    def grab_all(self) -> List[str]:
+        """A picture from every camera, each checked against its outlines:
+        what opening a setup at the venue needs first. A camera that does not
+        open is reported and the rest still come. Streams are left to their
+        own Refresh: looking one up takes yt-dlp seconds, and a stream is
+        never checked (its picture changes with every cut)."""
+        with self.lock:
+            cams = [(c["name"], c["source"]) for c in self.cfg["cameras"]]
+        got = []
+        for name, source in cams:
+            if (self.running and not is_file_source(source)) \
+                    or source_kind(source) == "stream":
+                continue
+            try:
+                self.grab(name)
+                got.append(name)
+            except (Exception, SystemExit) as e:
+                self.say(f"! {name}: no picture ({e})")
+        return got
 
     def picture(self, cam_name: str, fuel: bool = False):
         """What to show for a camera: live while running, else its still;
@@ -676,21 +825,30 @@ class HubController:
                 c["ball_area"] = round(area)
         return area
 
-    def calibrate(self, cam_name: str, video: str, hand: Dict[str, int]) -> Dict:
+    def calibrate(self, cam_name: str, video: str, hand: Dict[str, int],
+                  progress: Optional[Callable[[float], None]] = None,
+                  full: bool = False) -> Dict:
         from .hubcount import calibrate, setup_from_dict
-        c = self.camera(cam_name)
+        hand = clean_hand(hand)
+        with self.lock:
+            c = json.loads(json.dumps(self.camera(cam_name)))
         issues = problems({"cameras": [c]})
         if issues:
             raise ValueError(" ".join(issues))
         cam = setup_from_dict({"cameras": [dict(c, blur=0, remove_static=False)]}
                               ).cameras[0]
-        r = calibrate(cam, video, hand, out=self.say, progress=self.progress)
+        r = calibrate(cam, video, hand, out=self.say, progress=progress or self.progress)
+        if not r:
+            raise ValueError("calibration stopped before it finished")
         best, base = r["best"], r["uncorrected"]
-        return {"camera": c["name"], "blur": best["blur"],
-                "remove_static": best["remove_static"],
-                "counts": best["counts"], "error": best["error"],
-                "uncorrected": base["counts"], "uncorrected_error": base["error"],
-                "hand": hand}
+        out = {"camera": c["name"], "blur": best["blur"],
+               "remove_static": best["remove_static"],
+               "counts": best["counts"], "error": best["error"],
+               "uncorrected": base["counts"], "uncorrected_error": base["error"],
+               "hand": hand}
+        if full:
+            out["all"] = r["all"]
+        return out
 
     # -- the feed ------------------------------------------------------------------
     def start(self, target: str = DEFAULT_TARGET, practice: bool = False,
@@ -788,7 +946,9 @@ class HubController:
                         errs = self.monitor.get("errors") or []
                         if errs:
                             why = errs[-1]
-                    except Exception as e:
+                    # SystemExit too (hubcount.open_source's "could not
+                    # open"): uncaught, it ended this thread with no restart.
+                    except (Exception, SystemExit) as e:
                         why = f"error: {e}"
                         self.say(why)
                     if user_stop.is_set() or not restart:
@@ -809,6 +969,7 @@ class HubController:
                         self.stop_evt = threading.Event()
                         self.restarting = None
             finally:
+                user_stop.set()          # the session is over: ends watch()
                 release()
                 self.stop_recording()
                 with self.lock:
@@ -826,10 +987,26 @@ class HubController:
                         self.say(f"! {s.pending()} fuel events never reached frc-fms: "
                                  f"{s.last_error}")
                 self.say(f"stopped: red {s.counts['red']}, blue {s.counts['blue']}")
+        def watch(session_over):
+            # The outlines against the live picture every few seconds: a
+            # tripod bumped mid-event reads low with no other sign. Its own
+            # thread, about 10 ms a camera, so counting never waits on it.
+            # On the session's end, not stop_evt: run() sets that when a
+            # camera fails, and the restart above replaces it, which ended
+            # this check at the first restart.
+            while not session_over.wait(ALIGN_EVERY_S):
+                with self.lock:
+                    live = dict(self.live_frames)
+                for name, frame in live.items():
+                    try:
+                        self.check_alignment(name, frame)
+                    except Exception as e:
+                        self.say(f"camera check {name}: {e}")
         with self.lock:
             self.running = True
         self.say(f"session {self.sender.session}: sending to {self.feed_target}")
         threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=watch, args=(user_stop,), daemon=True).start()
 
     def stop(self) -> None:
         with self.lock:
@@ -914,7 +1091,8 @@ class HubController:
                          + (f" ({r.dropped} dropped: the disk could not keep up)" if r.dropped else ""))
         return done
 
-    def test_recording(self, cam_name: str, video: str, hand: Dict[str, int]) -> Dict:
+    def test_recording(self, cam_name: str, video: str, hand: Dict[str, int],
+                       progress: Optional[Callable[[float], None]] = None) -> Dict:
         """Every way of counting this camera's zones, on a recording, against
         a hand count (hubcount.hand_test)."""
         from .hubcount import hand_test, setup_from_dict
@@ -926,15 +1104,55 @@ class HubController:
         issues = problems({"cameras": [c]})
         if issues:
             raise ValueError(" ".join(issues))
-        setup = setup_from_dict({"combine": cfg.get("combine"), "confirm": cfg.get("confirm"),
-                                 "cameras": [c]})
-        r = hand_test(setup, cam_name, video, hand, progress=self.progress)
+        # "rules" too: without it setup_from_dict takes the file for one saved
+        # before 2026-09-29 and reads a calibrated blur 0 as unset (0.3), so
+        # "what the hub counts now" was not what the hub counted.
+        setup = setup_from_dict({"rules": cfg.get("rules"), "combine": cfg.get("combine"),
+                                 "confirm": cfg.get("confirm"), "cameras": [c]})
+        r = hand_test(setup, cam_name, video, clean_hand(hand),
+                      progress=progress or self.progress)
         for hub, h in r["hubs"].items():
             best = next((x for x in h["rows"] if x.get("best")), None)
             if best:
                 self.say(f"test {hub}: closest is {best['label']} ({best['count']}, "
                          f"{best['error']:+d} against {h['hand']} by hand)")
         return r
+
+    def check_recording(self, cam_name: str, video: str, hand: Dict) -> Dict:
+        """The one hand-count check: every way of counting (test_recording),
+        then the blur / still-yellow fit (calibrate) on the same recording.
+        Each suggestion says whether it is worth applying (worth_changing)."""
+        hand = clean_hand(hand)
+        with self.lock:
+            c = json.loads(json.dumps(self.camera(cam_name)))
+        has_outline = any(not z.get("line") for z in c.get("zones") or [])
+        passes = 3 if has_outline else 1          # test once, calibrate twice
+        done = [0]
+
+        def prog(f):
+            self.progress((done[0] + max(0.0, min(1.0, f))) / passes)
+        test = self.test_recording(cam_name, video, hand, progress=prog)
+        total = sum(hand.values())
+        for h in test["hubs"].values():
+            cur = next((x for x in h["rows"] if x.get("current")), None)
+            best = next((x for x in h["rows"] if x.get("best")), None)
+            if cur and best and "error" in cur and best is not cur:
+                best["worth"] = worth_changing(cur["error"], best["error"], h["hand"] or 0)
+        out = {"test": test, "calibration": None}
+        if has_outline:
+            done[0] = 1
+            cal = self.calibrate(cam_name, video, hand, progress=prog, full=True)
+            now = next((r for r in cal["all"]
+                        if r["blur"] == round(float(c.get("blur", DEFAULT_BLUR)), 1)
+                        and r["remove_static"] == bool(c.get("remove_static"))), None)
+            cal["current_error"] = now["error"] if now else None
+            cal["current_counts"] = now["counts"] if now else None
+            cal["worth"] = (now is not None and (cal["blur"], cal["remove_static"]) !=
+                            (now["blur"], now["remove_static"])
+                            and worth_changing(now["error"], cal["error"], total))
+            cal.pop("all", None)
+            out["calibration"] = cal
+        return out
 
     # Set by the web server: its Share (the page on Wi-Fi, behind a PIN).
     share = None
@@ -958,6 +1176,12 @@ class HubController:
             running = self.running
             pictures = {n: tuple(int(v) for v in f.shape[1::-1])
                         for n, f in {**self.frames, **self.live_frames}.items()}
+            alignment = {n: dict(r, words=alignment_words(r))
+                         for n, r in self.alignment.items() if r}
+        # The page needs no picture data back from the setup: the grey
+        # reference stays on the server side (about 3 KB a camera, every poll).
+        for c in cfg["cameras"]:
+            c["has_reference"] = bool(c.pop("reference", None))
         kinds = {c["name"]: source_kind(c["source"]) for c in cfg["cameras"]}
         out = {"cfg": cfg, "path": self.path, "running": running, "job": job,
                "locked": running and self.locked,
@@ -972,6 +1196,8 @@ class HubController:
                "update": self.updater.status() if self.updater else None,
                "presets": self.presets(),
                "standard_colour": dict(STANDARD_COLOUR),
+               "alignment": alignment,
+               "default_blur": DEFAULT_BLUR,
                "log": self.messages_since(last_log)}
         s = self.sender
         live = {"counts": {"red": 0, "blue": 0}, "linked": False, "reply": None,

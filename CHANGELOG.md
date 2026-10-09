@@ -31,6 +31,43 @@ the build rather than publishing an empty release.
   cross-check out of range, now show in the page's status line, not only
   as chips. The command-line `run.py hubfeed` does not restart itself; use
   the app on match day.
+- **Setup at the venue is shorter.**
+  - **Camera moved? The page says so, and fixes it.** Each camera now keeps
+    a small grey copy of the picture its outlines were drawn on (in
+    cams.json, a few KB). Every new picture -- and every 10 s while
+    counting -- is compared with it: a shift is measured (phase
+    correlation; within 1-3 px on test scenes, through a 40% light change),
+    and a camera moved more than half a ball shows **Camera moved** with a
+    **Move the outlines +31, -19 px** button. A different view (camera
+    numbers swapped on re-plugging, a camera turned far) or a new picture
+    size says so instead. Only a shift is corrected: a camera turned or
+    zoomed needs its outlines drawn again. Wireless and USB cameras only;
+    a recording's picture changes with every cut.
+  - **Opening a setup fetches every camera's picture** and runs that check,
+    instead of a click per camera.
+  - **One hand-count check.** Step 5's *Check a recording against a hand
+    count* runs every way of counting *and* the blur / still-yellow
+    calibration on the same recording, and offers a change only where it
+    beats the current setting by more than 2 balls (or 5% of the hand
+    count): fitting one recording otherwise overfits it, as the knob sweeps
+    did (27-28% held out against 13%). The separate *Calibrate* button in
+    step 3 is gone; the sliders stay, closed, marked "(standard)".
+  - **Step 2 shows only what applies:** *combine by* appears when a hub has
+    more than one outline, *exits confirm* when it has an outline and an
+    exit line, and the exit-line buttons sit under *Exit line (untested)*.
+  - **A ball ruler while drawing:** once the ball is measured, four ball
+    widths hang below the pointer, so "top edge 3-4 balls above the hood"
+    is measured, not guessed.
+- **Fixed:** a camera that would not open (unplugged, wrong number) left
+  its job "running" for good -- `SystemExit` from `open_source` got past the
+  worker -- so the page refused every picture, measure and check after it
+  until the app was restarted.
+- **Fixed:** a hub left empty in a hand count was sent as 0 balls, and
+  calibration fitted the setting that counted nothing in it.
+- **Fixed:** *Test a recording* read a calibrated blur 0 as unset and
+  counted at 0.3, so "what the hub counts now" was not what it counted.
+- **Fixed:** a request naming a camera that is gone answered 404 "unknown",
+  and an unexpected error dropped the connection with no message.
 
 ## v0.5.4 — 2026-10-08
 

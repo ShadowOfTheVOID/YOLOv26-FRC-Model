@@ -891,7 +891,8 @@ class Camera:
                  zones: List[Zone], fps: float = 0.0, size: str = "",
                  blur: float = DEFAULT_BLUR, remove_static: bool = False,
                  model: Optional[Dict] = None, image: Optional[Dict] = None,
-                 colour: Optional[Dict] = None, preset: str = ""):
+                 colour: Optional[Dict] = None, preset: str = "",
+                 reference: Optional[Dict] = None):
         self.name = name
         self.source = str(source)
         self.ball_area = float(ball_area)
@@ -906,6 +907,9 @@ class Camera:
         self.image = check_image(image) if image else {}
         self.colour = check_colour(colour) if colour else None
         self.preset = str(preset or "")
+        # camcheck: the small grey picture the outlines were drawn on, kept
+        # so the page can tell when the camera has moved. Not used to count.
+        self.reference = reference if isinstance(reference, dict) else None
         # hubmodel.parse_model's dict, or None for colour only. Exit lines
         # stay colour only: the model counter scores a ball that vanishes in
         # the outline's box, and an exit line has no box.
@@ -1072,7 +1076,8 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
             cams.append(Camera(name, c["source"], area, zones,
                                float(c.get("fps") or 0), str(c.get("size") or ""),
                                blur, bool(c.get("remove_static", False)), model,
-                               c.get("image"), c.get("colour"), c.get("preset", "")))
+                               c.get("image"), c.get("colour"), c.get("preset", ""),
+                               c.get("reference")))
         except ValueError as e:
             raise ValueError(f"camera {name!r}: {e}")
     setup = Setup(cams, cfg.get("combine"), measuring, cfg.get("confirm"))
@@ -1109,6 +1114,8 @@ def setup_to_dict(setup: "Setup") -> Dict:
             d["image"] = dict(c.image)
         if c.colour:
             d["colour"] = dict(c.colour)
+        if c.reference:
+            d["reference"] = dict(c.reference)
         if c.model:
             d["model"] = dict({k: c.model[k] for k in ("weights", "weight")},
                               **c.model["counter"],
