@@ -9,6 +9,14 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Docs: Watchtower's mock vision can feed bioarena** (watchtower-fms
+  PR #3). A `vision.mock.yaml` with no `feeds:` key takes the feeds in
+  `vision.yaml`, so a rehearsal's random fuel goes to bioarena too.
+  `deploy/FRC_FMS.md` says to set `feeds: []` there while this repo's
+  counter is the bioarena source. No code change: the Watchtower app runs
+  our counter, not Watchtower's vision, and `.github/watchtower-release`
+  stays at v0.1.0 until the PR is tagged (v0.1.1 changed only CI and docs).
+
 ## v0.5.6 — 2026-10-10
 
 - **Match queue page on Watchtower** (`/queue` on the FMS port, so on the
