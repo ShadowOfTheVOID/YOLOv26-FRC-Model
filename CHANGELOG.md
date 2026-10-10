@@ -9,12 +9,12 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
-- **Fixed: Find cameras listed only some of the cameras plugged in** (two,
-  reported on v0.5.5). It tried camera numbers 0-5 only. Linux and the Pi
+- **Fixed: Find cameras listed only some of the cameras plugged in** (two of
+  three on a Mac whose System Settings showed all three, v0.5.5). It tried camera numbers 0-5 only. Linux and the Pi
   give every USB camera two numbers (0, 2, 4, 6...), and a Mac counts the
   built-in camera, an iPhone and Desk View first, so later cameras were
   never tried. One failed first read, from a camera still starting up,
-  also dropped it. It now tries 0-11, reads each camera up to 10 times,
+  also dropped it. It now tries 0-11, waits up to 2 s for each camera's first picture,
   tries DirectShow on Windows when the default driver refuses, and lists a
   camera that opens but sends no picture (in use by another program, or
   out of USB bandwidth) instead of hiding it. Not checked on real hardware

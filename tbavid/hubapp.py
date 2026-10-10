@@ -201,7 +201,8 @@ def probe_cameras(max_index: int = 12, opener: Optional[Callable] = None) -> Lis
       built-in camera, an iPhone (Continuity) and Desk View before any USB
       one -- three cameras could already run past 5. Now 0-11, gaps skipped.
     - One read decided it. A camera often returns no frame on the first read
-      while it starts up, and was dropped as if absent. Now up to 10 reads.
+      while it starts up, and was dropped as if absent. Now it is read for up
+      to 2 s (a Mac's driver can take over half a second to deliver one).
     - Windows' default driver (Media Foundation) refuses some USB cameras
       DirectShow opens; DirectShow is tried before giving up.
     A camera that opens but sends no picture (in use by another program, or
@@ -229,10 +230,13 @@ def probe_cameras(max_index: int = 12, opener: Optional[Callable] = None) -> Lis
             continue
         frame = None
         try:
-            for _ in range(10):
+            give_up = time.monotonic() + 2.0
+            while True:
                 ok, fr = cap.read()
                 if ok and fr is not None:
                     frame = fr
+                    break
+                if time.monotonic() > give_up:
                     break
                 time.sleep(0.05)
         finally:
