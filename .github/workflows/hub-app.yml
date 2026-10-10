@@ -196,7 +196,10 @@ jobs:
             ls "$mnt"
             [ -L "$mnt/Applications" ] || { echo "::error::no Applications link in the dmg"; exit 1; }
             python apps/watchtower/smoke_test.py "$mnt/Watchtower.app/Contents/MacOS/Watchtower"
-            hdiutil detach "$mnt"
+            # The app has quit and passed by now; the mount can still be busy
+            # for a moment (PR #38's run: "couldn't unmount disk5 - Resource
+            # busy" right after OK). Retry, then force: nothing is written to it.
+            hdiutil detach "$mnt" || { sleep 5; hdiutil detach "$mnt"; } || hdiutil detach -force "$mnt"
           else
             for app in "Watchtower" "Hub Counter"; do
               setup="${{ matrix.wasset }}"; [ "$app" = "Hub Counter" ] && setup="${{ matrix.asset }}"

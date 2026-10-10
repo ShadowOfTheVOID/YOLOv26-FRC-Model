@@ -101,6 +101,61 @@ def read_event(d: Path) -> dict:
             "port": int(srv.get("port") or FMS_PORT)}
 
 
+TBA_TTL = 30.0          # s a TBA schedule is reused; TBA itself caches about a minute
+
+
+def add_pages(app, cfg: dict = None) -> None:
+    """Our pages on Watchtower's own server, so phones and the public address
+    reach them like /ref or /display. /queue: the matches still to play, for
+    teams in the pits, who otherwise had to ask the scorekeeper what was next
+    (Watchtower's pages show only the current match). It reads the same /ws
+    state as every other page, so it needs no PIN.
+
+    /queue/tba.json is TBA's schedule for the same page, for an event
+    Watchtower is not running (?event=) or before the scorekeeper has
+    entered one. The Read API key stays here, never sent to the page. The
+    page is public (the proxy), so TBA is asked at most once per TBA_TTL per
+    event and once every 2 s in all, with 16 events remembered: a stranger
+    looping over event keys cannot turn this into a TBA flood."""
+    import re
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    import settings
+    cfg = cfg or {}
+    default_event = str((cfg.get("event") or {}).get("tba_event_key") or "").strip().lower()
+    read_key = str((cfg.get("tba") or {}).get("read_key") or "")
+    queue = Path(getattr(sys, "_MEIPASS", HERE)) / "queue.html"
+    app.add_api_route("/queue", lambda: FileResponse(queue, headers={"Cache-Control": "no-store"}),
+                      methods=["GET"])
+    cache: dict = {}            # event -> (fetched, result)
+    lock = threading.Lock()
+    last = [0.0]
+
+    def tba_json(event: str = ""):
+        key = (event or default_event).strip().lower()
+        if not re.fullmatch(r"\d{4}[a-z0-9]{1,16}", key):
+            raise HTTPException(400, "No TBA event key: open /queue?event=2026catstd, or set it on The Blue Alliance tab.")
+        with lock:
+            now = time.time()
+            hit = cache.get(key)
+            if hit and now - hit[0] < TBA_TTL:
+                return {**hit[1], "event": key, "age": round(now - hit[0])}
+            if now - last[0] < 2.0:
+                if hit:
+                    return {**hit[1], "event": key, "age": round(now - hit[0])}
+                raise HTTPException(429, "Busy; trying again shortly.")
+            last[0] = now
+            r = settings.tba_matches(key, read_key)
+            if "error" in r and hit and "error" not in hit[1]:
+                # Offline or TBA down: keep showing the last schedule, and say so.
+                return {**hit[1], "event": key, "age": round(now - hit[0]), "error": r["error"]}
+            cache[key] = (now, r)
+            while len(cache) > 16:
+                cache.pop(min(cache, key=lambda k: cache[k][0]))
+            return {**r, "event": key, "age": 0}
+    app.add_api_route("/queue/tba.json", tba_json, methods=["GET"])
+
+
 class FmsServer:
     """Watchtower's FastAPI app under uvicorn, in a thread, as `python -m
     fms.server` runs it (same host and port from event.yaml)."""
@@ -108,6 +163,7 @@ class FmsServer:
     def __init__(self, host: str, port: int):
         import uvicorn
         from fms import server             # reads config/event.yaml at import
+        add_pages(server.app, server.CFG)
         self.server = uvicorn.Server(uvicorn.Config(server.app, host=host, port=port,
                                                     log_level="warning"))
         self.thread = threading.Thread(target=self.server.run, daemon=True, name="watchtower fms")
@@ -132,6 +188,7 @@ VIEWS = {   # name: (window title, path on the FMS, or None for the hub counter,
     "control": ("Watchtower: Scorekeeper", "/control", (1320, 860)),
     "hub": ("Watchtower: Hub cameras", None, (1400, 900)),
     "display": ("Watchtower: Field display", "/display", (1280, 720)),
+    "queue": ("Watchtower: Match queue", "/queue", (1000, 800)),
 }
 
 

@@ -3,7 +3,7 @@
 Starts it with a scratch home folder and checks what a double-click must
 give: the first-launch event.yaml with PINs and the start page; the FMS on
 :8000; the hub counter on :8790 with its address box already set to that FMS;
-a count accepted with that address's vision key (and refused with a wrong
+the match queue page; a count accepted with that address's vision key (and refused with a wrong
 one); and Quit stopping both. A bundle missing a uvicorn protocol module, the
 FMS pages or the example configs fails here, not at a venue.
 """
@@ -85,6 +85,7 @@ def main(program: str) -> int:
                                      headers={"Content-Type": "application/json", "X-Home-Token": token})
         state = json.loads(urllib.request.urlopen(req, timeout=5).read())["result"]
         assert state["fms_ok"] and set(state["pins"]) == {"control", "ref", "emcee"}, "Home state wrong"
+        assert "Match Queue" in get(FMS + "/queue"), "the match queue page is not served"
         target = json.loads(get(HUB + "/api/state"))["default_target"]
         assert target.startswith("http://") and target.endswith("@127.0.0.1:8000"), \
             "the hub counter is not set to this Watchtower"
@@ -103,7 +104,7 @@ def main(program: str) -> int:
         if up(FMS + "/"):
             fail("Quit left the FMS running")
             return 1
-        print(f"OK: first-launch setup, FMS, hub counter preset to it, vision key, Quit "
+        print(f"OK: first-launch setup, FMS, match queue, hub counter preset to it, vision key, Quit "
               f"(exit code {proc.returncode})")
         return 0
     finally:
