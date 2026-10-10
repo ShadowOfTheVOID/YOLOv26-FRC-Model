@@ -5248,6 +5248,33 @@ def test_find_cameras_says_why():
     check("and the page shows it", 'modal("Could not look for cameras"' in page)
 
 
+def test_cvload_survives_a_refusing_loader():
+    """The Watchtower app on a Mac could not open a camera: OpenCV's own
+    loader raised 'recursion is detected during loading of "cv2" binary
+    extensions' on every import (v0.5.7, 2026-10-10). cvload.load() loads
+    the compiled module directly when the loader refuses."""
+    root = Path(__file__).resolve().parent.parent
+    for app in ("watchtower", "hubcounter"):
+        src = (root / "apps" / app / "main.py").read_text()
+        check(f"the {app} app loads OpenCV through cvload at start",
+              "cvload.load()" in src and src.index("cvload.load()") < src.index("argparse.ArgumentParser("))
+    try:
+        import cv2 as _probe  # noqa: F401  (CI has no OpenCV; checked where it is)
+    except ImportError:
+        return
+    import importlib
+    for k in [k for k in sys.modules if k == "cv2" or k.startswith("cv2.")]:
+        del sys.modules[k]
+    sys.OpenCV_LOADER = True                 # the state the Mac app was in
+    from tbavid import cvload
+    importlib.reload(cvload)
+    m = cvload.load()
+    import cv2
+    check("with OpenCV's loader refusing, cvload still loads it, for every later import",
+          m is not None and cv2 is m and hasattr(cv2, "VideoCapture")
+          and "recursion" in cvload.error and not hasattr(sys, "OpenCV_LOADER"))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5270,7 +5297,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_app_update,
+               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day):

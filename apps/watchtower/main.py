@@ -635,6 +635,10 @@ def run_windows(d: Path, ev: dict, ctl, stop_all, hub: threading.Thread,
 
 
 def main() -> int:
+    # OpenCV once, here on the main thread, before any camera job: its own
+    # loader refused on a Mac (tbavid/cvload.py), and Find cameras failed.
+    from tbavid import cvload
+    cvload.load()
     import argparse
     ap = argparse.ArgumentParser(prog="Watchtower", description=__doc__.split("\n\n")[0])
     ap.add_argument("--no-browser", action="store_true",

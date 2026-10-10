@@ -128,6 +128,8 @@ def run_window(ctl, server, d: Path, selftest: str = "") -> bool:
 
 
 def main() -> int:
+    from tbavid import cvload      # see apps/watchtower/main.py
+    cvload.load()
     ultralytics_home()
     if len(sys.argv) == 3 and sys.argv[1] == "--selftest-model":
         return selftest_model(sys.argv[2])
