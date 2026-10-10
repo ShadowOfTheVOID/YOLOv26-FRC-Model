@@ -825,8 +825,11 @@ def cmd_hubfeed(args, cfg):
         sender = fmslink.make_sender(args.target)
     except ValueError as e:
         raise SystemExit(f"--target wants HOST[:PORT] for bioarena or "
-                         f"http://KEY@HOST:PORT for frc-fms: {e}")
-    if isinstance(sender, fmslink.FmsSender):
+                         f"http://KEY@HOST:PORT for frc-fms, or both separated "
+                         f"by a comma: {e}")
+    if isinstance(sender, fmslink.FanOut):
+        print(f"session {sender.session}: sending to {sender.describe()}. Ctrl-C to stop.")
+    elif isinstance(sender, fmslink.FmsSender):
         print(f"sending fuel events to frc-fms at {sender.url}. Ctrl-C to stop.")
     else:
         print(f"session {sender.session}: sending to udp {sender.target[0]}:"
@@ -840,7 +843,7 @@ def cmd_hubfeed(args, cfg):
     for hub in setup.hubs():
         n = len(setup.zones(hub))
         if n > 1:
-            print(f"  {hub}: {n} zones combined by {setup.combine[hub]}")
+            print(f"  {hub}: {n} zones, {hubcount.describe_combine(setup.zones(hub), setup.combine[hub])}")
     relay = None
     if args.partner_port:
         relay = hubfeed.RelayIn(args.partner_port)
@@ -1321,7 +1324,9 @@ def main(argv=None):
     p.add_argument("--target", default="10.0.100.5:8411",
                    help="bioarena's HOST:PORT (default 10.0.100.5:8411), or "
                         "Watchtower / frc-fms as http://VISIONKEY@HOST:8000 or "
-                        "https://VISIONKEY@watchtower.systemoverload.org")
+                        "https://VISIONKEY@watchtower.systemoverload.org; "
+                        "both at once separated by a comma, e.g. "
+                        "http://VISIONKEY@127.0.0.1:8000,10.0.100.5:8411")
     p.add_argument("--cam-fps", dest="cam_fps", type=float, default=0.0,
                    help="ask the camera for this frame rate (60 halves the "
                         "wait for the next frame)")

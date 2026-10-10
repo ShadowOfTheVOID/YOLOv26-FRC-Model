@@ -90,14 +90,62 @@ def first_setup(d: Path, src: Path) -> dict:
     return init.init(str(cfg))
 
 
+def vision_feed(d: Path) -> str:
+    """The first `feeds:` entry of config/vision.yaml as host:port: the
+    field system Watchtower's own vision would send to (and, since
+    watchtower-fms PR #3, its mock runs too). "" if none or unreadable.
+
+    The app reads this at launch, so nothing in the file may stop it: a
+    hand-made `feeds: 10.0.100.5` (a string, once read a character at a
+    time) or a port like "8411/udp" (int() raised and the app did not open)
+    is taken as written where it can be and skipped where it cannot."""
+    import re
+    import yaml
+    try:
+        feeds = (yaml.safe_load((d / "config" / "vision.yaml").read_text()) or {}).get("feeds")
+    except (OSError, yaml.YAMLError, AttributeError):
+        return ""
+    if not isinstance(feeds, list):
+        feeds = [feeds]
+    for f in feeds:
+        if isinstance(f, dict):
+            host, port = str(f.get("host") or "").strip(), f.get("port") or 8411
+        elif isinstance(f, str):
+            host, _, port = f.strip().partition(":")
+            port = port or 8411
+        else:
+            continue
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            continue
+        if re.fullmatch(r"[A-Za-z0-9.-]+", host) and 0 < port < 65536:
+            return f"{host}:{port}"
+    return ""
+
+
+# bioarena's address in its Hub FUEL Counter Feed spec. Nothing is typed:
+# Phones & PINs shows it read-only, and vision.yaml's feeds: overrides it.
+FIELD_FEED = "10.0.100.5:8411"
+
+
+def counter_target(ev: dict) -> str:
+    """What the hub counter sends to: Watchtower on this computer and bioarena
+    (tbavid.fmslink.FanOut). Watchtower passes counts to bioarena only from
+    its own vision runner, which the app does not run."""
+    return f"http://{ev['key']}@127.0.0.1:{ev['port']}, {ev.get('field_feed') or FIELD_FEED}"
+
+
 def read_event(d: Path) -> dict:
     import yaml
     ev = yaml.safe_load((d / "config" / "event.yaml").read_text()) or {}
     srv, e = ev.get("server") or {}, ev.get("event") or {}
+    vf = vision_feed(d)                  # read once: the two fields agree
     return {"name": e.get("name", ""), "date": str(e.get("date") or ""),
             "teams": list(e.get("teams") or []),
             "pins": srv.get("pins") or {}, "key": srv.get("vision_key", ""),
             "public_url": str(srv.get("public_url") or "").rstrip("/"),
+            "field_feed": vf or FIELD_FEED, "field_from": "vision.yaml" if vf else "spec",
             "port": int(srv.get("port") or FMS_PORT)}
 
 
@@ -225,10 +273,13 @@ class App:
                 # Set in Phones & PINs when a proxy or tunnel serves this FMS
                 # under a public name: then that leads, and the QR carries it.
                 "public_url": self.ev.get("public_url", ""),
+                # Read-only on Phones & PINs: where the counter feeds bioarena.
+                "field_feed": self.ev.get("field_feed", ""), "field_from": self.ev.get("field_from", ""),
                 "on_network": ip != "127.0.0.1",
                 "fms_ok": port_open(self.ev["port"]), "data_dir": str(self.d),
                 "hub": {"running": bool(st.get("running")), "linked": bool(live.get("linked")),
                         "counts": live.get("counts") or {"red": 0, "blue": 0},
+                        "links": live.get("links") or {},
                         "cameras": len(st["cfg"].get("cameras") or [])}}
 
     def qr(self, text: str) -> str:
@@ -640,7 +691,8 @@ def main() -> int:
     from tbavid import hubweb
     from tbavid.hubapp import HubController
     ctl = HubController(str(d / "cams.json"))
-    ctl.default_target = f"http://{ev['key']}@127.0.0.1:{ev['port']}"
+    ctl.default_target = counter_target(ev)
+    print(f"hub counter: to Watchtower and bioarena at {ev['field_feed']} ({ev['field_from']})")
     # Camera presets saved here or in the Hub Counter app are the same file.
     ctl.presets_file = str(Path.home() / "Documents" / "Hub Counter" / "camera-presets.json")
     hub = threading.Thread(target=hubweb.serve, args=(ctl, HUB_PORT, "127.0.0.1"),

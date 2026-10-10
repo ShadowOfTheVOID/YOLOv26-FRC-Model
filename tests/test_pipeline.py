@@ -2302,7 +2302,13 @@ def test_hub_feed_receiver_rules():
     rx.accept(d(seq=8, red=6, blue=1), ok)
     check("match counts are relative to ResetMatch",
           rx.match_counts() == {"red": 2, "blue": 0})
+    # A second session while this one is live is a second sender, not a
+    # restart (watchtower-fms PR #3: mock vision feeds vision.yaml's feeds:).
+    check("a new session while the current one is live is dropped",
+          rx.accept(d(session="bb", seq=1, red=9, blue=9), ok) == (False, HF.SECOND_SENDER)
+          and rx.restarts == 0 and rx.match_counts() == {"red": 2, "blue": 0})
     # A counter restarted mid-match loses only what it missed while down.
+    clock.t += 1.01                        # the old session has gone quiet
     ok_, what = rx.accept(d(session="bb", seq=1, red=1, blue=0), ok)
     check("a new session is a restart, not a drop",
           ok_ and what == "hub counter restarted" and rx.restarts == 1)
@@ -2311,6 +2317,25 @@ def test_hub_feed_receiver_rules():
     check("a new session may start its seq anywhere, even lower",
           rx.accept(d(session="bb", seq=2, red=1, blue=2), ok)[0]
           and rx.match_counts() == {"red": 3, "blue": 2})
+    # A replaced session never comes back; a late datagram from it is dropped.
+    clock.t += 5
+    check("a replaced session coming back is dropped, even once quiet",
+          rx.accept(d(session="aa", seq=99, red=9, blue=9), ok)
+          == (False, HF.SECOND_SENDER)
+          and rx.restarts == 1 and rx.match_counts() == {"red": 3, "blue": 2})
+    t2 = _FakeClock()
+    two = HF.Receiver(clock=t2)
+    sq = {"real": 0, "mock": 0}
+    for i in range(20):                    # 2 s at 10 Hz; the mock starts after
+        for sess, red in (("real", 5 + i), ("mock", 3)):
+            if sess == "mock" and i < 3:
+                continue
+            sq[sess] += 1
+            two.accept(d(session=sess, seq=sq[sess], red=red), ok)
+        t2.t += 0.1
+    check("a mock started after the real counter is dropped; the real one keeps scoring",
+          two.match_counts()["red"] == 24 and two.restarts == 0
+          and two.dropped[HF.SECOND_SENDER] == 17 and two.session == "real")
     rx.reset_match()
     check("a restart before ResetMatch carries nothing into the next match",
           rx.match_counts() == {"red": 0, "blue": 0})
@@ -3005,7 +3030,7 @@ def test_frc_fms_sender():
           ok and url == "http://fms:8000/api/vision/events" and key == "k"
           and body["events"] == {"red": [[1_700_000_099.5, 2], [1_700_000_100.0, 1]],
                                  "blue": [[1_700_000_100.0, 1]]}
-          and body["source"] == "live" and s.pending() == 0 and s.linked())
+          and body["source"].startswith("tbavid ") and s.pending() == 0 and s.linked())
     check("cumulative counts stay for the page and the board",
           s.counts == {"red": 3, "blue": 1})
     import tbavid.hubcount as HC2
@@ -3579,6 +3604,10 @@ def test_watchtower_settings():
     St = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(St)
 
+    check("a missing optional field reads back as empty, as it loads (Save refused every change "
+          "on an event.yaml without public_url / read_key, 2026-10-10)",
+          St._norm("url", None) == "" and St._norm("secret", None) == ""
+          and St._norm("teams", None) == [] and St._norm("int", 5) == 5)
     check("teams parse from any separators, in order, without repeats",
           St.parse_teams("254, 1678 971\n604;254") == [254, 1678, 971, 604])
     clean, err = St.check({"event.name": " X ", "event.date": "2026-10-10", "event.qual_start": "09:00",
@@ -4727,7 +4756,7 @@ def test_hub_setup_streamlined():
               len(runs) == 2 and c3.running and c3.restarts == 1)
         c3.live_frames["cam0"] = view()
         n = len(checked)
-        time.sleep(0.3)
+        __import__("time").sleep(0.3)
         check("the moved-camera check keeps running after a restart",
               len(checked) > n and checked[-1] == 2)
         c3.stop()
@@ -4735,7 +4764,7 @@ def test_hub_setup_streamlined():
         while time.monotonic() < end and c3.running:
             time.sleep(0.02)
         n = len(checked)
-        time.sleep(0.3)
+        __import__("time").sleep(0.3)
         check("... and ends with the session", not c3.running and len(checked) == n)
     finally:
         H.run, keepawake.hold, A.RESTART_FIRST_S, A.ALIGN_EVERY_S = real
@@ -4760,16 +4789,23 @@ def test_two_boxes_one_feed():
     check("a duplicate or a count going backwards is dropped, as bioarena would",
           relay.handle(dg("p1", 2, 0, 5), "10.0.100.22") is None
           and relay.handle(dg("p1", 3, 0, 1), "10.0.100.22") is None)
+    check("a second partner session while the first is live is dropped",
+          relay.handle(dg("p2", 1, 0, 2), "10.0.100.22") is None)
+    t[0] = 102.5                           # the partner restarted: p1 went quiet
     r = relay.handle(dg("p2", 1, 0, 2), "10.0.100.22")
     check("the partner restarting keeps what it had sent: its new 2 adds to 3",
-          r == [("blue", 2, 101.0)] and relay.forwarded["blue"] == 5
+          r == [("blue", 2, 102.5)] and relay.forwarded["blue"] == 5
           and relay.rx.restarts == 1)
+    check("and the old partner session sending again is a second sender, dropped",
+          relay.handle(dg("p1", 9, 0, 9), "10.0.100.22") is None
+          and relay.forwarded["blue"] == 5
+          and relay.state()["dropped"].get(HF.SECOND_SENDER) == 2)
     relay.reply_source = lambda: {"v": 1, "seq": 777, "match_state": "AUTO_PERIOD",
                                   "credited": {"red": 1, "blue": 5}}
     rep = _json.loads(relay.reply())
     check("the partner gets bioarena's reply, with its own seq echoed",
           rep["match_state"] == "AUTO_PERIOD" and rep["seq"] == 1)
-    t[0] = 103.0
+    t[0] = 104.0
     check("a partner silent for 1 s is offline (it holds the main box's heartbeat)",
           not relay.online() and relay.state()["counts"] == {"red": 0, "blue": 5})
     strict = HF.RelayIn(partner="10.0.100.22", clock=lambda: t[0])
@@ -4900,6 +4936,318 @@ def test_counter_keeps_going_on_match_day():
           and "Partner box OFFLINE" in page and "Restarting the counter" in page)
 
 
+def test_fanout_watchtower_and_bioarena():
+    """The scrimmage: Watchtower on the M4 (HTTP, port 8000) and bioarena
+    (UDP, 8411), each on its own address. Watchtower forwards to bioarena only
+    from its own vision runner, which the Watchtower app does not run, so with
+    one target the app's counter reached Watchtower and bioarena got nothing.
+    "Send counts to" now takes both; each ball reaches each one."""
+    import ast
+    import json as _json
+    from tbavid import fmslink as FL
+    from tbavid import hubfeed as HF
+
+    check("a comma or spaces separate targets",
+          FL.split_targets(" http://k@m4:8000,10.0.100.5:8411  ")
+          == ["http://k@m4:8000", "10.0.100.5:8411"])
+    check("one target is still the plain sender",
+          isinstance(FL.make_sender("10.0.100.5:8411"), HF.FeedSender))
+    try:
+        FL.make_sender("10.0.100.5:8411, 10.0.100.6:8411")
+        check("two bioarenas are refused (two sessions read as restarts)", False)
+    except ValueError:
+        check("two bioarenas are refused (two sessions read as restarts)", True)
+
+    clock = _FakeClock()
+    sock = _FakeSock()
+    udp = HF.FeedSender(("10.0.100.5", 8411), session="main", sock=sock, clock=clock)
+    posts, fail = [], [False]
+    def post(url, body, key):
+        if fail[0]:
+            raise OSError("connection refused")
+        posts.append(body)
+        return {"record": None}
+    web = FL.FmsSender("http://k@m4:8000", post=post, clock=clock,
+                       wall=lambda: 1_700_000_000.0 + clock.t, start=False)
+    fan = FL.FanOut([web, udp])
+    check("bioarena is the primary, whatever the order (it is the official score)",
+          fan.primary is udp and fan.peer == "bioarena" and fan.session == "main")
+    fan.info = "cam 60fps"
+    fan.hub_status = {"red": {"fps": 60}}
+    check("status reaches both", web.info == udp.info == "cam 60fps"
+          and web.hub_status == {"red": {"fps": 60}})
+    fan.score("red", 2, clock.t)
+    fan.heartbeat()
+    rx = HF.Receiver()
+    for data, _ in sock.sent:
+        rx.accept(data, "10.0.100.21")
+    web.flush()
+    check("each ball reaches bioarena's feed and Watchtower",
+          rx.match_counts()["red"] == 2
+          and sum(n for _, n in posts[-1]["events"]["red"]) == 2
+          and fan.counts == {"red": 2, "blue": 0})
+    check("no key in what the page and log show",
+          fan.describe() == "http://m4:8000, udp 10.0.100.5:8411")
+    sock.replies.append(_json.dumps({"v": 1, "seq": udp.seq, "match_state": "AUTO_PERIOD"}).encode())
+    fan.poll_replies()
+    check("linked and the match state come from bioarena",
+          fan.linked() and fan.last_reply["match_state"] == "AUTO_PERIOD")
+    fail[0] = True
+    clock.t += 3
+    fan.score("blue", 1, clock.t)
+    web.flush()
+    fan.heartbeat()
+    sock.replies.append(_json.dumps({"v": 1, "seq": udp.seq, "match_state": "AUTO_PERIOD"}).encode())
+    fan.poll_replies()
+    check("a dead Watchtower does not hold bioarena's feed",
+          fan.linked() and fan.links() == {"http://m4:8000": False, "udp 10.0.100.5:8411": True})
+    check("and its error is named, and its events stay queued",
+          fan.send_errors == 1 and fan.last_error.startswith("http://m4:8000:")
+          and fan.pending() == 1)
+    import tbavid.hubcount as HC
+    from types import SimpleNamespace as NS
+    line = HC.status_line(fan, {"c": NS(fps=lambda: 60.0, lag_ms=lambda: 4.0)},
+                          NS(zones={"red": [], "blue": []}, setup=NS(combine={})))
+    check("the console names the target that is not answering",
+          "http://m4:8000 NO REPLY" in line and "bioarena AUTO_PERIOD" in line)
+    # No bioarena at the venue (the app always lists the spec's address):
+    # still linked, through Watchtower, and the state is Watchtower's.
+    fail[0] = False
+    clock.t += 5
+    web.flush()
+    check("bioarena silent, Watchtower answering: linked, led by Watchtower",
+          fan.linked() and fan.lead() is web and fan.peer == "frc-fms"
+          and fan.links() == {"http://m4:8000": True, "udp 10.0.100.5:8411": False})
+    line = HC.status_line(fan, {"c": NS(fps=lambda: 60.0, lag_ms=lambda: 4.0)},
+                          NS(zones={"red": [], "blue": []}, setup=NS(combine={})))
+    check("and the console says Watchtower took it, bioarena not answering",
+          "frc-fms took it" in line and "udp 10.0.100.5:8411 NO REPLY" in line)
+    check("the partner relay and /board still get bioarena's own reply, not Watchtower's",
+          fan.field_reply["match_state"] == "AUTO_PERIOD" and not fan.field_linked
+          and "record" not in fan.field_reply)
+    check("names without the key", FL.sender_name(fan) == "http://m4:8000, udp 10.0.100.5:8411"
+          and FL.sender_name(udp) == "10.0.100.5:8411" and FL.sender_name(web) == "http://m4:8000")
+    prac = FL.make_sender("http://k@m4:8000, 10.0.100.5:8411", udp_host="127.0.0.1")
+    check("practice mode moves only bioarena to the local stand-in",
+          prac.primary.target == ("127.0.0.1", 8411) and prac.senders[0].url == "http://m4:8000")
+    prac.close()
+    check("each FmsSender labels its events, so Watchtower's fuel table shows who sent what",
+          web.source.startswith("tbavid ") and web.source != prac.senders[0].source)
+
+    # The broadcast double count (2026-10-10, blue 221 auto fuel against 110
+    # total points): one camera, two outlines on a hub, summed.
+    from tbavid import hubapp as HA0
+    cam = lambda zones: {"cameras": [{"name": "stream", "zones": zones}]}
+    two = [{"hub": "blue", "outline": [[0, 0], [1, 0], [1, 1]]},
+           {"hub": "blue", "outline": [[5, 5], [6, 5], [6, 6]]}]
+    w = HA0.double_count_risks(cam(two))
+    check("two blue outlines on one camera, summed: warned", len(w) == 1 and "set blue to max" in w[0])
+    check("not once combine is max", HA0.double_count_risks(dict(cam(two), combine={"blue": "max"})) == [])
+    check("not for one outline per hub, nor exit lines",
+          HA0.double_count_risks(cam(two[:1] + [{"hub": "blue", "line": [[0, 0], [1, 1]], "out": [0, 1]}])) == [])
+    check("not for two cameras each with one outline (other sides of the hub)",
+          HA0.double_count_risks({"cameras": [{"name": "a", "zones": two[:1]}, {"name": "b", "zones": two[1:]}]}) == [])
+
+    # Practice mode with both targets: test balls must never reach the live
+    # Watchtower, which credits them to the match its timeline has open.
+    from tbavid import hubapp as HA, hubcount as HCo
+    real_run, real_listen, real_problems = HCo.run, HF.listen, HA.problems
+    try:
+        HCo.run = lambda sender, setup, stop=None, **kw: stop.wait(5)
+        HF.listen = lambda **kw: None
+        HA.problems = lambda cfg: []
+        ctl = HA.HubController(None)
+        ctl.cfg = {"cameras": [{"name": "c", "source": "rec.mp4", "ball_area": 100,
+                   "zones": [{"hub": "red", "outline": [[0, 0], [10, 0], [10, 10]]}]}]}
+        ctl.start("http://K@127.0.0.1:8000, 10.0.100.5:8411", practice=True)
+        check("practice with Watchtower and bioarena: only the local test receiver",
+              isinstance(ctl.sender, HF.FeedSender) and ctl.sender.target == ("127.0.0.1", 8411)
+              and ctl.feed_target == "127.0.0.1:8411")
+        ctl.stop()
+        __import__("time").sleep(0.3)
+    finally:
+        HCo.run, HF.listen, HA.problems = real_run, real_listen, real_problems
+
+    # The Watchtower app: bioarena's address is never typed. vision.yaml's
+    # first feeds: entry, else the spec's; Phones & PINs only shows it.
+    root = Path(__file__).resolve().parent.parent
+    page = (root / "apps" / "watchtower" / "home.html").read_text()
+    check("Phones & PINs shows bioarena read-only, with no input box",
+          'id="fieldurl"' in page and "server.field_feed" not in page
+          and "field_feed" not in (root / "apps" / "watchtower" / "settings.py").read_text())
+    src = (root / "apps" / "watchtower" / "main.py").read_text()
+    tree = ast.parse(src)
+    ns = {"Path": Path}
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.name in ("vision_feed", "counter_target"):
+            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
+        if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "FIELD_FEED":
+            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
+    ev = {"key": "K", "port": 8000, "field_feed": ""}
+    check("nothing found: Watchtower and the spec's bioarena address",
+          ns["FIELD_FEED"] == "10.0.100.5:8411"
+          and ns["counter_target"](ev) == "http://K@127.0.0.1:8000, 10.0.100.5:8411")
+    check("vision.yaml's address when it has one",
+          ns["counter_target"](dict(ev, field_feed="192.168.1.50:8411"))
+          == "http://K@127.0.0.1:8000, 192.168.1.50:8411")
+    check("main() uses it", "ctl.default_target = counter_target(ev)" in src
+          and '"field_feed": vf or FIELD_FEED' in src)
+    try:
+        import yaml  # noqa: F401  (CI has no PyYAML; the app bundles it)
+    except ImportError:
+        return
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "config").mkdir()
+        check("no vision.yaml: no feed", ns["vision_feed"](Path(d)) == "")
+        (Path(d) / "config" / "vision.yaml").write_text(
+            "fms_url: x\n# feeds:\n#   - {host: 1.2.3.4}\n")
+        check("fms.init's commented-out feeds: none", ns["vision_feed"](Path(d)) == "")
+        (Path(d) / "config" / "vision.yaml").write_text(
+            "feeds:\n  - name: bioarena\n    host: 192.168.1.50\n")
+        check("vision.yaml's first feed, default port 8411",
+              ns["vision_feed"](Path(d)) == "192.168.1.50:8411")
+        for text, want in (("feeds: 10.0.100.5\n", "10.0.100.5:8411"),
+                           ("feeds: {host: 10.0.100.6, port: 9000}\n", "10.0.100.6:9000"),
+                           ("feeds: ['10.0.100.7:8411']\n", "10.0.100.7:8411"),
+                           ("feeds: [{host: a, port: 8411/udp}, {host: 10.0.100.8}]\n", "10.0.100.8:8411"),
+                           ("feeds: [{host: 'udp://x'}]\n", ""), ("feeds: 7\n", ""),
+                           ("feeds: [\n", "")):
+            (Path(d) / "config" / "vision.yaml").write_text(text)
+            check(f"vision.yaml {text.strip()!r} -> {want!r}, never a crash at launch",
+                  ns["vision_feed"](Path(d)) == want)
+
+
+def test_plugin_combines_like_hubtally():
+    """Watchtower's plugin (fms_counter) and the page's counter (hubcount.run)
+    must give one hub the same count from the same setup.
+
+    The plugin added every zone, so an outline and an exit line on one hub
+    counted each ball going in and again coming out: on 2026-10-10
+    Watchtower showed blue 221 auto fuel against a broadcast's 110 total
+    points. HubTally (the page's counter since v0.5.3) takes the larger kind.
+    """
+    import json as _json
+    from types import SimpleNamespace as NS
+    from tbavid import fms_counter as FC
+    from tbavid import hubcount as HC
+
+    class Fake:                        # a zone counter whose count is set by hand
+        def __init__(self, poly):
+            self.poly, self.reported = poly, 0
+        def update(self, blobs):
+            pass
+
+    mouth = [[100, 100], [300, 100], [300, 160], [100, 160]]
+    mouth2 = [[400, 100], [600, 100], [600, 160], [400, 160]]
+    exit_ = {"line": [[100, 400], [300, 400]], "out": [200, 450]}
+    frame = np.zeros((720, 1280, 3), np.uint8)
+
+    def both(zones, counts, extra=None, steps=1):
+        """(plugin total, the page's count) for blue with these zone counts:
+        each a final count reached evenly over `steps` seconds, or a list of
+        the count at each second."""
+        cfg = {"cameras": [{"name": "cam", "source": "0", "ball_area": 300,
+                            "zones": [dict(z, hub="blue", name=f"z{i}") for i, z in enumerate(zones)]}]}
+        cfg.update(extra or {})
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "cams.json"
+            path.write_text(_json.dumps(cfg))
+            pc = FC.ColourCounter({"hub": "blue", "setup": str(path), "camera": "cam"})
+            setup = HC.load_setup(str(path))
+        pc._build(frame)
+        pc.counters = [Fake(c.poly) for c in pc.counters]
+        pc.eyes = [NS(blobs=lambda f: []) for _ in pc.counters]     # no OpenCV here
+        tally = HC.HubTally(setup)
+        page = setup.zones("blue")
+        for z in page:
+            z.counter = NS(reported=0)
+        t = 0.0
+        for step in range(1, steps + 1):
+            t += 1.0
+            for i, n in enumerate(counts):
+                now = n[step - 1] if isinstance(n, list) else n * step // steps
+                pc.counters[i].reported = page[i].counter.reported = now
+            pc.process(frame, t)
+            tally.tick(t)
+            tally.rise("blue")              # as hubcount.run does every frame
+        return pc.total, tally.sent["blue"]
+
+    plugin, hub = both([{"outline": mouth}, exit_], [40, 38])
+    check("outline 40 + exit line 38 on one hub: 40 (the larger), not 78",
+          plugin == hub == 40)
+    plugin, hub = both([{"outline": mouth}, exit_], [12, 30])
+    check("and an exit line that sees more wins", plugin == hub == 30)
+    plugin, hub = both([{"outline": mouth}, {"outline": mouth2}], [20, 15])
+    check("two outlines combine by the setup's sum", plugin == hub == 35)
+    plugin, hub = both([{"outline": mouth}, {"outline": mouth2}], [20, 15],
+                       {"combine": {"blue": "max"}})
+    check("or its max", plugin == hub == 20)
+    plugin, hub = both([{"outline": mouth}, {"outline": mouth2}, exit_], [20, 15, 30],
+                       {"combine": {"blue": "max"}})
+    check("each kind combined, then the larger kind", plugin == hub == 30)
+    entries = [5 * k for k in range(1, 9)]              # 5 a second, 40 in all
+    exits = [0, 0] + entries[:-2]                       # each out 2 s after it went in
+    plugin, hub = both([{"outline": mouth}, exit_], [entries, exits],
+                       {"confirm": {"blue": 2}}, steps=8)
+    check("confirm (exits now + recent entries) is the page's too: 40, not 70",
+          plugin == hub == 40)
+    from types import SimpleNamespace as Z
+    o, e = Z(kind="outline"), Z(kind="exit")
+    check("the console calls outline + exit 'the larger', never 'sum' (it read as a double count)",
+          HC.describe_combine([o, e], "sum") == "the larger of outline and exit"
+          and HC.describe_combine([o, o], "sum") == "sum" and HC.describe_combine([o], "sum") == ""
+          and HC.describe_combine([o, o, e], "max") == "the larger of outline and exit (2 outlines by max)")
+    one = FC.ColourCounter({"hub": "blue", "outline": mouth, "ball_area": 300})
+    one._build(frame)
+    one.counters = [Fake(mouth)]
+    one.eyes = [NS(blobs=lambda f: [])]
+    one.counters[0].reported = 7
+    check("a single outline from vision.yaml counts as before", one.process(frame, 1.0) == 7)
+    pc = FC.ColourCounter({"hub": "blue", "outline": mouth, "ball_area": 300})
+    pc._build(frame)
+    pc.counters = [Fake(mouth)]
+    pc.counters[0].reported = 5
+    check("and /control's colour figure is the hub's count", pc.status()["detail"] == "colour 5")
+
+
+def test_find_cameras_says_why():
+    """Find cameras did nothing visible when another job (the "pictures" grab
+    that runs when a setup opens) was still going: HubController.job refused
+    and said so only in the log. The refusal is now an API error (a toast),
+    and a failed search opens a box saying why."""
+    import threading
+    from tbavid import hubweb as HW
+    from tbavid.hubapp import HubController
+    ctl = HubController(None)
+    gate = threading.Event()
+    ctl.job("pictures", lambda: gate.wait(5))
+    try:
+        HW.ACTIONS["find_cameras"](ctl, {})
+        check("Find cameras during another job says it is busy", False)
+    except ValueError as e:
+        check("Find cameras during another job says it is busy, and with what",
+              "Busy with pictures" in str(e))
+    gate.set()
+    for _ in range(100):
+        if not ctl.job_state["running"]:
+            break
+        __import__("time").sleep(0.01)
+    real = HW.probe_cameras
+    try:
+        HW.probe_cameras = lambda: (_ for _ in ()).throw(RuntimeError("camera access denied"))
+        HW.ACTIONS["find_cameras"](ctl, {})
+        for _ in range(100):
+            if not ctl.job_state["running"]:
+                break
+            __import__("time").sleep(0.01)
+    finally:
+        HW.probe_cameras = real
+    check("a failed search keeps its reason for the page",
+          ctl.job_state["name"] == "find cameras" and "access denied" in ctl.job_state["error"])
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    check("and the page shows it", 'modal("Could not look for cameras"' in page)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -4922,7 +5270,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_app_update,
+               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day):

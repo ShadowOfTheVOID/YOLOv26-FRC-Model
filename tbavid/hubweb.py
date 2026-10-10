@@ -287,6 +287,17 @@ def make_handler(ctl: HubController, allow_remote: bool = False,
     return Handler
 
 
+def _job(ctl, name: str, fn) -> bool:
+    """Start a job, or say why not. HubController.job refuses while another
+    job runs (one camera at a time) and said so only in the log, so a click
+    on Find cameras while the opening "pictures" job still ran did nothing
+    visible. The refusal is now an error, which the page shows as a toast."""
+    if not ctl.job(name, fn):
+        busy = ctl.job_state.get("name") or "another job"
+        raise ValueError(f"Busy with {busy} -- try again when it finishes.")
+    return True
+
+
 def _at(body) -> Optional[float]:
     v = body.get("at")
     return float(v) if v not in (None, "") else None
@@ -316,18 +327,18 @@ ACTIONS = {
     "ball_test_check": lambda c, b: c.check_ball_test(b.get("hand", {})),
     "record_start": lambda c, b: c.start_recording(),
     "record_stop": lambda c, b: c.stop_recording(),
-    "test_recording": lambda c, b: c.job("test", lambda: c.test_recording(
+    "test_recording": lambda c, b: _job(c, "test", lambda: c.test_recording(
         b["camera"], b["video"], b.get("hand") or {})),
     # The one hand-count check (test + calibration), and applying its picks.
-    "check_recording": lambda c, b: c.job("check", lambda: c.check_recording(
+    "check_recording": lambda c, b: _job(c, "check", lambda: c.check_recording(
         b["camera"], b["video"], b.get("hand") or {})),
     "grab_all": lambda c, b: c.job("pictures", c.grab_all),
     "reference": lambda c, b: c.set_reference(b["camera"]),
     "shift_zones": lambda c, b: c.shift_zones(b["camera"], b["dx"], b["dy"]),
-    "grab": lambda c, b: c.job("picture", lambda: (c.grab(b["camera"], _at(b)), None)[1]),
-    "measure": lambda c, b: c.job("measure", lambda: c.measure(b["camera"])),
-    "find_cameras": lambda c, b: c.job("find cameras", probe_cameras),
-    "calibrate": lambda c, b: c.job("calibrate", lambda: c.calibrate(
+    "grab": lambda c, b: _job(c, "picture", lambda: (c.grab(b["camera"], _at(b)), None)[1]),
+    "measure": lambda c, b: _job(c, "measure", lambda: c.measure(b["camera"])),
+    "find_cameras": lambda c, b: _job(c, "find cameras", probe_cameras),
+    "calibrate": lambda c, b: _job(c, "calibrate", lambda: c.calibrate(
         b["camera"], b["video"], b.get("hand") or {})),
     "apply_calibration": lambda c, b: c.update_camera(
         b["camera"], {"blur": b["blur"], "remove_static": b["remove_static"]}),

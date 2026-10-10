@@ -126,6 +126,9 @@ code{-webkit-user-select:text;user-select:text}
   <div class="card"><h2>Public address</h2>
     <div class="form" id="form_public"></div>
     <p class="note">Optional. Set it when a reverse proxy or tunnel (ours is https://watchtower.systemoverload.org) forwards to port 8000 on this computer: phones are then sent through this address instead of the .local name, and the QR code above carries it; the Wi-Fi IP stays listed for when the website or internet is down. Empty = Wi-Fi only. A hub counter on another computer sends to this address with the vision key in front: https://KEY@watchtower.systemoverload.org.</p></div>
+  <div class="card"><h2>Field: bioarena</h2>
+    <div class="url" id="fieldurl" style="font-size:16px">—</div><div class="sub" id="fieldsub"></div>
+    <p class="note">The hub counter sends every ball to Watchtower here (port 8000) and to bioarena's live feed (UDP), which decides the AUTO winner and lights the hubs. Nothing to type: the address is the first <code>feeds:</code> entry in Watchtower's config/vision.yaml, or the feed spec's 10.0.100.5:8411. Only one counter may feed bioarena: no second counter, no mock vision run.</p></div>
   <div class="card"><h2>PINs</h2>
     <div class="form" id="form_pins"></div>
     <div class="row" style="margin-top:12px"><button class="btn" onclick="regenPins()">Make new PINs</button></div>
@@ -277,6 +280,13 @@ async function refresh(){
   // only the raw IP stays, for when the website or the internet is down.
   $("phoneurl2").textContent=pub?("if the website is down, on the Wi-Fi: "+s.phone_url):(s.phone_name?("or "+s.phone_url):"");
   $("queueurl").textContent=(pub||s.phone_name||s.phone_url)+"/queue";
+  // While counting, the address the counter really sends to (the camera
+  // page's target box can be edited, and practice mode uses a local one).
+  const fl=Object.entries(h.links||{}).find(([n])=>/^udp /.test(n));
+  $("fieldurl").textContent=(h.running&&fl?fl[0].slice(4):s.field_feed)||"—";
+  $("fieldsub").textContent=h.running&&!fl?"not sending to bioarena (see Hub cameras, Send counts to)":
+    (s.field_from==="vision.yaml"?"from config/vision.yaml":"the feed spec's address")
+    +(h.running?(fl[1]?" · bioarena answering":" · no reply from bioarena yet"):"");
   if(qrUrl!==qrFor){qrFor=qrUrl;try{$("qr").innerHTML=await api().qr(qrUrl);}catch(e){}}
 }
 async function renderUpdate(running){let u;try{u=await api().update_status();}catch(e){return;}

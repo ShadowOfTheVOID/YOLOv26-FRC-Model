@@ -334,6 +334,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="comb" id="comb_red"><span class="muted">Red zones combine by</span><div class="seg" data-hub="red"><button>sum</button><button>max</button><button>median</button></div></div>
         <div class="comb" id="comb_blue"><span class="muted">Blue zones combine by</span><div class="seg" data-hub="blue"><button>sum</button><button>max</button><button>median</button></div></div>
         <p class="muted" style="margin:8px 0 0">Sum when the outlines see different balls (other sides of the hub); max or median when several watch the same ones.</p>
+        <p id="combwarn" style="display:none;margin:8px 0 0;color:#f5a524"></p>
       </div>
       <div id="confbox" style="display:none">
         <div class="comb" id="conf_red"><span class="muted">Red: exits confirm entries after</span><input class="input tnum" id="confirm_red" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('red',this.value)"><span class="muted">s</span></div>
@@ -365,7 +366,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
     <section class="card step" id="st4">
       <h2><span class="n">4</span>Run</h2>
-      <label class="field"><span>Send counts to <span class="muted">(bioarena host:port, or Watchtower https://KEY@watchtower.systemoverload.org or http://KEY@host:8000)</span></span><input class="input tnum" id="target" value="10.0.100.5:8411" oninput="this.dataset.edited=1"></label>
+      <label class="field"><span>Send counts to <span class="muted">(bioarena host:port, or Watchtower https://KEY@watchtower.systemoverload.org or http://KEY@host:8000; both, separated by a comma)</span></span><input class="input tnum" id="target" value="10.0.100.5:8411" oninput="this.dataset.edited=1"></label>
       <label class="switch"><span>Practice with a test receiver</span><input type="checkbox" id="practice"><i></i></label>
       <label class="switch"><span>Main box: also send a partner box's counts <span class="muted">(one camera per box)</span></span><input type="checkbox" id="partner" onchange="renderPartnerHint()"><i></i></label>
       <div id="partnerbox" style="display:none;margin:-2px 0 8px">
@@ -547,6 +548,7 @@ function renderZoneOptions(){const zs=S.cfg.cameras.flatMap(c=>c.zones);let comb
     const both=(outl>0&&ex>0)||!!(S.cfg.confirm||{})[h];
     $("comb_"+h).style.display=many?"":"none";$("conf_"+h).style.display=both?"":"none";comb=comb||many;conf=conf||both;}
   $("combbox").style.display=comb?"":"none";$("confbox").style.display=conf?"":"none";
+  const dw=S.double_count||[];$("combwarn").style.display=dw.length?"":"none";$("combwarn").textContent=dw.join(" ");
   if(zs.some(z=>z.line))$("exitbox").open=true;}
 /* Has the camera moved since its outlines were drawn? (tbavid/camcheck.py) */
 function alignBad(n){const a=S.alignment&&S.alignment[n];return !!a&&a.status!=="ok";}
@@ -576,7 +578,9 @@ function setStatus(kind,text,sub){$("sdot").className="dot "+kind;$("stext").tex
 /* Which field system the counts go to, by its address: Watchtower / frc-fms
    take http://KEY@host:8000, bioarena a UDP host:port. Inside the Watchtower
    app this page said "Connected to bioarena" while sending to Watchtower. */
-function fieldName(){const t=(S.running?S.live.target:$("target").value)||"";return /^https?:/i.test(t.trim())?"Watchtower":"bioarena";}
+function fieldName(){const t=((S.running?S.live.target:$("target").value)||"").split(/[,\s]+/).filter(Boolean);
+  const web=t.filter(x=>/^https?:/i.test(x)).length,udp=t.length-web;
+  return web&&udp?"bioarena and Watchtower":web?"Watchtower":"bioarena";}
 function renderUpdate(){const u=S.update,bar=$("updbar");
   if(!u||!u.available){bar.style.display="none";return;}
   bar.style.display="";$("updver").textContent=u.latest;$("updnotes").href=u.release_url||"#";
@@ -600,7 +604,12 @@ function renderLive(){const v=S.live,F=fieldName();
   else if(v.linked){const r=v.reply||{};const delayed=Object.values(S.kinds).includes("stream");
     // a Wi-Fi camera is not flagged here: its delay is small and shown as fps
     const parts=[(r.match_state||"").replace(/_/g," ").toLowerCase(),r.shift||"",`${v.rtt_ms} ms`].filter(Boolean);
-    setStatus(delayed?"warn":"ok",`Connected to ${F}`,parts.join(" · ")+(delayed?" · counting from a delayed stream":""));}
+    // Several targets (Watchtower and bioarena): connected while any answers,
+    // and the silent one named. At a venue with no bioarena that is bioarena.
+    const ups=Object.entries(v.links||{}),down=ups.filter(([n,up])=>!up).map(([n])=>n);
+    const to=down.length?ups.filter(([n,up])=>up).map(([n])=>/^udp /.test(n)?"bioarena":"Watchtower").join(" and "):F;
+    if(down.length)parts.push("no reply from "+down.join(", "));
+    setStatus(delayed||down.length?"warn":"ok",`Connected to ${to}`,parts.join(" · ")+(delayed?" · counting from a delayed stream":""));}
   else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
   $("xcheck").innerHTML=Object.entries(v.check||{}).map(([h,c])=>`<span class="chip"${c.warn?' style="color:#f5a524"':""} title="exits now against the outline ${c.lag_s} s ago${c.confirming?" · exits confirm this hub":""}">${h} exit ${c.exit} / outline ${c.due}${c.ratio!=null?` <b class="tnum">${Math.round(c.ratio*100)}%</b>`:""}${c.warn?" · check the cameras":""}</span>`).join("");
   renderTests(v);
@@ -611,7 +620,9 @@ function handleJob(){const j=S.job;
   if(j.running){$("prog").style.display=j.progress!=null?"block":"none";$("prog").firstChild.style.width=((j.progress||0)*100)+"%";
     hint(`<b>${esc(j.name[0].toUpperCase()+j.name.slice(1))}…</b>`);return;}
   $("prog").style.display="none";if(j.id===jobSeen)return;jobSeen=j.id;
-  if(j.error){hint("");return;}
+  // A job that failed said so only in the log: Find cameras looked dead.
+  if(j.error){hint("");if(j.name==="find cameras")modal("Could not look for cameras",`<p>${esc(j.error)}</p>`,[{label:"OK",cls:"primary"}]);
+    else toast(`${j.name[0].toUpperCase()+j.name.slice(1)} failed: ${j.error}`,"bad");return;}
   if(j.name==="find cameras")chooseCamera(j.result||[]);
   else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
     else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
@@ -697,7 +708,7 @@ $("f_model_weight").addEventListener("change",async()=>{try{await api("update_ca
 document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>api("combine",{hub:g.dataset.hub,how:b.textContent}).then(refresh)));
 function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
 function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
-function findCams(){api("find_cameras");}
+function findCams(){api("find_cameras").catch(()=>{});}
 let testPassed=false;
 function renderTests(v){const run=S.running,bt=v.ball_test;
   $("bt_start").disabled=!run;$("bt_start").textContent=bt?"Restart ball test":"Start ball test";$("bt_check").style.display=bt?"":"none";

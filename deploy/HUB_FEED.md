@@ -953,6 +953,21 @@ python3 run.py hubfeed-listen --counter 10.0.100.21
 It applies bioarena's acceptance rules, prints every count as bioarena would
 receive it, and replies like bioarena, so the counter shows a link.
 
+**Only one counter may send.** The spec reads a new session as a restart and
+carries what the old session had counted. Two senders on one receiver look
+like a restart on every datagram, and each one carries the other's whole
+total again: with a real 5 and a mock 3, the stand-in read red 80 after
+one second, and the count kept climbing. The usual second sender is
+Watchtower's mock vision, which feeds `vision.yaml`'s `feeds:` since
+watchtower-fms PR #3 (deploy/FRC_FMS.md). `hubfeed-listen` and the main
+box's partner port therefore take a new session as a restart only once the
+current one has been quiet for 1 s. While it is live, the newcomer is
+dropped and `replaced session: is a second counter sending?` is printed
+once. The sender that was there first keeps the feed, so a mock started
+after the real counter adds nothing. If the mock was there first, it is the
+one counted: stop it, then start the real counter. bioarena's own receiver
+follows the spec, not this rule, so make sure only one counter sends there.
+
 ## 4. Run it
 
 ```bash
@@ -966,6 +981,18 @@ state, shift, round trip). `owed` is balls reported that have since come
 back out of the outline; the next ball in is absorbed against them, because
 the feed may never go down. A half field: give only the one hub; the other
 reads 0.
+
+**Watchtower and bioarena at once.** *Send counts to* (or `--target`)
+takes both, separated by a comma:
+`http://KEY@<M4>:8000, 10.0.100.5:8411`. Each ball goes to each target
+(`tbavid/fmslink.FanOut`). bioarena's link is the one shown as
+*Connected*, with its match state. A target that stops answering is named
+on the page ("One target not answering") and in the console line (`NO
+REPLY`), and the other target still gets every ball. Only one bioarena may
+be listed, since two of our sessions on one receiver read as restarts. The
+Watchtower app fills this in by itself: the first `feeds:` entry in its
+`config/vision.yaml`, else `10.0.100.5:8411`. It is shown read-only on
+Phones & PINs. The link reads as up while any target answers.
 
 Leave it running across matches; it never needs resetting. If it restarts,
 bioarena keeps the match's score and loses only the balls scored while it was

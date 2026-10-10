@@ -1,0 +1,37 @@
+# watchtower.systemoverload.org: Watchtower's port 8000 behind TLS, and the
+# offline page (deploy/watchtower-offline.html) in Watchtower's own look
+# while the FMS is not running.
+#
+#   sudo mkdir -p /etc/caddy/watchtower
+#   sudo cp deploy/watchtower-offline.html /etc/caddy/watchtower/offline.html
+#   sudo systemctl reload caddy
+#
+# Keep the reverse_proxy line the site already has (where the M4's port 8000
+# is reached from this host); only the handle_errors block is new. Then set
+# Watchtower's Phones & PINs -> Public address to
+# https://watchtower.systemoverload.org.
+
+watchtower.systemoverload.org {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# Websockets (/ws, every Watchtower page) pass through reverse_proxy as is.
+	reverse_proxy <M4 address>:8000
+
+	# The FMS is down or the tunnel is: the offline page, not Caddy's error.
+	# The status stays 502/503/504 and nothing is cached, so the page's own
+	# check (every 15 s) sees Watchtower the moment it is back.
+	handle_errors {
+		@down expression `{err.status_code} in [502, 503, 504]`
+		handle @down {
+			header Cache-Control "no-store"
+			root * /etc/caddy/watchtower
+			rewrite * /offline.html
+			file_server
+		}
+	}
+}

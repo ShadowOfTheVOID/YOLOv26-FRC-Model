@@ -102,8 +102,40 @@ _MODEL_OPTIONS = {
 }
 
 
+class _ZoneView:
+    """One plugin zone as HubTally sees a hubcount.Zone: its kind and count."""
+
+    def __init__(self, kind: str, count):
+        self.kind, self._count = kind, count
+
+    @property
+    def reported(self) -> int:
+        return self._count()
+
+
+class _OneHub:
+    """The slice of hubcount.Setup that HubTally reads, for one hub."""
+
+    def __init__(self, hub: str, zones: list, combine: str, confirm: float):
+        self.hub, self._zones = hub, zones
+        self.combine = {h: combine for h in HC.HUB_NAMES}
+        self.confirm = {hub: confirm} if confirm else {}
+
+    def zones(self, hub: str) -> list:
+        return self._zones if hub == self.hub else []
+
+
 class ColourCounter:
-    """frc-fms counter interface: __init__(cfg), process(frame, t), total, draw."""
+    """frc-fms counter interface: __init__(cfg), process(frame, t), total, draw.
+
+    A hub's zones are combined exactly as `hubcount.run` combines them, by
+    the same HubTally: each kind (outlines, exit lines) by the setup's
+    combine, then the larger kind, with the setup's confirm. This plugin
+    once added every zone: a hub with an outline and an exit line counted
+    each ball going in and again coming out. On 2026-10-10 Watchtower showed
+    blue 221 auto fuel against a broadcast's 110 total points, while the
+    page's own counter (HubTally since v0.5.3) took the larger.
+    """
 
     PLUGIN_API = 1
     NAME = "tbavid-colour"
@@ -122,6 +154,10 @@ class ColourCounter:
         self.blur = float(cfg.get("blur", HC.DEFAULT_BLUR))
         self.remove_static = bool(cfg.get("remove_static", False))
         self.fps = float(cfg.get("fps", 30) or 30)
+        # From the setup file when the hub names one (Setup's own rules);
+        # a single roi / outline / line has nothing to combine.
+        self.combine, self.confirm = "sum", 0.0
+        self.tally = None
         self.zones = self._zone_specs(cfg)
         if not self.zones:
             raise ValueError(f"hub {self.hub}: give roi, outline, line+out, or "
@@ -160,6 +196,9 @@ class ColourCounter:
                 self.blur = cam.blur
             if "remove_static" not in cfg:
                 self.remove_static = cam.remove_static
+            if self.hub in setup.combine:
+                self.combine = setup.combine[self.hub]
+            self.confirm = setup.confirm.get(self.hub, 0.0)
             return [("exit", list(z.line), z.out) if z.line else
                     ("outline", list(z.outline or []), None)
                     for z in cam.zones if z.hub == self.hub]
@@ -184,6 +223,20 @@ class ColourCounter:
                                         self.remove_static, self.fps))
         if self.model:
             self._build_model()
+        key = self.hub if self.hub in HC.HUB_NAMES else HC.HUB_NAMES[0]
+        views = [_ZoneView(kind, (lambda i=i: self._zone_count(i)))
+                 for i, (kind, _, _) in enumerate(self.zones)]
+        self.tally = HC.HubTally(_OneHub(key, views, self.combine, self.confirm))
+        self._key = key
+
+    def _hub_count(self, per_zone: List[int]) -> int:
+        """Display numbers (colour half, model half) by the same rule as the
+        score: each kind combined, then the larger kind."""
+        by: dict = {}
+        for (kind, _, _), n in zip(self.zones, per_zone):
+            if n is not None:
+                by.setdefault(kind, []).append(n)
+        return max((HC.combined(v, self.combine) for v in by.values()), default=0)
 
     def _build_model(self) -> None:
         from .hubmodel import ModelCounter, ModelEye, ModelWorker, model_stride
@@ -256,7 +309,8 @@ class ColourCounter:
         # that fell behind is dropped and colour alone is lower); frc-fms adds
         # events, so nothing is taken back -- new fuel waits until the count
         # passes the total again.
-        now = sum(self._zone_count(i) for i in range(len(self.counters)))
+        self.tally.tick(t)
+        now = self.tally.value(self._key)
         new = max(0, now - self.total)
         self.total += new
         return new
@@ -264,7 +318,7 @@ class ColourCounter:
     def status(self) -> dict:
         """The line frc-fms's /control shows under this hub: both halves of
         the count, or why the model is not in it."""
-        colour = sum(c.reported for c in self.counters)
+        colour = self._hub_count([c.reported for c in self.counters])
         if self.worker is None:
             if self.model and not self.counters:
                 return {"detail": "waiting for the first frame"}
@@ -275,7 +329,7 @@ class ColourCounter:
         if self.worker.off:
             return {"detail": f"colour {colour} (model off)",
                     "warning": "model too slow, turned off; counting by colour only"}
-        model = sum(m.reported for m in self.models if m is not None)
+        model = self._hub_count([m.reported if m is not None else None for m in self.models])
         out = {"detail": f"colour {colour} · model {model}"}
         if self.worker.skipped:
             out["warning"] = f"model skipped {self.worker.skipped} frames"
@@ -294,8 +348,8 @@ class ColourCounter:
             cv2.polylines(frame, [pts], True, (0, 255, 255), 2)
         label = f"{self.hub}: {self.total}"
         if self.worker is not None:
-            colour = sum(c.reported for c in self.counters)
-            model = sum(m.reported for m in self.models if m is not None)
+            colour = self._hub_count([c.reported for c in self.counters])
+            model = self._hub_count([m.reported if m is not None else None for m in self.models])
             label += (f"  (colour {colour}, model off)" if self.worker.off or self.worker.error
                       else f"  (colour {colour}, model {model})")
         cv2.putText(frame, label, (20, 50),

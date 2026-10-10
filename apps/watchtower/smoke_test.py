@@ -86,7 +86,8 @@ def main(program: str) -> int:
         state = json.loads(urllib.request.urlopen(req, timeout=5).read())["result"]
         assert state["fms_ok"] and set(state["pins"]) == {"control", "ref", "emcee"}, "Home state wrong"
         assert "Match Queue" in get(FMS + "/queue"), "the match queue page is not served"
-        target = json.loads(get(HUB + "/api/state"))["default_target"]
+        # Watchtower first; bioarena may follow after a comma (Phones & PINs).
+        target = json.loads(get(HUB + "/api/state"))["default_target"].split(",")[0].strip()
         assert target.startswith("http://") and target.endswith("@127.0.0.1:8000"), \
             "the hub counter is not set to this Watchtower"
         key = target[len("http://"):target.index("@")]

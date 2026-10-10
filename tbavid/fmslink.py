@@ -31,6 +31,7 @@ Two things the FMS relies on that bioarena did not:
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -69,6 +70,12 @@ class FmsSender:
             raise ValueError("frc-fms needs its vision_key: put it in the URL, "
                              "http://KEY@host:8000 (server.vision_key in event.yaml)")
         self.session = "frc-fms"
+        # Watchtower stores every event it is sent, from every sender, with
+        # this label (its fuel table's `source`) and no dedupe. Its own
+        # vision runner and ours both said "live", so a double count could
+        # not be traced to a sender. Ours now names itself, once per run.
+        import secrets
+        self.source = f"tbavid {secrets.token_hex(3)}"
         self.peer = "frc-fms"      # what status lines call the other end
         self.counts: Dict[str, int] = {h: 0 for h in HUBS}
         self.info = ""
@@ -133,7 +140,7 @@ class FmsSender:
             status = {h: dict(live.get(h) or {"counter": "tbavid colour"},
                               session_total=self.counts[h], info=self.info)
                       for h in (live or HUBS)}
-        body = {"events": batch, "status": status, "source": "live"}
+        body = {"events": batch, "status": status, "source": self.source}
         sent_at = self.clock()
         try:
             reply = self._post(f"{self.url}/api/vision/events", body, self.key)
@@ -163,9 +170,149 @@ class FmsSender:
             return json.loads(r.read() or b"{}")
 
 
-def make_sender(target: str):
-    """A bioarena UDP sender for host[:port], an frc-fms one for a URL."""
-    if is_fms_target(target):
-        return FmsSender(target)
+def split_targets(target: str) -> List[str]:
+    """'http://KEY@m4:8000, 10.0.100.5:8411' -> both. Commas or spaces
+    separate; neither appears in a host:port or in these URLs."""
+    return [t for t in re.split(r"[,\s]+", str(target).strip()) if t]
+
+
+def make_sender(target: str, udp_host: str = ""):
+    """A bioarena UDP sender for host[:port], an frc-fms one for a URL, and a
+    FanOut for several of them separated by commas. `udp_host` replaces the
+    host of every UDP target (practice mode's local stand-in)."""
     from .hubfeed import FeedSender, parse_target
-    return FeedSender(parse_target(target))
+    targets = split_targets(target) or [target]
+    if sum(not is_fms_target(t) for t in targets) > 1:
+        # Checked before any sender exists: FmsSender starts a thread.
+        raise ValueError("send counts to one bioarena only (one host:port); "
+                         "add Watchtower as http://KEY@host:8000 beside it")
+    senders = []
+    for t in targets:
+        if is_fms_target(t):
+            senders.append(FmsSender(t))
+        else:
+            host, port = parse_target(t)
+            senders.append(FeedSender((udp_host or host, port)))
+    return senders[0] if len(senders) == 1 else FanOut(senders)
+
+
+class FanOut:
+    """Every ball to several field systems at once, in a sender's face.
+
+    The scrimmage runs Watchtower (HTTP on the M4, port 8000) beside
+    bioarena (UDP 8411), each on its own address. Watchtower only forwards
+    to bioarena from its own vision runner (run_vision.py `feeds:`), which
+    the Watchtower app does not run: with one target, the app's counter
+    reached Watchtower and bioarena got nothing. Each target keeps its own
+    sender and rules -- the UDP one its session, seq and heartbeat, the HTTP
+    one its never-dropped queue -- so a dead Watchtower cannot stall the feed
+    bioarena decides AUTO from, nor the reverse.
+
+    The bioarena target is the primary: while it answers, the match state
+    and round trip come from it, as bioarena is the official score. The
+    Watchtower app always lists bioarena (the spec's 10.0.100.5:8411 unless
+    vision.yaml says otherwise), so a venue with no bioarena must still read
+    as linked: `linked` is any target answering, and the state comes from
+    whichever leads (`lead`). Errors from any target are counted and named.
+    """
+
+    def __init__(self, senders):
+        if len(senders) < 2:
+            raise ValueError("FanOut wants two or more senders")
+        self.senders = list(senders)
+        udp = [x for x in self.senders if not isinstance(x, FmsSender)]
+        if len(udp) > 1:
+            # bioarena reads a second session as the counter restarting, and
+            # two of ours alternating re-carry each other's totals.
+            raise ValueError("send to one bioarena only (one UDP host:port)")
+        self.primary = udp[0] if udp else self.senders[0]
+
+    def lead(self):
+        """The primary while it answers, else the first target that does."""
+        if self.primary.linked():
+            return self.primary
+        return next((x for x in self.senders if x.linked()), self.primary)
+
+    # what hubcount.run, hubapp and run.py read
+    session = property(lambda self: self.primary.session)
+    counts = property(lambda self: self.primary.counts)
+    peer = property(lambda self: getattr(self.lead(), "peer", "bioarena"))
+    last_reply = property(lambda self: self.lead().last_reply)
+    rtt_ms = property(lambda self: self.lead().rtt_ms)
+    # bioarena's own reply and link, whoever leads: the partner box's relay
+    # and /board need bioarena's status, never Watchtower's {"record": ...}
+    # (and /board must not flip views each time bioarena's 1 s link blinks).
+    field_reply = property(lambda self: self.primary.last_reply)
+    field_linked = property(lambda self: self.primary.linked())
+    send_errors = property(lambda self: sum(x.send_errors for x in self.senders))
+
+    @property
+    def last_error(self) -> str:
+        return "; ".join(f"{_name(x)}: {x.last_error}" for x in self.senders
+                         if x.send_errors and x.last_error)
+
+    def _set_all(name):
+        def get(self):
+            return getattr(self.primary, name)
+
+        def put(self, value):
+            for x in self.senders:
+                setattr(x, name, value)
+        return property(get, put)
+    info = _set_all("info")
+    hub_status = _set_all("hub_status")
+    del _set_all
+
+    def score(self, hub: str, n: int, captured_at: float) -> None:
+        for x in self.senders:
+            x.score(hub, n, captured_at)
+
+    def heartbeat(self) -> bool:
+        return any([x.heartbeat() for x in self.senders])
+
+    def poll_replies(self) -> int:
+        return sum(x.poll_replies() for x in self.senders)
+
+    def linked(self) -> bool:
+        return any(x.linked() for x in self.senders)
+
+    def links(self) -> Dict[str, bool]:
+        return {_name(x): x.linked() for x in self.senders}
+
+    def describe(self) -> str:
+        return ", ".join(_name(x) for x in self.senders)
+
+    def close(self) -> None:
+        for x in self.senders:
+            if hasattr(x, "close"):
+                x.close()
+
+    def pending(self) -> int:
+        return sum(x.pending() for x in self.senders if hasattr(x, "pending"))
+
+
+def _name(sender) -> str:
+    """'udp 10.0.100.5:8411' / 'http://m4:8000' -- never the key."""
+    if isinstance(sender, FmsSender):
+        return sender.url
+    t = getattr(sender, "target", None)
+    if isinstance(t, tuple) and len(t) == 2:
+        return f"udp {t[0]}:{t[1]}"
+    return str(getattr(sender, "peer", "bioarena"))
+
+
+def sender_links(sender) -> Dict[str, bool]:
+    """{destination: answering} for one sender or a FanOut's every target."""
+    if isinstance(sender, FanOut):
+        return sender.links()
+    return {_name(sender): sender.linked()}
+
+
+def sender_name(sender) -> str:
+    """What the page and log call a sender's destination, without the key:
+    'http://m4:8000', '10.0.100.5:8411', or a FanOut's list."""
+    if isinstance(sender, FanOut):
+        return sender.describe()
+    if isinstance(sender, FmsSender):
+        return sender.url
+    return "{}:{}".format(*sender.target)

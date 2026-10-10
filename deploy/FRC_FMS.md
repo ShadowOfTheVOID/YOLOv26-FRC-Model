@@ -291,6 +291,23 @@ frc-fms (`tbavid/fmslink.py`):
 Practice mode (the built-in bioarena stand-in) does not apply. Run frc-fms
 itself to rehearse, or its mock vision.
 
+**Mock vision now feeds the field too** (watchtower-fms PR #3, open on
+2026-10-10, not yet in a tag). A vision config with no `feeds:` key takes
+the feeds from `config/vision.yaml` in the same folder, so
+`./run.sh ../config/vision.mock.yaml` streams random fuel to bioarena when
+`vision.yaml` lists it. The receiver accepts one source address. If this
+repo's counter (`run.py hubfeed`, or the page's bioarena target) is also
+feeding it from the same machine, two sessions arrive from that address and
+the fake counts can reach the score. (bioarena `main` has no receiver yet,
+deploy/HUB_FEED.md; `run.py hubfeed-listen` is the stand-in.) Put `feeds: []` in `vision.mock.yaml` before a
+rehearsal while the real counter is feeding bioarena.
+`deploy/frc-fms.vision.yaml` has no `feeds:`, so copying it over
+`vision.yaml` also stops the mock run from feeding the field. Under the
+spec, two senders take turns being "the restarted counter", and each turn
+adds the other's whole total again (deploy/HUB_FEED.md, step 3). Our
+`hubfeed-listen` and partner port now drop the second sender and say so.
+bioarena's receiver does not.
+
 ## Using a retrained model with frc-fms's `zone` counter
 
 `zone` takes every box the model returns. A three-class model

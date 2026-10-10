@@ -9,6 +9,105 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Fixed: Watchtower app settings could not be saved** ("could not write
+  Public address ... safely; nothing was saved", whichever field was
+  changed). Public address and Read key are this app's own settings, not
+  in Watchtower's defaults, so on an event.yaml without those lines they
+  read back as nothing, where loading had shown them as empty. Save
+  compared the two and refused. Both now read the same way. Checked on a
+  fresh event.yaml from Watchtower v0.1.0's fms.init: changing only the
+  name, setting the public address and clearing it again all save.
+
+- **Fixed: Find cameras could do nothing visible.** Only one camera job
+  runs at a time, and the page starts one itself ("pictures": a frame from
+  every camera) when a setup opens. A click on Find cameras during it was
+  refused, and the refusal went only to the log. A search that failed only
+  cleared the hint. The refusal now shows as "Busy with pictures -- try
+  again when it finishes". A failed search opens a box with the reason,
+  and any other job that fails shows a toast. The same applies to Measure,
+  Refresh picture, Test a recording, Check a recording and Calibrate.
+
+- **Fixed: Watchtower's plugin counted a ball twice when a hub had an
+  outline and an exit line.** The `tbavid-colour` / `tbavid-combo` counters
+  that Watchtower's vision loads (`tbavid/fms_counter.py`) added every zone
+  of the hub. A scored ball crosses the outline going in and the exit line
+  coming out, so each one counted twice. On 2026-10-10 Watchtower showed
+  blue 221 auto fuel against a broadcast's 110 total points. The camera
+  page's own counter has taken the larger kind since v0.5.3; the plugin was
+  older and never changed, and it also ignored the setup's combine and
+  confirm. The plugin now counts through the same `HubTally`: each kind
+  combined by the setup's rule, then the larger kind, with confirm. Its
+  `/control` line uses the same rule. A test drives both from one setup
+  file and requires the same count. On the old plugin it read 78 where
+  the page read 40.
+
+- **Double counts are flagged and traceable.** On 2026-10-10, Watchtower
+  showed blue 221 auto fuel against a broadcast's 110 total points.
+  - **Outlines added together:** a hub with several outlines adds them by
+    default (combine: sum). One camera with two outlines on one hub, as on
+    a split-screen broadcast or two views of the same hub, counts every
+    ball in each. The camera page now warns under step 2, and Start says so
+    in the log ("set blue to max"). It is a warning, not a block, because
+    two separate mouths in one picture are summed rightly.
+  - **Two senders:** Watchtower adds every event from every sender and
+    removes no duplicates. Its own vision runner (`./run.sh` starts it) and
+    our counter both labelled their events "live". Ours now posts as
+    `tbavid <id>`, unique per run, so Watchtower's fuel table shows who
+    sent what.
+
+- **Hub counter to Watchtower and bioarena at once.** At the scrimmage,
+  Watchtower runs on the M4 (port 8000) and bioarena takes the UDP count
+  feed (8411), each on its own address. The counter sent to only one
+  target. Watchtower passes counts on to bioarena only from its own vision
+  runner, which the Watchtower app does not run, so the app's counts never
+  reached bioarena. *Send counts to* and `run.py hubfeed --target` now take
+  both, separated by a comma (`http://KEY@127.0.0.1:8000, 10.0.100.5:8411`).
+  A fan-out sender (`fmslink.FanOut`) gives every ball to each target, and
+  each keeps its own rules (session, seq and heartbeat for bioarena, the
+  never-dropped queue for Watchtower). A dead Watchtower cannot hold
+  bioarena's feed, nor the other way round. bioarena is the primary target:
+  the match state comes from it while it answers, and `/board` and the
+  partner box's relay always use bioarena's own reply. A target that stops
+  answering is named on the page and in the console. Two bioarena targets
+  are refused. Practice mode sends only to the local test receiver and
+  leaves Watchtower out, so test balls never reach a live match. Checked end to end over real sockets: Watchtower's
+  HTTP stand-in got all 3 balls with the vision key, and `hubfeed-listen`
+  counted red 3.
+- **Watchtower app: bioarena is built in, nothing to type.** The camera
+  page starts out sending to Watchtower and bioarena. bioarena's address is
+  the first `feeds:` entry in Watchtower's `config/vision.yaml`, or else the
+  feed spec's `10.0.100.5:8411`. Phones & PINs shows it read-only, with
+  whether bioarena is answering. The link reads as connected while any
+  target answers (at a venue with no bioarena, through Watchtower) and
+  names the one that does not.
+- **An offline page for watchtower.systemoverload.org in Watchtower's own
+  look** (`deploy/watchtower-offline.html`, `deploy/Caddyfile.watchtower`).
+  The page Caddy served while the FMS was down was dark, unlike every
+  Watchtower page. The new one uses Watchtower's tokens, panel and pill,
+  inlined because the FMS that serves `style.css` is down. It keeps the
+  same words, has no outside requests, and fits a phone (390 px, no
+  sideways scroll). It checks `/` every 15 s and reloads when Watchtower
+  answers. Checked against a local server that answered 502, then 200: it
+  was on the real page within 17 s. The server copy is put in place by
+  hand; see the Caddyfile's header.
+
+- **A second counter on one receiver is dropped, not counted again and
+  again.** watchtower-fms PR #3 makes its mock vision send to `vision.yaml`'s
+  `feeds:`, beside this repo's counter. The spec reads every new session as
+  a restart and carries the old session's count. Two senders taking turns
+  carried each other's total on every heartbeat: a real red 5 with a mock
+  3 read 80 after one second. In `hubfeed-listen` and the main box's
+  partner port (`hubfeed.Receiver`), a new session now counts as a restart
+  only once the current one has gone quiet for 1 s, as a restarted counter
+  has. While the current one is live, the newcomer is dropped with
+  `replaced session: is a second counter sending?`, so the sender that was
+  there first keeps the feed. A real counter with a mock started after it
+  counts only the real balls. A replaced session is never taken back, which
+  also drops a late datagram from just before a restart. The deploy guides (deploy/HUB_FEED.md step 3,
+  deploy/FRC_FMS.md) say to set `feeds: []` in `vision.mock.yaml` while our
+  counter is feeding bioarena; bioarena's own receiver follows the spec.
+  `.github/watchtower-release` stays at v0.1.0 until the PR is tagged.
+
 ## v0.5.6 — 2026-10-10
 
 - **Match queue page on Watchtower** (`/queue` on the FMS port, so on the

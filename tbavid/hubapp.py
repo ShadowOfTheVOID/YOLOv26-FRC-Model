@@ -140,6 +140,26 @@ def problems(cfg: Dict) -> List[str]:
     return out
 
 
+def double_count_risks(cfg: Dict) -> List[str]:
+    """Setups that add the same balls twice: one camera with two outlines
+    on one hub, combined by sum (the default). Sum is right for outlines
+    that see different balls; on a split-screen broadcast (the main view
+    and an inset both show the hub) or two outlines over one mouth, every
+    ball is counted in each. Watchtower showed blue 221 auto fuel on
+    2026-10-10 against a broadcast's 110 total points. A warning, not a
+    problem: a hub with two mouths in one picture is summed rightly."""
+    out = []
+    how = cfg.get("combine") or {}
+    for c in cfg.get("cameras") or []:
+        for hub in HUBS:
+            n = sum(1 for z in c.get("zones") or [] if z.get("hub") == hub and not z.get("line"))
+            if n > 1 and how.get(hub, "sum") == "sum":
+                out.append(f"{c['name']}: {n} {hub} outlines are ADDED (combine: sum). "
+                           f"If they show the same balls -- a split-screen broadcast, two "
+                           f"views of one hub -- every ball counts {n} times: set {hub} to max.")
+    return out
+
+
 def _has_ultralytics() -> bool:
     import importlib.util
     return importlib.util.find_spec("ultralytics") is not None
@@ -866,15 +886,25 @@ class HubController:
         if issues:
             raise ValueError("Not ready yet: " + " ".join(issues))
         setup = hubcount.setup_from_dict(cfg)
-        from .fmslink import FmsSender, is_fms_target, split_target
-        fms = is_fms_target(target)
-        if fms and practice:
+        for w in double_count_risks(cfg):
+            self.say("! " + w)
+        from .fmslink import is_fms_target, make_sender, sender_name, split_targets
+        # One target or several, e.g. Watchtower on the M4 and bioarena:
+        # "http://KEY@127.0.0.1:8000, 10.0.100.5:8411" (fmslink.FanOut).
+        parts = split_targets(target) or [DEFAULT_TARGET]
+        udp = [t for t in parts if not is_fms_target(t)]
+        if practice and not udp:
             self.say("practice mode is for bioarena's UDP feed; sending to frc-fms instead")
             practice = False
-        host, port = ("", 0) if fms else hubfeed.parse_target(target.strip() or DEFAULT_TARGET)
+        if practice and len(udp) < len(parts):
+            # Practice balls are test balls: Watchtower would credit them to
+            # whatever match its timeline has open. Only the local stand-in.
+            self.say("practice mode: Watchtower left out, test balls go to the "
+                     "local test receiver only")
+            parts = udp
+        port = hubfeed.parse_target(udp[0])[1] if udp else 0
         self.practice = practice
         if practice:
-            host = "127.0.0.1"
             self.listen_stop = threading.Event()
             threading.Thread(target=hubfeed.listen, daemon=True,
                              kwargs=dict(port=port, bind="127.0.0.1",
@@ -885,14 +915,10 @@ class HubController:
             base = os.path.dirname(os.path.abspath(self.path)) if self.path else os.getcwd()
             log_path = os.path.join(base, time.strftime("hubfeed_%Y%m%d_%H%M%S.csv"))
             self.say(f"logging counts to {log_path}")
-        if fms:
-            # frc-fms: timestamped events over HTTP (tbavid/fmslink.py). The
-            # key is in the URL; it is not shown or logged.
-            self.sender = FmsSender(target.strip())
-            self.feed_target = split_target(target)[0]
-        else:
-            self.sender = hubfeed.FeedSender((host, port))
-            self.feed_target = f"{host}:{port}"
+        # bioarena (UDP), Watchtower / frc-fms (a URL: timestamped events over
+        # HTTP), or both. Keys are in the URL; never in feed_target or logs.
+        self.sender = make_sender(", ".join(parts), udp_host="127.0.0.1" if practice else "")
+        self.feed_target = sender_name(self.sender)
         self.stop_evt = threading.Event()
         self.monitor = {}
         realtime = realtime and any(source_kind(c.source) in ("file", "stream")
@@ -1188,6 +1214,7 @@ class HubController:
                "kinds": kinds, "stream_warning": STREAM_WARNING,
                "wireless_warning": WIRELESS_WARNING,
                "problems": problems(cfg), "pictures": pictures,
+               "double_count": double_count_risks(cfg),
                "builtin_model": bundled_model() is not None,
                "default_target": self.default_target,
                # This box's address, for the partner box's "Send counts to"
@@ -1207,6 +1234,8 @@ class HubController:
         if s is not None:
             live.update(counts=dict(s.counts), linked=s.linked(),
                         reply=s.last_reply, rtt_ms=s.rtt_ms, session=s.session)
+            from .fmslink import sender_links
+            live["links"] = sender_links(s)
         health = self.monitor.get("health") or {}
         now = time.monotonic()
         for n, h in health.items():
@@ -1255,8 +1284,9 @@ class HubController:
         stale = [n for n, h in health.items()
                  if running and now - h.last_frame > 0.5]
         lags = [h.lag_ms() for h in health.values()]
-        from .fmslink import FmsSender
-        if isinstance(s, FmsSender):
+        # By whether a bioarena target exists at all (FanOut.primary), not by
+        # who answers right now: that would flip /board on every late reply.
+        if s is not None and getattr(getattr(s, "primary", s), "peer", "bioarena") != "bioarena":
             v = board_view(dict(s.counts), running, False, None, stale,
                            round(max(lags)) if lags else None,
                            list(self.monitor.get("errors", [])), False,
@@ -1265,8 +1295,10 @@ class HubController:
             if running and not s.linked() and "alert" not in v:
                 v["alert"] = f"frc-fms not answering: {s.last_error or 'no reply yet'}"
             return v
+        field_up = bool(s and getattr(s, "field_linked", s.linked()))
+        field_reply = (getattr(s, "field_reply", s.last_reply) if s else None)
         return board_view(dict(s.counts) if s else {}, running,
-                          bool(s and s.linked()), s.last_reply if s else None,
+                          field_up, field_reply,
                           stale, round(max(lags)) if lags else None,
                           list(self.monitor.get("errors", [])),
                           bool(getattr(self, "practice", False)),

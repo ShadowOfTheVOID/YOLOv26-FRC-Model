@@ -199,6 +199,10 @@ class FeedSender:
 
 # -- a stand-in for bioarena, for commissioning --------------------------
 
+SECOND_SENDER = "replaced session: is a second counter sending?"
+RETIRED_KEPT = 32
+
+
 class Receiver:
     """bioarena's acceptance rules (spec 4.5) and baseline arithmetic (6.2).
 
@@ -222,6 +226,19 @@ class Receiver:
         self.info = ""
         self.restarts = 0
         self.dropped: Dict[str, int] = {}
+        # A second sender on one receiver -- e.g. Watchtower's mock vision,
+        # which since watchtower-fms PR #3 feeds vision.yaml's feeds: beside
+        # the real counter. Read as restarts, two senders alternating carried
+        # each other's whole total on every heartbeat: true red 5 read 80
+        # after one second and kept climbing. So a new session is a restart
+        # only once the current one has gone quiet (OFFLINE_S, as a restarted
+        # counter has); while it is live the newcomer is dropped, and the
+        # sender that was there first keeps the feed. Keeping the newest
+        # instead silenced the real counter whenever a mock started after it.
+        # Sessions replaced by a restart are retired: a counter never goes
+        # back to its old one, so a late or reordered datagram from it is
+        # dropped too.
+        self.retired: list = []
 
     def reset_match(self) -> None:
         """What bioarena does at LoadMatch/StartMatch: zero match-relative."""
@@ -258,8 +275,13 @@ class Receiver:
                         and x >= 0 for x in (seq, red, blue))):
             return self._drop("missing or bad field")
         event = "count"
+        if session in self.retired:
+            return self._drop(SECOND_SENDER)
+        if session != self.session and self.session is not None and self.online():
+            return self._drop(SECOND_SENDER)
         if session != self.session:
             if self.session is not None:
+                self.retired = (self.retired + [self.session])[-RETIRED_KEPT:]
                 # Keep what the old session contributed to this match; the
                 # new one starts from zero (spec 6.2).
                 for h in HUBS:
@@ -416,7 +438,7 @@ class RelayIn:
         if self.sock is None:
             self.open()
         out(f"taking a partner box's counts on udp {self.bind}:{self.port}")
-        was = False
+        was, said = False, set()
         try:
             while not stop.is_set():
                 try:
@@ -428,6 +450,11 @@ class RelayIn:
                     continue
                 rises = self.handle(data, addr[0])
                 if rises is None:
+                    for why, n in self.rx.dropped.items():
+                        if n == 1 and why not in said:
+                            said.add(why)
+                            out(f"partner box: dropped from {addr[0]}: {why} "
+                                "(said once per reason)")
                     continue
                 if not was:
                     out(f"partner box ONLINE: {addr[0]} session {self.rx.session}")

@@ -163,7 +163,15 @@ jobs:
                 stage=$(mktemp -d)
                 cp -R "dist/$1.app" "$stage/"
                 ln -s /Applications "$stage/Applications"
-                hdiutil create -volname "$1" -srcfolder "$stage" -ov -format UDZO "$2" ;;
+                # The second image right after the first can find the disk
+                # image helper still busy (PR #40's run: "hdiutil: create
+                # failed - Resource busy" on Watchtower-mac.dmg, after
+                # HubCounter-mac.dmg was made). Wait and retry, as detach does.
+                for try in 1 2 3; do
+                  hdiutil create -volname "$1" -srcfolder "$stage" -ov -format UDZO "$2" && break
+                  [ "$try" = 3 ] && exit 1
+                  echo "hdiutil create busy, retry $try in 10 s"; sleep 10
+                done ;;
               *Setup-windows.exe)
                 # Absolute paths: Inno resolves relative ones from the .iss's folder.
                 # Inno's own error, as an annotation: the raw log is not on the PR.

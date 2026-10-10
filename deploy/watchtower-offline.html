@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#161a1f">
+<title>Watchtower FMS</title>
+<!-- What watchtower.systemoverload.org shows while Watchtower is not running
+     (Caddy's handle_errors on 502/503/504: deploy/Caddyfile.watchtower).
+     The page that was there was dark, unlike every Watchtower page a phone
+     sees once the FMS is up. This one is Watchtower's own look -- the
+     tokens, panel and pill of fms/static/style.css and the hero of its
+     index.html -- inlined, because /static/style.css is served by the FMS
+     that is down. System fonts only, as Watchtower's: no outside requests.
+     It asks for / every 15 s and reloads when Watchtower answers, so a ref's
+     phone left on it comes back by itself. -->
+<style>
+  :root {
+    --wall: #eceee9; --panel: #ffffff; --panel-2: #f5f6f2; --ink: #161a1f; --ink-2: #2a3038;
+    --muted: #5d656e; --line: #e0e3dc; --line-strong: #c3c8bf;
+    --red: #cf1430; --blue: #0a5fbd; --fuel: #f4c300; --fuel-soft: #fff5c7;
+    --ok: #157045; --ok-soft: #dbf1e4; --warn: #b4520a; --warn-soft: #fdeedd;
+    --shadow: 0 1px 2px rgba(17, 24, 39, .05), 0 2px 8px rgba(17, 24, 39, .06);
+    --r-lg: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    color: var(--ink); background: var(--wall);
+    -webkit-text-size-adjust: 100%;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--wall); line-height: 1.4;
+    padding-bottom: env(safe-area-inset-bottom); overflow-x: clip; }
+  h1 { margin: 0; line-height: 1.2; letter-spacing: -.01em; font-size: 1.35rem; }
+  p { margin: .5rem 0; }
+  .bar { display: flex; align-items: center; gap: .5rem; min-height: 52px; background: var(--ink); color: #fff;
+    padding: calc(.65rem + env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) .65rem max(1rem, env(safe-area-inset-left)); }
+  .bar .conn { width: .6rem; height: .6rem; border-radius: 50%; background: var(--warn); flex: none;
+    box-shadow: 0 0 0 3px rgba(180, 82, 10, .25); }
+  .bar .conn.on { background: #3ddc84; box-shadow: 0 0 0 3px rgba(61, 220, 132, .2); }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 1rem; }
+  .hero { display: flex; align-items: center; gap: .8rem; margin: 1.5rem 0 1.2rem; }
+  .hero svg { width: 48px; height: 48px; border-radius: 12px; flex: none; }
+  .muted { color: var(--muted); }
+  .small { font-size: .85rem; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg);
+    padding: 1.1rem; box-shadow: var(--shadow); }
+  .pill { display: inline-flex; align-items: center; gap: .3rem; padding: .18rem .6rem; border-radius: 999px;
+    font-size: .75rem; font-weight: 650; white-space: nowrap; background: var(--warn-soft); color: var(--warn); }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .hubs { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-top: 1rem; }
+  .hub { border-radius: 12px; border: 2px solid var(--line); background: var(--panel-2); padding: .7rem .5rem;
+    text-align: center; font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .hub.red { border-color: #f3b9c1; } .hub.blue { border-color: #b5cdee; }
+  .hint { color: var(--muted); font-size: .85rem; margin-top: 1rem; text-align: center; }
+</style>
+</head><body>
+<div class="bar"><span class="conn" id="conn"></span><b>Watchtower FMS</b></div>
+<main class="wrap">
+  <div class="hero">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#1d2127"/><circle cx="32" cy="32" r="16" fill="#f2c200"/><path d="M8 32h8" stroke="#c8102e" stroke-width="5"/><path d="M48 32h8" stroke="#0b5fb3" stroke-width="5"/></svg>
+    <div><h1>Watchtower FMS</h1><div class="muted small">System Overload Robotics &middot; Team 6059</div></div>
+  </div>
+  <div class="panel">
+    <span class="pill" id="state">Offline right now</span>
+    <p>The field management system is only online during events and testing. Check back on event day.</p>
+    <div class="hubs"><div class="hub red">Red hub</div><div class="hub blue">Blue hub</div></div>
+  </div>
+  <p class="hint" id="hint">This page reconnects by itself when Watchtower is back.</p>
+</main>
+<script>
+// Caddy serves this page in place of a 502; once the FMS answers / again,
+// load the real page.
+async function check() {
+  try {
+    const r = await fetch("/", { cache: "no-store" });
+    if (r.ok && !/Offline right now/.test(await r.text())) {
+      document.getElementById("conn").className = "conn on";
+      document.getElementById("state").className = "pill ok";
+      document.getElementById("state").textContent = "Back online";
+      location.reload();
+      return;
+    }
+  } catch (e) { /* the proxy itself is down: keep waiting */ }
+  setTimeout(check, 15000);
+}
+setTimeout(check, 15000);
+</script>
+</body></html>
