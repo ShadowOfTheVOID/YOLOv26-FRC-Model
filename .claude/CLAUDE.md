@@ -287,7 +287,10 @@ Watchtower app (`apps/watchtower/main.py`, built by the same spec with
 HUBAPP=watchtower from a clone of watchtower-fms at `.github/watchtower-release`):
 runs fms.init into ~/Documents/Watchtower/config, uvicorn in a thread on :8000,
 and the hub counter with `HubController.default_target` set to
-http://KEY@127.0.0.1:8000. fms.server reads event.yaml at import, so chdir and
+http://KEY@127.0.0.1:8000, plus bioarena's host:port (`fmslink.FanOut`, one
+comma-separated target box) from `server.field_feed` (Phones & PINs) or
+vision.yaml's first `feeds:` -- Watchtower forwards to bioarena only from its
+own vision runner, which the app does not run. fms.server reads event.yaml at import, so chdir and
 FMS_CONFIG come first. It is a pywebview desktop app (home.html + settings.py,
 which edits event.yaml line by line; the user wants no hand-editing of YAML).
 Watchtower's pages are top-level windows, never frames: Watchtower keeps logins

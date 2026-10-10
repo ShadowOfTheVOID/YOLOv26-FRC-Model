@@ -9,6 +9,29 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Hub counter to Watchtower and bioarena at once.** At the scrimmage,
+  Watchtower runs on the M4 (port 8000) and bioarena takes the UDP count
+  feed (8411), each on its own address. The counter sent to only one
+  target. Watchtower passes counts on to bioarena only from its own vision
+  runner, which the Watchtower app does not run, so the app's counts never
+  reached bioarena. *Send counts to* and `run.py hubfeed --target` now take
+  both, separated by a comma (`http://KEY@127.0.0.1:8000, 10.0.100.5:8411`).
+  A fan-out sender (`fmslink.FanOut`) gives every ball to each target, and
+  each keeps its own rules (session, seq and heartbeat for bioarena, the
+  never-dropped queue for Watchtower). A dead Watchtower cannot hold
+  bioarena's feed, nor the other way round. bioarena is the primary target:
+  the page's *Connected*, the match state and `/board` come from it. A
+  target that stops answering is named on the page and in the console.
+  Two bioarena targets are refused. Practice mode swaps only bioarena for
+  the local stand-in. Checked end to end over real sockets: Watchtower's
+  HTTP stand-in got all 3 balls with the vision key, and `hubfeed-listen`
+  counted red 3.
+- **Watchtower app: Phones & PINs, *Field: bioarena*** (`server.field_feed`
+  in event.yaml, like `public_url`). When it is set, the camera page starts
+  out sending to Watchtower and bioarena. When it is empty, the first
+  `feeds:` entry in Watchtower's `config/vision.yaml` is used. A web
+  address is refused there, because bioarena's feed is UDP.
+
 - **A second counter on one receiver is dropped, not counted again and
   again.** watchtower-fms PR #3 makes its mock vision send to `vision.yaml`'s
   `feeds:`, beside this repo's counter. The spec reads every new session as

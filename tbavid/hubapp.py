@@ -866,12 +866,19 @@ class HubController:
         if issues:
             raise ValueError("Not ready yet: " + " ".join(issues))
         setup = hubcount.setup_from_dict(cfg)
-        from .fmslink import FmsSender, is_fms_target, split_target
-        fms = is_fms_target(target)
-        if fms and practice:
+        from .fmslink import FmsSender, is_fms_target, make_sender, split_target, split_targets
+        # One target or several, e.g. Watchtower on the M4 and bioarena:
+        # "http://KEY@127.0.0.1:8000, 10.0.100.5:8411" (fmslink.FanOut).
+        parts = split_targets(target) or [DEFAULT_TARGET]
+        udp = [t for t in parts if not is_fms_target(t)]
+        if len(udp) > 1:
+            raise ValueError("Send counts to one bioarena only (one host:port); "
+                             "add Watchtower as http://KEY@host:8000 beside it.")
+        if practice and not udp:
             self.say("practice mode is for bioarena's UDP feed; sending to frc-fms instead")
             practice = False
-        host, port = ("", 0) if fms else hubfeed.parse_target(target.strip() or DEFAULT_TARGET)
+        fms = not udp
+        host, port = ("", 0) if fms else hubfeed.parse_target(udp[0])
         self.practice = practice
         if practice:
             host = "127.0.0.1"
@@ -885,11 +892,16 @@ class HubController:
             base = os.path.dirname(os.path.abspath(self.path)) if self.path else os.getcwd()
             log_path = os.path.join(base, time.strftime("hubfeed_%Y%m%d_%H%M%S.csv"))
             self.say(f"logging counts to {log_path}")
-        if fms:
+        if len(parts) > 1:
+            # Watchtower and bioarena both; practice swaps bioarena for the
+            # local stand-in only. Keys are never in feed_target.
+            self.sender = make_sender(", ".join(parts), udp_host=host if practice else "")
+            self.feed_target = self.sender.describe()
+        elif fms:
             # frc-fms: timestamped events over HTTP (tbavid/fmslink.py). The
             # key is in the URL; it is not shown or logged.
-            self.sender = FmsSender(target.strip())
-            self.feed_target = split_target(target)[0]
+            self.sender = FmsSender(parts[0])
+            self.feed_target = split_target(parts[0])[0]
         else:
             self.sender = hubfeed.FeedSender((host, port))
             self.feed_target = f"{host}:{port}"
@@ -1207,6 +1219,8 @@ class HubController:
         if s is not None:
             live.update(counts=dict(s.counts), linked=s.linked(),
                         reply=s.last_reply, rtt_ms=s.rtt_ms, session=s.session)
+            if hasattr(s, "links"):
+                live["links"] = s.links()
         health = self.monitor.get("health") or {}
         now = time.monotonic()
         for n, h in health.items():
@@ -1255,8 +1269,7 @@ class HubController:
         stale = [n for n, h in health.items()
                  if running and now - h.last_frame > 0.5]
         lags = [h.lag_ms() for h in health.values()]
-        from .fmslink import FmsSender
-        if isinstance(s, FmsSender):
+        if s is not None and getattr(s, "peer", "bioarena") != "bioarena":
             v = board_view(dict(s.counts), running, False, None, stale,
                            round(max(lags)) if lags else None,
                            list(self.monitor.get("errors", [])), False,

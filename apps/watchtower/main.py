@@ -90,6 +90,32 @@ def first_setup(d: Path, src: Path) -> dict:
     return init.init(str(cfg))
 
 
+def vision_feed(d: Path) -> str:
+    """The first `feeds:` entry of config/vision.yaml as host:port: the
+    field system Watchtower's own vision would send to (and, since
+    watchtower-fms PR #3, its mock runs too). "" if none or unreadable."""
+    import yaml
+    try:
+        feeds = (yaml.safe_load((d / "config" / "vision.yaml").read_text()) or {}).get("feeds")
+    except (OSError, yaml.YAMLError, AttributeError):
+        return ""
+    if isinstance(feeds, dict):
+        feeds = [feeds]
+    for f in feeds or []:
+        if isinstance(f, dict) and f.get("host"):
+            return f"{f['host']}:{int(f.get('port') or 8411)}"
+        if isinstance(f, str) and f.strip():
+            return f.strip() if ":" in f else f"{f.strip()}:8411"
+    return ""
+
+
+def counter_target(ev: dict) -> str:
+    """What the hub counter sends to: Watchtower on this computer, and
+    bioarena too when its address is set (tbavid.fmslink.FanOut)."""
+    t = f"http://{ev['key']}@127.0.0.1:{ev['port']}"
+    return f"{t}, {ev['field_feed']}" if ev.get("field_feed") else t
+
+
 def read_event(d: Path) -> dict:
     import yaml
     ev = yaml.safe_load((d / "config" / "event.yaml").read_text()) or {}
@@ -98,6 +124,7 @@ def read_event(d: Path) -> dict:
             "teams": list(e.get("teams") or []),
             "pins": srv.get("pins") or {}, "key": srv.get("vision_key", ""),
             "public_url": str(srv.get("public_url") or "").rstrip("/"),
+            "field_feed": str(srv.get("field_feed") or "").strip() or vision_feed(d),
             "port": int(srv.get("port") or FMS_PORT)}
 
 
@@ -640,7 +667,9 @@ def main() -> int:
     from tbavid import hubweb
     from tbavid.hubapp import HubController
     ctl = HubController(str(d / "cams.json"))
-    ctl.default_target = f"http://{ev['key']}@127.0.0.1:{ev['port']}"
+    ctl.default_target = counter_target(ev)
+    if ev.get("field_feed"):
+        print(f"hub counter: to Watchtower and bioarena at {ev['field_feed']}")
     # Camera presets saved here or in the Hub Counter app are the same file.
     ctl.presets_file = str(Path.home() / "Documents" / "Hub Counter" / "camera-presets.json")
     hub = threading.Thread(target=hubweb.serve, args=(ctl, HUB_PORT, "127.0.0.1"),

@@ -51,6 +51,13 @@ FIELDS = [
     # is built in. Watchtower itself still listens on the Wi-Fi; this only
     # changes the link and QR on Phones & PINs.
     (("server", "public_url"), "url", "Public address (optional, e.g. https://watchtower.systemoverload.org)"),
+    # Not Watchtower's: where the app's hub counter also sends every ball,
+    # bioarena's UDP count feed (8411), beside Watchtower on this computer's
+    # port 8000. Watchtower forwards to bioarena only from its own vision
+    # runner (vision.yaml feeds:), which the app does not run, so with this
+    # empty bioarena got nothing from the app. Empty = vision.yaml's first
+    # feed, else Watchtower only.
+    (("server", "field_feed"), "hostport", "bioarena address (optional, e.g. 10.0.100.5:8411)"),
     # The Blue Alliance
     (("event", "tba_event_key"), "tbakey", "TBA event key"),
     (("tba", "enabled"), "bool", "Send schedule and results to TBA with this write key"),
@@ -103,7 +110,7 @@ def load(event_yaml: Path) -> dict:
         v = _get(cfg, path)
         if kind == "teams":
             v = [int(t) for t in v or []]
-        elif kind in ("text", "secret", "date", "time", "tbakey", "pin", "url"):
+        elif kind in ("text", "secret", "date", "time", "tbakey", "pin", "url", "hostport"):
             v = "" if v is None else str(v)
         out[name] = v
     return out
@@ -200,6 +207,23 @@ def clean_url(s: str) -> str:
     return f"{u.scheme}://{u.netloc}{u.path.rstrip('/')}"
 
 
+def clean_hostport(s: str) -> str:
+    """'10.0.100.5' -> '10.0.100.5:8411' (the feed spec's port). bioarena's
+    feed is UDP to an address, not a web page: a URL is refused, as the
+    counter would post HTTP to it instead."""
+    s = (s or "").strip()
+    if not s:
+        return ""
+    if "://" in s or "/" in s or "@" in s or "," in s or " " in s:
+        raise ValueError("just host:port, like 10.0.100.5:8411 (bioarena's feed is UDP, not a web address)")
+    host, _, port = s.rpartition(":") if ":" in s else (s, "", "8411")
+    if not re.fullmatch(r"[A-Za-z0-9.-]+", host or ""):
+        raise ValueError("like 10.0.100.5:8411")
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise ValueError("the port is a number, 8411 for bioarena")
+    return f"{host}:{int(port)}"
+
+
 def parse_teams(v) -> list:
     """'254, 1678 971' (any separators), TBA's CSV, JSON, or [254, ...] ->
     [254, 1678, 971], in order, no repeats."""
@@ -269,6 +293,8 @@ def _clean(kind: str, v):
         return (s or "").lower()
     if kind == "url":
         return clean_url(s or "")
+    if kind == "hostport":
+        return clean_hostport(s or "")
     if kind == "points4":
         vals = [int(x) for x in (s.values() if isinstance(s, dict) else re.findall(r"-?\d+", str(s)))]
         if len(vals) != 4:

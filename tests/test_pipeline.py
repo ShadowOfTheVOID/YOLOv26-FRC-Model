@@ -4920,6 +4920,128 @@ def test_counter_keeps_going_on_match_day():
           and "Partner box OFFLINE" in page and "Restarting the counter" in page)
 
 
+def test_fanout_watchtower_and_bioarena():
+    """The scrimmage: Watchtower on the M4 (HTTP, port 8000) and bioarena
+    (UDP, 8411), each on its own address. Watchtower forwards to bioarena only
+    from its own vision runner, which the Watchtower app does not run, so with
+    one target the app's counter reached Watchtower and bioarena got nothing.
+    "Send counts to" now takes both; each ball reaches each one."""
+    import ast
+    import json as _json
+    from tbavid import fmslink as FL
+    from tbavid import hubfeed as HF
+
+    check("a comma or spaces separate targets",
+          FL.split_targets(" http://k@m4:8000,10.0.100.5:8411  ")
+          == ["http://k@m4:8000", "10.0.100.5:8411"])
+    check("one target is still the plain sender",
+          isinstance(FL.make_sender("10.0.100.5:8411"), HF.FeedSender))
+    try:
+        FL.make_sender("10.0.100.5:8411, 10.0.100.6:8411")
+        check("two bioarenas are refused (two sessions read as restarts)", False)
+    except ValueError:
+        check("two bioarenas are refused (two sessions read as restarts)", True)
+
+    clock = _FakeClock()
+    sock = _FakeSock()
+    udp = HF.FeedSender(("10.0.100.5", 8411), session="main", sock=sock, clock=clock)
+    posts, fail = [], [False]
+    def post(url, body, key):
+        if fail[0]:
+            raise OSError("connection refused")
+        posts.append(body)
+        return {"record": None}
+    web = FL.FmsSender("http://k@m4:8000", post=post, clock=clock,
+                       wall=lambda: 1_700_000_000.0 + clock.t, start=False)
+    fan = FL.FanOut([web, udp])
+    check("bioarena is the primary, whatever the order (it is the official score)",
+          fan.primary is udp and fan.peer == "bioarena" and fan.session == "main")
+    fan.info = "cam 60fps"
+    fan.hub_status = {"red": {"fps": 60}}
+    check("status reaches both", web.info == udp.info == "cam 60fps"
+          and web.hub_status == {"red": {"fps": 60}})
+    fan.score("red", 2, clock.t)
+    fan.heartbeat()
+    rx = HF.Receiver()
+    for data, _ in sock.sent:
+        rx.accept(data, "10.0.100.21")
+    web.flush()
+    check("each ball reaches bioarena's feed and Watchtower",
+          rx.match_counts()["red"] == 2
+          and sum(n for _, n in posts[-1]["events"]["red"]) == 2
+          and fan.counts == {"red": 2, "blue": 0})
+    check("no key in what the page and log show",
+          fan.describe() == "http://m4:8000, udp 10.0.100.5:8411")
+    sock.replies.append(_json.dumps({"v": 1, "seq": udp.seq, "match_state": "AUTO_PERIOD"}).encode())
+    fan.poll_replies()
+    check("linked and the match state come from bioarena",
+          fan.linked() and fan.last_reply["match_state"] == "AUTO_PERIOD")
+    fail[0] = True
+    clock.t += 3
+    fan.score("blue", 1, clock.t)
+    web.flush()
+    fan.heartbeat()
+    sock.replies.append(_json.dumps({"v": 1, "seq": udp.seq, "match_state": "AUTO_PERIOD"}).encode())
+    fan.poll_replies()
+    check("a dead Watchtower does not hold bioarena's feed",
+          fan.linked() and fan.links() == {"http://m4:8000": False, "udp 10.0.100.5:8411": True})
+    check("and its error is named, and its events stay queued",
+          fan.send_errors == 1 and fan.last_error.startswith("http://m4:8000:")
+          and fan.pending() == 1)
+    import tbavid.hubcount as HC
+    from types import SimpleNamespace as NS
+    line = HC.status_line(fan, {"c": NS(fps=lambda: 60.0, lag_ms=lambda: 4.0)},
+                          NS(zones={"red": [], "blue": []}, setup=NS(combine={})))
+    check("the console names the target that is not answering",
+          "http://m4:8000 NO REPLY" in line and "bioarena AUTO_PERIOD" in line)
+    prac = FL.make_sender("http://k@m4:8000, 10.0.100.5:8411", udp_host="127.0.0.1")
+    check("practice mode moves only bioarena to the local stand-in",
+          prac.primary.target == ("127.0.0.1", 8411) and prac.senders[0].url == "http://m4:8000")
+    prac.close()
+
+    # The Watchtower app: bioarena's address from Phones & PINs, else vision.yaml.
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("wt_settings2", root / "apps" / "watchtower" / "settings.py")
+    St = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(St)
+    check("the bioarena address takes host or host:port",
+          St.clean_hostport(" 10.0.100.5 ") == "10.0.100.5:8411"
+          and St.clean_hostport("10.0.100.5:8411") == "10.0.100.5:8411"
+          and St.clean_hostport("") == "")
+    for bad in ("http://10.0.100.5:8411", "10.0.100.5:http", "a b", "10.0.100.5:0"):
+        try:
+            St.clean_hostport(bad)
+            check(f"bioarena address {bad!r} refused", False)
+        except ValueError:
+            pass
+    check("and it is a field on the page", "server.field_feed" in St.KEY
+          and 'field:["server.field_feed"]' in (root / "apps" / "watchtower" / "home.html").read_text())
+    src = (root / "apps" / "watchtower" / "main.py").read_text()
+    tree = ast.parse(src)
+    ns = {"Path": Path}
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.name in ("vision_feed", "counter_target"):
+            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
+    ev = {"key": "K", "port": 8000, "field_feed": ""}
+    check("no bioarena set: the counter sends to Watchtower only",
+          ns["counter_target"](ev) == "http://K@127.0.0.1:8000")
+    check("set: to both", ns["counter_target"](dict(ev, field_feed="10.0.100.5:8411"))
+          == "http://K@127.0.0.1:8000, 10.0.100.5:8411")
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "config").mkdir()
+        check("no vision.yaml: no feed", ns["vision_feed"](Path(d)) == "")
+        (Path(d) / "config" / "vision.yaml").write_text(
+            "fms_url: x\n# feeds:\n#   - {host: 1.2.3.4}\n")
+        check("fms.init's commented-out feeds: none", ns["vision_feed"](Path(d)) == "")
+        (Path(d) / "config" / "vision.yaml").write_text(
+            "feeds:\n  - name: bioarena\n    host: 192.168.1.50\n")
+        check("vision.yaml's first feed, default port 8411",
+              ns["vision_feed"](Path(d)) == "192.168.1.50:8411")
+    check("main() uses it", "ctl.default_target = counter_target(ev)" in src
+          and '"field_feed": str(srv.get("field_feed") or "").strip() or vision_feed(d)' in src)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -4942,7 +5064,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_app_update,
+               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day):

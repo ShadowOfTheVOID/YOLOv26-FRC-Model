@@ -126,6 +126,9 @@ code{-webkit-user-select:text;user-select:text}
   <div class="card"><h2>Public address</h2>
     <div class="form" id="form_public"></div>
     <p class="note">Optional. Set it when a reverse proxy or tunnel (ours is https://watchtower.systemoverload.org) forwards to port 8000 on this computer: phones are then sent through this address instead of the .local name, and the QR code above carries it; the Wi-Fi IP stays listed for when the website or internet is down. Empty = Wi-Fi only. A hub counter on another computer sends to this address with the vision key in front: https://KEY@watchtower.systemoverload.org.</p></div>
+  <div class="card"><h2>Field: bioarena</h2>
+    <div class="form" id="form_field"></div>
+    <p class="note">Optional. bioarena's address for the hub counter's live feed (UDP, port 8411), e.g. 10.0.100.5:8411. The counter then sends every ball both to Watchtower here (port 8000) and to bioarena, which decides the AUTO winner and lights the hubs. Empty = the first <code>feeds:</code> entry in config/vision.yaml, if any; otherwise Watchtower only. Only one counter may feed bioarena: no second counter, no mock vision run.</p></div>
   <div class="card"><h2>PINs</h2>
     <div class="form" id="form_pins"></div>
     <div class="row" style="margin-top:12px"><button class="btn" onclick="regenPins()">Make new PINs</button></div>
@@ -167,6 +170,7 @@ const $=id=>document.getElementById(id);
 const api=()=>window.pywebview.api;
 const GROUPS={event:["event.name","event.date","event.utc_offset_hours","event.teams","event.qual_start","event.cycle_min","event.lunch"],
   public:["server.public_url"],
+  field:["server.field_feed"],
   pins:["server.pins.control","server.pins.ref","server.pins.emcee"],
   tba:["event.tba_event_key"],
   tbawrite:["tba.auth_id","tba.auth_secret","tba.enabled","tba.send_score_breakdown"],
@@ -197,6 +201,7 @@ function fieldHTML(f){const id="v_"+f.name.replace(/\./g,"_"),wide=["teams","url
   else if(f.kind==="offset"){let o="";for(let h=-12;h<=14;h+=0.5)o+=`<option value="${h}">UTC ${h>=0?"+":""}${h}</option>`;
     input=`<div class="inrow"><select id="${id}">${o}</select><button class="btn" type="button" onclick="useLocalOffset()">This computer's</button></div>`;}
   else if(f.kind==="int"||f.kind==="pin")input=`<input id="${id}" inputmode="numeric">`;
+  else if(f.kind==="hostport")input=`<input id="${id}" class="tnum" placeholder="10.0.100.5:8411" autocomplete="off" spellcheck="false">`;
   else if(f.kind==="url")input=`<input id="${id}" type="url" placeholder="https://watchtower.systemoverload.org" autocomplete="off">`;
   else input=`<input id="${id}">`;
   const extra=f.kind==="teams"?` <span id="tcount" style="font-weight:400"></span>`:"";

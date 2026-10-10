@@ -1622,6 +1622,9 @@ def status_line(sender, health: Dict[str, Health], tally: HubTally) -> str:
         detail = ", ".join(f"{z.name} {z.reported}" for z in zs)
         how = f" {tally.setup.combine[hub]}" if len(zs) > 1 else ""
         parts.append(f"{hub} {tally.value(hub)}{how} [{detail}]")
+    if hasattr(sender, "links"):            # fmslink.FanOut: every target's link
+        link += "  (" + ", ".join(f"{n} {'ok' if up else 'NO REPLY'}"
+                                  for n, up in sender.links().items()) + ")"
     errs = f"  send errors {sender.send_errors}: {sender.last_error}" \
         if sender.send_errors else ""
     return f"{'  '.join(parts)}  |  {info_line(health, tally)}  |  {link}{errs}"

@@ -46,6 +46,15 @@ Watchtower combines our camera setup with Watchtower's own parts:
     (`~/Documents/Hub Counter/camera-presets.json`).
   - **Phones & PINs:** the address phones open, as text and as a QR code, and
     the scorekeeper, ref and emcee PINs, with a button for new PINs.
+    **Field: bioarena** takes bioarena's address (e.g. `10.0.100.5:8411`).
+    The hub counter then sends every ball to Watchtower on this computer
+    (port 8000) and to bioarena's UDP feed (8411), which decides the AUTO
+    winner and lights the hubs. Watchtower does not pass counts on to
+    bioarena itself: only its own vision runner does, and the app does not
+    run it. If this is empty, the first `feeds:` entry in
+    `config/vision.yaml` is used, and if there is none, the counter sends
+    to Watchtower only. The camera page's *Send counts to* then reads
+    `http://KEY@127.0.0.1:8000, 10.0.100.5:8411`.
   - **Event & schedule:** name, date, time zone, teams, qualification start,
     match cycle and lunch.
   - **The Blue Alliance:** event key; a **Write key** section (Auth ID and Auth Secret, both masked, plus how to request one) that sends results; an optional **Read key** for importing teams.

@@ -980,6 +980,16 @@ back out of the outline; the next ball in is absorbed against them, because
 the feed may never go down. A half field: give only the one hub; the other
 reads 0.
 
+**Watchtower and bioarena at once.** *Send counts to* (or `--target`)
+takes both, separated by a comma:
+`http://KEY@<M4>:8000, 10.0.100.5:8411`. Each ball goes to each target
+(`tbavid/fmslink.FanOut`). bioarena's link is the one shown as
+*Connected*, with its match state. A target that stops answering is named
+on the page ("One target not answering") and in the console line (`NO
+REPLY`), and the other target still gets every ball. Only one bioarena may
+be listed, since two of our sessions on one receiver read as restarts. The
+Watchtower app fills this in from Phones & PINs, *Field: bioarena*.
+
 Leave it running across matches; it never needs resetting. If it restarts,
 bioarena keeps the match's score and loses only the balls scored while it was
 down. If the camera stops delivering frames it stops the heartbeat, so
