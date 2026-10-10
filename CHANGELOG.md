@@ -9,6 +9,8 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.6 — 2026-10-10
+
 - **Match queue page on Watchtower** (`/queue` on the FMS port, so on the
   Wi-Fi address and the public one alike, e.g.
   watchtower.systemoverload.org/queue). Shows the match on the field, then
