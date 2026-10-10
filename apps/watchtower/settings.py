@@ -92,6 +92,24 @@ def _get(cfg: dict, path: tuple):
     return cfg
 
 
+STRING_KINDS = ("text", "secret", "date", "time", "tbakey", "pin", "url")
+
+
+def _norm(kind: str, v):
+    """A field's value as the page shows it, from what YAML holds. Used for
+    loading and for the read-back after a save, so the two agree: our own
+    fields (server.public_url, tba.read_key) are not in Watchtower's
+    DEFAULTS, so in an event.yaml that lacks the line they read None. Load
+    showed that as "", the read-back compared None with "" and refused every
+    save ("could not write Public address ... safely; nothing was saved",
+    2026-10-10, whichever field was changed)."""
+    if kind == "teams":
+        return [int(t) for t in v or []]
+    if kind in STRING_KINDS:
+        return "" if v is None else str(v)
+    return v
+
+
 def load(event_yaml: Path) -> dict:
     """{"event.name": value, ...} for every field, Watchtower's defaults
     filled in where the file leaves one out."""
@@ -100,12 +118,7 @@ def load(event_yaml: Path) -> dict:
     cfg = config._merge(config.DEFAULTS, yaml.safe_load(event_yaml.read_text(encoding="utf-8")) or {})
     out = {}
     for name, (path, kind, _) in KEY.items():
-        v = _get(cfg, path)
-        if kind == "teams":
-            v = [int(t) for t in v or []]
-        elif kind in ("text", "secret", "date", "time", "tbakey", "pin", "url"):
-            v = "" if v is None else str(v)
-        out[name] = v
+        out[name] = _norm(kind, _get(cfg, path))
     return out
 
 
@@ -379,9 +392,7 @@ def save(event_yaml: Path, values: dict) -> dict:
         event_yaml.with_suffix(".yaml.bak").write_text(text, encoding="utf-8")
     merged = config._merge(config.DEFAULTS, yaml.safe_load(new) or {})
     for k, v in clean.items():                         # read back what we wrote
-        got = _get(merged, KEY[k][0])
-        if KEY[k][1] == "teams":
-            got = [int(t) for t in got or []]
+        got = _norm(KEY[k][1], _get(merged, KEY[k][0]))
         if got != v and str(got) != str(v):
             raise ValueError(f"could not write {KEY[k][2]} safely; nothing was saved")
     try:

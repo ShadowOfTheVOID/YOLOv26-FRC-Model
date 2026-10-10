@@ -9,6 +9,15 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Fixed: Watchtower app settings could not be saved** ("could not write
+  Public address ... safely; nothing was saved", whichever field was
+  changed). Public address and Read key are this app's own settings, not
+  in Watchtower's defaults, so on an event.yaml without those lines they
+  read back as nothing, where loading had shown them as empty. Save
+  compared the two and refused. Both now read the same way. Checked on a
+  fresh event.yaml from Watchtower v0.1.0's fms.init: changing only the
+  name, setting the public address and clearing it again all save.
+
 - **Fixed: Find cameras could do nothing visible.** Only one camera job
   runs at a time, and the page starts one itself ("pictures": a frame from
   every camera) when a setup opens. A click on Find cameras during it was

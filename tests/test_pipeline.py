@@ -3604,6 +3604,10 @@ def test_watchtower_settings():
     St = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(St)
 
+    check("a missing optional field reads back as empty, as it loads (Save refused every change "
+          "on an event.yaml without public_url / read_key, 2026-10-10)",
+          St._norm("url", None) == "" and St._norm("secret", None) == ""
+          and St._norm("teams", None) == [] and St._norm("int", 5) == 5)
     check("teams parse from any separators, in order, without repeats",
           St.parse_teams("254, 1678 971\n604;254") == [254, 1678, 971, 604])
     clean, err = St.check({"event.name": " X ", "event.date": "2026-10-10", "event.qual_start": "09:00",
