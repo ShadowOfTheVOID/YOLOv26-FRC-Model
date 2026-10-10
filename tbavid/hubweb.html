@@ -620,7 +620,9 @@ function handleJob(){const j=S.job;
   if(j.running){$("prog").style.display=j.progress!=null?"block":"none";$("prog").firstChild.style.width=((j.progress||0)*100)+"%";
     hint(`<b>${esc(j.name[0].toUpperCase()+j.name.slice(1))}…</b>`);return;}
   $("prog").style.display="none";if(j.id===jobSeen)return;jobSeen=j.id;
-  if(j.error){hint("");return;}
+  // A job that failed said so only in the log: Find cameras looked dead.
+  if(j.error){hint("");if(j.name==="find cameras")modal("Could not look for cameras",`<p>${esc(j.error)}</p>`,[{label:"OK",cls:"primary"}]);
+    else toast(`${j.name[0].toUpperCase()+j.name.slice(1)} failed: ${j.error}`,"bad");return;}
   if(j.name==="find cameras")chooseCamera(j.result||[]);
   else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
     else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
@@ -706,7 +708,7 @@ $("f_model_weight").addEventListener("change",async()=>{try{await api("update_ca
 document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>api("combine",{hub:g.dataset.hub,how:b.textContent}).then(refresh)));
 function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
 function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
-function findCams(){api("find_cameras");}
+function findCams(){api("find_cameras").catch(()=>{});}
 let testPassed=false;
 function renderTests(v){const run=S.running,bt=v.ball_test;
   $("bt_start").disabled=!run;$("bt_start").textContent=bt?"Restart ball test":"Start ball test";$("bt_check").style.display=bt?"":"none";

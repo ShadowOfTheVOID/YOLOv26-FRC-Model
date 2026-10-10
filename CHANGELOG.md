@@ -9,6 +9,15 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Fixed: Find cameras could do nothing visible.** Only one camera job
+  runs at a time, and the page starts one itself ("pictures": a frame from
+  every camera) when a setup opens. A click on Find cameras during it was
+  refused, and the refusal went only to the log. A search that failed only
+  cleared the hint. The refusal now shows as "Busy with pictures -- try
+  again when it finishes". A failed search opens a box with the reason,
+  and any other job that fails shows a toast. The same applies to Measure,
+  Refresh picture, Test a recording, Check a recording and Calibrate.
+
 - **Fixed: Watchtower's plugin counted a ball twice when a hub had an
   outline and an exit line.** The `tbavid-colour` / `tbavid-combo` counters
   that Watchtower's vision loads (`tbavid/fms_counter.py`) added every zone

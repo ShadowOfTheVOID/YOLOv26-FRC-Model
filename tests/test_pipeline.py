@@ -5196,6 +5196,44 @@ def test_plugin_combines_like_hubtally():
     check("and /control's colour figure is the hub's count", pc.status()["detail"] == "colour 5")
 
 
+def test_find_cameras_says_why():
+    """Find cameras did nothing visible when another job (the "pictures" grab
+    that runs when a setup opens) was still going: HubController.job refused
+    and said so only in the log. The refusal is now an API error (a toast),
+    and a failed search opens a box saying why."""
+    import threading
+    from tbavid import hubweb as HW
+    from tbavid.hubapp import HubController
+    ctl = HubController(None)
+    gate = threading.Event()
+    ctl.job("pictures", lambda: gate.wait(5))
+    try:
+        HW.ACTIONS["find_cameras"](ctl, {})
+        check("Find cameras during another job says it is busy", False)
+    except ValueError as e:
+        check("Find cameras during another job says it is busy, and with what",
+              "Busy with pictures" in str(e))
+    gate.set()
+    for _ in range(100):
+        if not ctl.job_state["running"]:
+            break
+        __import__("time").sleep(0.01)
+    real = HW.probe_cameras
+    try:
+        HW.probe_cameras = lambda: (_ for _ in ()).throw(RuntimeError("camera access denied"))
+        HW.ACTIONS["find_cameras"](ctl, {})
+        for _ in range(100):
+            if not ctl.job_state["running"]:
+                break
+            __import__("time").sleep(0.01)
+    finally:
+        HW.probe_cameras = real
+    check("a failed search keeps its reason for the page",
+          ctl.job_state["name"] == "find cameras" and "access denied" in ctl.job_state["error"])
+    page = (Path(__file__).resolve().parent.parent / "tbavid" / "hubweb.html").read_text()
+    check("and the page shows it", 'modal("Could not look for cameras"' in page)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5218,7 +5256,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_app_update,
+               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day):
