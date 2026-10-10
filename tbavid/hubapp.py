@@ -190,19 +190,58 @@ def list_dir(path: str) -> Dict:
 
 # -- camera access (OpenCV, imported lazily) ----------------------------------
 
-def probe_cameras(max_index: int = 6) -> List[Dict]:
+def probe_cameras(max_index: int = 12, opener: Optional[Callable] = None) -> List[Dict]:
     """Which camera numbers open, and at what size. Numbers can change when
-    cameras are re-plugged, so the interfaces always show a picture."""
-    import cv2
+    cameras are re-plugged, so the interfaces always show a picture.
+
+    Find cameras showed two of the cameras plugged in (v0.5.5). Three causes,
+    each fixed here:
+    - Only numbers 0-5 were tried. Linux and the Pi give every USB camera two
+      numbers (picture + metadata: 0, 2, 4, 6...), and a Mac counts the
+      built-in camera, an iPhone (Continuity) and Desk View before any USB
+      one -- three cameras could already run past 5. Now 0-11, gaps skipped.
+    - One read decided it. A camera often returns no frame on the first read
+      while it starts up, and was dropped as if absent. Now up to 10 reads.
+    - Windows' default driver (Media Foundation) refuses some USB cameras
+      DirectShow opens; DirectShow is tried before giving up.
+    A camera that opens but sends no picture (in use by another program, or
+    out of USB bandwidth) is listed as such instead of vanishing."""
+    import sys
+
+    if opener is None:
+        import cv2
+
+        def opener(i):
+            caps = [lambda: cv2.VideoCapture(i)]
+            if sys.platform.startswith("win"):
+                caps.append(lambda: cv2.VideoCapture(i, cv2.CAP_DSHOW))
+            for make in caps:
+                cap = make()
+                if cap.isOpened():
+                    return cap
+                cap.release()
+            return None
+
     found = []
     for i in range(max_index):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            ok, frame = cap.read()
-            if ok:
-                h, w = frame.shape[:2]
-                found.append({"index": i, "size": f"{w}x{h}"})
-        cap.release()
+        cap = opener(i)
+        if cap is None:
+            continue
+        frame = None
+        try:
+            for _ in range(10):
+                ok, fr = cap.read()
+                if ok and fr is not None:
+                    frame = fr
+                    break
+                time.sleep(0.05)
+        finally:
+            cap.release()
+        if frame is not None:
+            h, w = frame.shape[:2]
+            found.append({"index": i, "size": f"{w}x{h}"})
+        else:
+            found.append({"index": i, "size": "no picture -- in use by another program?"})
     return found
 
 

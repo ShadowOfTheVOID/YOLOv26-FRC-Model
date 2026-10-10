@@ -5210,6 +5210,38 @@ def test_plugin_combines_like_hubtally():
     check("and /control's colour figure is the hub's count", pc.status()["detail"] == "colour 5")
 
 
+def test_find_cameras_sees_them_all():
+    """Find cameras showed two of the cameras plugged in (v0.5.5): it tried
+    numbers 0-5 only (Linux gives each USB camera two numbers, 0/2/4/6), and
+    one failed first read -- a camera still starting -- dropped it."""
+    from tbavid.hubapp import probe_cameras
+
+    class Frame:
+        shape = (720, 1280, 3)
+
+    class Cap:
+        def __init__(self, i):
+            self.i, self.reads = i, 0
+        def read(self):
+            self.reads += 1
+            if self.i == 2 and self.reads < 3:      # slow to start
+                return False, None
+            if self.i == 8:                         # busy
+                return False, None
+            return True, Frame()
+        def release(self):
+            pass
+
+    real = {0, 2, 4, 6, 8, 10}                      # every second number, like V4L2
+    found = probe_cameras(opener=lambda i: Cap(i) if i in real else None)
+    idx = [c["index"] for c in found]
+    check("cameras past number 5 are found", idx == [0, 2, 4, 6, 8, 10])
+    check("a camera slow to give its first frame is kept with its size",
+          found[1]["size"] == "1280x720")
+    check("a camera that opens but sends nothing is listed, and says so",
+          "no picture" in found[4]["size"])
+
+
 def test_find_cameras_says_why():
     """Find cameras did nothing visible when another job (the "pictures" grab
     that runs when a setup opens) was still going: HubController.job refused
@@ -5297,7 +5329,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
+               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_find_cameras_sees_them_all, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day):
