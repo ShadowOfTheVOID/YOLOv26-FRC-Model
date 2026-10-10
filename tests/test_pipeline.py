@@ -4994,40 +4994,45 @@ def test_fanout_watchtower_and_bioarena():
                           NS(zones={"red": [], "blue": []}, setup=NS(combine={})))
     check("the console names the target that is not answering",
           "http://m4:8000 NO REPLY" in line and "bioarena AUTO_PERIOD" in line)
+    # No bioarena at the venue (the app always lists the spec's address):
+    # still linked, through Watchtower, and the state is Watchtower's.
+    fail[0] = False
+    clock.t += 5
+    web.flush()
+    check("bioarena silent, Watchtower answering: linked, led by Watchtower",
+          fan.linked() and fan.lead() is web and fan.peer == "frc-fms"
+          and fan.links() == {"http://m4:8000": True, "udp 10.0.100.5:8411": False})
+    line = HC.status_line(fan, {"c": NS(fps=lambda: 60.0, lag_ms=lambda: 4.0)},
+                          NS(zones={"red": [], "blue": []}, setup=NS(combine={})))
+    check("and the console says Watchtower took it, bioarena not answering",
+          "frc-fms took it" in line and "udp 10.0.100.5:8411 NO REPLY" in line)
     prac = FL.make_sender("http://k@m4:8000, 10.0.100.5:8411", udp_host="127.0.0.1")
     check("practice mode moves only bioarena to the local stand-in",
           prac.primary.target == ("127.0.0.1", 8411) and prac.senders[0].url == "http://m4:8000")
     prac.close()
 
-    # The Watchtower app: bioarena's address from Phones & PINs, else vision.yaml.
-    import importlib.util
+    # The Watchtower app: bioarena's address is never typed. vision.yaml's
+    # first feeds: entry, else the spec's; Phones & PINs only shows it.
     root = Path(__file__).resolve().parent.parent
-    spec = importlib.util.spec_from_file_location("wt_settings2", root / "apps" / "watchtower" / "settings.py")
-    St = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(St)
-    check("the bioarena address takes host or host:port",
-          St.clean_hostport(" 10.0.100.5 ") == "10.0.100.5:8411"
-          and St.clean_hostport("10.0.100.5:8411") == "10.0.100.5:8411"
-          and St.clean_hostport("") == "")
-    for bad in ("http://10.0.100.5:8411", "10.0.100.5:http", "a b", "10.0.100.5:0"):
-        try:
-            St.clean_hostport(bad)
-            check(f"bioarena address {bad!r} refused", False)
-        except ValueError:
-            pass
-    check("and it is a field on the page", "server.field_feed" in St.KEY
-          and 'field:["server.field_feed"]' in (root / "apps" / "watchtower" / "home.html").read_text())
+    page = (root / "apps" / "watchtower" / "home.html").read_text()
+    check("Phones & PINs shows bioarena read-only, with no input box",
+          'id="fieldurl"' in page and "server.field_feed" not in page
+          and "field_feed" not in (root / "apps" / "watchtower" / "settings.py").read_text())
     src = (root / "apps" / "watchtower" / "main.py").read_text()
     tree = ast.parse(src)
     ns = {"Path": Path}
     for n in tree.body:
         if isinstance(n, ast.FunctionDef) and n.name in ("vision_feed", "counter_target"):
             exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
+        if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "FIELD_FEED":
+            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
     ev = {"key": "K", "port": 8000, "field_feed": ""}
-    check("no bioarena set: the counter sends to Watchtower only",
-          ns["counter_target"](ev) == "http://K@127.0.0.1:8000")
-    check("set: to both", ns["counter_target"](dict(ev, field_feed="10.0.100.5:8411"))
-          == "http://K@127.0.0.1:8000, 10.0.100.5:8411")
+    check("nothing found: Watchtower and the spec's bioarena address",
+          ns["FIELD_FEED"] == "10.0.100.5:8411"
+          and ns["counter_target"](ev) == "http://K@127.0.0.1:8000, 10.0.100.5:8411")
+    check("vision.yaml's address when it has one",
+          ns["counter_target"](dict(ev, field_feed="192.168.1.50:8411"))
+          == "http://K@127.0.0.1:8000, 192.168.1.50:8411")
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "config").mkdir()
         check("no vision.yaml: no feed", ns["vision_feed"](Path(d)) == "")
@@ -5039,7 +5044,7 @@ def test_fanout_watchtower_and_bioarena():
         check("vision.yaml's first feed, default port 8411",
               ns["vision_feed"](Path(d)) == "192.168.1.50:8411")
     check("main() uses it", "ctl.default_target = counter_target(ev)" in src
-          and '"field_feed": str(srv.get("field_feed") or "").strip() or vision_feed(d)' in src)
+          and '"field_feed": vision_feed(d) or FIELD_FEED' in src)
 
 
 def main() -> int:

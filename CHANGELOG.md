@@ -26,11 +26,23 @@ the build rather than publishing an empty release.
   the local stand-in. Checked end to end over real sockets: Watchtower's
   HTTP stand-in got all 3 balls with the vision key, and `hubfeed-listen`
   counted red 3.
-- **Watchtower app: Phones & PINs, *Field: bioarena*** (`server.field_feed`
-  in event.yaml, like `public_url`). When it is set, the camera page starts
-  out sending to Watchtower and bioarena. When it is empty, the first
-  `feeds:` entry in Watchtower's `config/vision.yaml` is used. A web
-  address is refused there, because bioarena's feed is UDP.
+- **Watchtower app: bioarena is built in, nothing to type.** The camera
+  page starts out sending to Watchtower and bioarena. bioarena's address is
+  the first `feeds:` entry in Watchtower's `config/vision.yaml`, or else the
+  feed spec's `10.0.100.5:8411`. Phones & PINs shows it read-only, with
+  whether bioarena is answering. The link reads as connected while any
+  target answers (at a venue with no bioarena, through Watchtower) and
+  names the one that does not.
+- **An offline page for watchtower.systemoverload.org in Watchtower's own
+  look** (`deploy/watchtower-offline.html`, `deploy/Caddyfile.watchtower`).
+  The page Caddy served while the FMS was down was dark, unlike every
+  Watchtower page. The new one uses Watchtower's tokens, panel and pill,
+  inlined because the FMS that serves `style.css` is down. It keeps the
+  same words, has no outside requests, and fits a phone (390 px, no
+  sideways scroll). It checks `/` every 15 s and reloads when Watchtower
+  answers. Checked against a local server that answered 502, then 200: it
+  was on the real page within 17 s. The server copy is put in place by
+  hand; see the Caddyfile's header.
 
 - **A second counter on one receiver is dropped, not counted again and
   again.** watchtower-fms PR #3 makes its mock vision send to `vision.yaml`'s

@@ -109,11 +109,16 @@ def vision_feed(d: Path) -> str:
     return ""
 
 
+# bioarena's address in its Hub FUEL Counter Feed spec. Nothing is typed:
+# Phones & PINs shows it read-only, and vision.yaml's feeds: overrides it.
+FIELD_FEED = "10.0.100.5:8411"
+
+
 def counter_target(ev: dict) -> str:
-    """What the hub counter sends to: Watchtower on this computer, and
-    bioarena too when its address is set (tbavid.fmslink.FanOut)."""
-    t = f"http://{ev['key']}@127.0.0.1:{ev['port']}"
-    return f"{t}, {ev['field_feed']}" if ev.get("field_feed") else t
+    """What the hub counter sends to: Watchtower on this computer and bioarena
+    (tbavid.fmslink.FanOut). Watchtower passes counts to bioarena only from
+    its own vision runner, which the app does not run."""
+    return f"http://{ev['key']}@127.0.0.1:{ev['port']}, {ev.get('field_feed') or FIELD_FEED}"
 
 
 def read_event(d: Path) -> dict:
@@ -124,7 +129,8 @@ def read_event(d: Path) -> dict:
             "teams": list(e.get("teams") or []),
             "pins": srv.get("pins") or {}, "key": srv.get("vision_key", ""),
             "public_url": str(srv.get("public_url") or "").rstrip("/"),
-            "field_feed": str(srv.get("field_feed") or "").strip() or vision_feed(d),
+            "field_feed": vision_feed(d) or FIELD_FEED,
+            "field_from": "vision.yaml" if vision_feed(d) else "spec",
             "port": int(srv.get("port") or FMS_PORT)}
 
 
@@ -252,10 +258,13 @@ class App:
                 # Set in Phones & PINs when a proxy or tunnel serves this FMS
                 # under a public name: then that leads, and the QR carries it.
                 "public_url": self.ev.get("public_url", ""),
+                # Read-only on Phones & PINs: where the counter feeds bioarena.
+                "field_feed": self.ev.get("field_feed", ""), "field_from": self.ev.get("field_from", ""),
                 "on_network": ip != "127.0.0.1",
                 "fms_ok": port_open(self.ev["port"]), "data_dir": str(self.d),
                 "hub": {"running": bool(st.get("running")), "linked": bool(live.get("linked")),
                         "counts": live.get("counts") or {"red": 0, "blue": 0},
+                        "links": live.get("links") or {},
                         "cameras": len(st["cfg"].get("cameras") or [])}}
 
     def qr(self, text: str) -> str:
@@ -668,8 +677,7 @@ def main() -> int:
     from tbavid.hubapp import HubController
     ctl = HubController(str(d / "cams.json"))
     ctl.default_target = counter_target(ev)
-    if ev.get("field_feed"):
-        print(f"hub counter: to Watchtower and bioarena at {ev['field_feed']}")
+    print(f"hub counter: to Watchtower and bioarena at {ev['field_feed']} ({ev['field_from']})")
     # Camera presets saved here or in the Hub Counter app are the same file.
     ctl.presets_file = str(Path.home() / "Documents" / "Hub Counter" / "camera-presets.json")
     hub = threading.Thread(target=hubweb.serve, args=(ctl, HUB_PORT, "127.0.0.1"),

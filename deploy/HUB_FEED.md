@@ -988,7 +988,9 @@ takes both, separated by a comma:
 on the page ("One target not answering") and in the console line (`NO
 REPLY`), and the other target still gets every ball. Only one bioarena may
 be listed, since two of our sessions on one receiver read as restarts. The
-Watchtower app fills this in from Phones & PINs, *Field: bioarena*.
+Watchtower app fills this in by itself: the first `feeds:` entry in its
+`config/vision.yaml`, else `10.0.100.5:8411`. It is shown read-only on
+Phones & PINs. The link reads as up while any target answers.
 
 Leave it running across matches; it never needs resetting. If it restarts,
 bioarena keeps the match's score and loses only the balls scored while it was

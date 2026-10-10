@@ -197,9 +197,12 @@ class FanOut:
     one its never-dropped queue -- so a dead Watchtower cannot stall the feed
     bioarena decides AUTO from, nor the reverse.
 
-    The first bioarena target is the primary: the match state, `linked` and
-    round trip come from it, as bioarena is the official score. Errors from
-    any target are counted and named.
+    The bioarena target is the primary: while it answers, the match state
+    and round trip come from it, as bioarena is the official score. The
+    Watchtower app always lists bioarena (the spec's 10.0.100.5:8411 unless
+    vision.yaml says otherwise), so a venue with no bioarena must still read
+    as linked: `linked` is any target answering, and the state comes from
+    whichever leads (`lead`). Errors from any target are counted and named.
     """
 
     def __init__(self, senders):
@@ -212,13 +215,19 @@ class FanOut:
             # two of ours alternating re-carry each other's totals.
             raise ValueError("send to one bioarena only (one UDP host:port)")
         self.primary = udp[0] if udp else self.senders[0]
-        self.peer = getattr(self.primary, "peer", "bioarena")
+
+    def lead(self):
+        """The primary while it answers, else the first target that does."""
+        if self.primary.linked():
+            return self.primary
+        return next((x for x in self.senders if x.linked()), self.primary)
 
     # what hubcount.run, hubapp and run.py read
     session = property(lambda self: self.primary.session)
     counts = property(lambda self: self.primary.counts)
-    last_reply = property(lambda self: self.primary.last_reply)
-    rtt_ms = property(lambda self: self.primary.rtt_ms)
+    peer = property(lambda self: getattr(self.lead(), "peer", "bioarena"))
+    last_reply = property(lambda self: self.lead().last_reply)
+    rtt_ms = property(lambda self: self.lead().rtt_ms)
     send_errors = property(lambda self: sum(x.send_errors for x in self.senders))
 
     @property
@@ -249,7 +258,7 @@ class FanOut:
         return sum(x.poll_replies() for x in self.senders)
 
     def linked(self) -> bool:
-        return self.primary.linked()
+        return any(x.linked() for x in self.senders)
 
     def links(self) -> Dict[str, bool]:
         return {_name(x): x.linked() for x in self.senders}
