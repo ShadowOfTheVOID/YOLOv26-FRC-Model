@@ -19,6 +19,16 @@ the build rather than publishing an empty release.
   and how many matches come before. `?tv=1` is a large layout for a pit
   TV, `?n=` sets how many are listed (10). Live over the same websocket as
   Watchtower's own pages. Overview has its address and an Open button.
+  **From TBA too:** `/queue?event=2026casj` shows that event's schedule
+  from The Blue Alliance (any event, e.g. a real one to follow), and with
+  no schedule entered in Watchtower yet the page shows TBA's for the event
+  key on The Blue Alliance tab, switching to Watchtower's own as soon as
+  the scorekeeper saves one. Played = TBA has a score; TBA cannot know what
+  is on the field, so its first unplayed match is "Up next". Needs the Read
+  API key (it stays in the app; the page gets only the schedule) and
+  internet. Refreshed every 30 s; TBA is asked at most once per 30 s per
+  event, and the last schedule stays up, with a warning, if TBA cannot be
+  reached. Checked against a stand-in TBA, not the real one.
   Checked in a browser against Watchtower v0.1.0 with a 14-match schedule
   and one match running, at desktop and phone widths.
 

@@ -7,7 +7,9 @@
 <link rel="stylesheet" href="/static/style.css">
 <title>Match Queue</title>
 <!-- Served by the Watchtower app at /queue on the FMS port (so also on the
-     public address). No PIN: it only reads /ws, the state every page gets.
+     public address). No PIN: it only reads /ws, the state every page gets,
+     and /queue/tba.json (TBA's schedule, fetched by the app with its Read
+     key) for ?event=KEY or while Watchtower has no schedule.
      Teams in the pits and the queuers' line had to ask the scorekeeper what
      was next; Watchtower's own pages show only the current match. -->
 <style>
@@ -81,29 +83,64 @@ box.value = team;
 box.oninput = () => {
   team = box.value.replace(/\D/g, "");
   try { localStorage.setItem("queue_team", team); } catch (e) {}
-  if (FMS.state) render(FMS.state);
+  render();
 };
 
+// Where the schedule comes from: ?event=KEY is always TBA (any event, not
+// just this one). Otherwise Watchtower's own schedule, and TBA's for the
+// event key on The Blue Alliance tab while Watchtower has none entered.
+const FORCED = (P.get("event") || "").trim().toLowerCase();
+let tba = null, tbaTimer = null;
+const useTba = () => !!FORCED || !!(FMS.state && !(FMS.state.matches || []).length && FMS.state.event.tba_event_key);
+async function pullTba() {
+  try {
+    const r = await fetch("/queue/tba.json" + (FORCED ? "?event=" + encodeURIComponent(FORCED) : ""), { cache: "no-store" });
+    const j = await r.json().catch(() => ({}));
+    tba = r.ok ? j : { ...(tba || {}), error: j.detail || r.statusText };
+  } catch (e) { tba = { ...(tba || {}), error: "Could not reach Watchtower." }; }
+  render();
+}
+function syncTba() {
+  if (useTba() && !tbaTimer) { pullTba(); tbaTimer = setInterval(pullTba, 30000); }
+  if (!useTba() && tbaTimer) { clearInterval(tbaTimer); tbaTimer = null; tba = null; }
+}
+
 function title(m) {
+  const sm = m.match_number > 1 ? `-${m.match_number}` : "";
   if (m.comp_level === "qm") return `Qual ${m.match_number}`;
   if (m.comp_level === "f") return `Final ${m.match_number}`;
-  return `Playoff ${m.set_number}` + (m.match_number > 1 ? `-${m.match_number}` : "");
+  if (m.comp_level === "qf") return `Quarterfinal ${m.set_number}${sm}`;
+  if (m.comp_level === "ef") return `Eighthfinal ${m.set_number}${sm}`;
+  return `Playoff ${m.set_number}${sm}`;
 }
 const has = (m, t) => !!t && [...(m.red || []), ...(m.blue || [])].some((x) => String(x) === t);
 const station = (m, t) => {
   for (const a of ["red", "blue"]) { const i = (m[a] || []).findIndex((x) => String(x) === t); if (i >= 0) return `${a} ${i + 1}`; }
   return "";
 };
+// Watchtower plans in HH:MM of the event day; TBA gives epoch seconds.
+const planned = (m) => m.scheduled ||
+  (m.time ? new Date(m.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
 
-// What is queued: every match not played yet, in schedule order, with the
-// one the scorekeeper has selected first (they can run them out of order).
-function queue(s) {
-  const ms = s.matches || [];
+// What is queued: every match not played yet, in schedule order. From
+// Watchtower, the one the scorekeeper has selected comes first (they can run
+// them out of order) and the running one is on the field; TBA knows neither.
+function view() {
+  const s = FMS.state;
+  if (useTba()) {
+    const ms = (tba && tba.matches) || [];
+    const ago = ms.length && tba.age != null ? (tba.age < 5 ? "just now" : `${tba.age} s ago`) : "";
+    return { name: (tba && tba.name) || FORCED || "Match queue", field: null, ms,
+             q: ms.filter((m) => m.status === "scheduled"),
+             src: `Schedule from The Blue Alliance${tba && tba.event ? " (" + tba.event + ")" : ""}${ago ? ", updated " + ago : ""}`,
+             error: tba ? tba.error : "", loading: !tba };
+  }
+  const ms = (s && s.matches) || [];
   const field = ms.find((m) => m.status === "running") || null;
   let q = ms.filter((m) => m.status === "scheduled");
-  const cur = s.current;
+  const cur = s && s.current;
   if (cur && cur.status === "scheduled") q = [q.find((m) => m.key === cur.key), ...q.filter((m) => m.key !== cur.key)].filter(Boolean);
-  return { field, q };
+  return { name: (s && s.event.name) || "Match queue", field, q, ms, src: "", error: "", loading: !s };
 }
 
 function alliance(m, a) {
@@ -117,40 +154,43 @@ function row(m, cls, tag) {
     `<span class="tag">${esc(tag)}</span></div>${alliance(m, "red")}${alliance(m, "blue")}</div>`;
 }
 
-function render(s) {
-  document.getElementById("ev").textContent = (s.event && s.event.name) || "Match queue";
-  const { field, q } = queue(s);
-  const played = (s.matches || []).filter((m) => m.status === "committed" || m.status === "review").length;
-  document.getElementById("sub").textContent = (s.matches || []).length
-    ? `${played} played · ${q.length} to go` : "Match queue";
-  let h = "";
+function render() {
+  syncTba();
+  const v = view(), { field, q, ms } = v;
+  document.getElementById("ev").textContent = v.name;
+  const played = ms.filter((m) => m.status === "committed" || m.status === "review").length;
+  document.getElementById("sub").textContent = v.loading ? "Connecting…" :
+    [ms.length ? `${played} played · ${q.length} to go` : "", v.src].filter(Boolean).join(" · ") || "Match queue";
+  let h = v.error ? `<div class="mine" style="background:var(--warn-soft);color:var(--warn)">${esc(v.error)}</div>` : "";
   if (field) h += `<div class="sec">On the field</div>` + row(field, "field", "Playing now");
   if (q.length) {
     h += `<div class="sec">Queue</div>`;
     q.slice(0, SHOW).forEach((m, i) => {
-      const tag = i === 0 ? (field ? "On deck" : "Up next") : i <= 2 ? "Queue now" : (m.scheduled ? `Planned ${m.scheduled}` : `#${i + 1} in line`);
+      const at = planned(m);
+      const tag = i === 0 ? (field ? "On deck" : "Up next") : i <= 2 ? "Queue now" : (at ? `Planned ${at}` : `#${i + 1} in line`);
       h += row(m, i === 0 ? "deck" : "", tag);
     });
     if (q.length > SHOW) h += `<div class="more">and ${q.length - SHOW} more</div>`;
-  } else if (!field) {
-    h += `<div class="empty">${(s.matches || []).length ? "Every scheduled match has been played." : "No matches scheduled yet."}</div>`;
+  } else if (!field && !v.loading && !(v.error && !ms.length)) {
+    h += `<div class="empty">${ms.length ? "Every scheduled match has been played." : "No matches scheduled yet."}</div>`;
   }
   document.getElementById("list").innerHTML = h;
 
   const mine = document.getElementById("mine");
-  if (!team) { mine.hidden = true; return; }
+  if (!team || v.loading) { mine.hidden = true; return; }
   mine.hidden = false;
   const i = q.findIndex((m) => has(m, team));
   if (field && has(field, team)) mine.innerHTML = `<b>${esc(team)}</b> is on the field now (${esc(station(field, team))}).`;
   else if (i < 0) mine.innerHTML = `<b>${esc(team)}</b> has no more matches scheduled.`;
   else {
-    const m = q[i], ahead = i + (field ? 1 : 0);
+    const m = q[i], ahead = i + (field ? 1 : 0), at = planned(m);
     mine.innerHTML = `<b>${esc(team)}</b>: next is <b>${esc(title(m))}</b>, ${esc(station(m, team))}` +
       (ahead ? ` — ${ahead} match${ahead > 1 ? "es" : ""} before it` : " — up next") +
-      (m.scheduled ? ` (planned ${esc(m.scheduled)})` : "") + ".";
+      (at ? ` (planned ${esc(at)})` : "") + ".";
   }
 }
 FMS.on(render);
 FMS.connect();
+if (FORCED) render();
 </script>
 </body></html>

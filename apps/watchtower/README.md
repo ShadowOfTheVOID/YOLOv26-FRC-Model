@@ -60,6 +60,10 @@ Watchtower combines our camera setup with Watchtower's own parts:
   teams and planned times, updating live. No PIN, so share it with teams.
   A team types its number to see its next match and how many come before
   it; `/queue?team=841` links straight to that, `/queue?tv=1` fills a pit TV.
+  `/queue?event=2026casj` shows that event's schedule from The Blue
+  Alliance instead, and until a schedule is entered here the page shows
+  TBA's for this event's key; both need the Read API key on The Blue
+  Alliance tab.
 - **Saving settings** checks them first (the scorekeeper PIN must differ from
   the others, times must be HH:MM, ...), writes them, and restarts the app in
   a few seconds. Matches are kept.

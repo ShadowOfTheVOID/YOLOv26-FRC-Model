@@ -3475,6 +3475,7 @@ def test_hub_counter_app():
     queue = (root / "apps" / "watchtower" / "queue.html").read_text()
     check("the match queue is a page on the FMS itself, bundled, no PIN",
           'add_api_route("/queue"' in wt and '"queue.html"' in spec
+          and 'add_api_route("/queue/tba.json"' in wt and "/queue/tba.json" in queue
           and "/static/common.js" in queue and "FMS.connect()" in queue
           and "gate(" not in queue)
     launcher = (root / "apps" / "hubcounter" / "main.py").read_text()
@@ -3660,6 +3661,19 @@ def test_watchtower_settings():
                 self.send_response(200); self.end_headers(); self.wfile.write(b"<html></html>"); return
             if self.headers.get("X-TBA-Auth-Key") != "goodkey":
                 self.send_response(401); self.end_headers(); return
+            if self.path == "/api/v3/event/2026later/matches/simple":
+                def m(level, s_, n, red, blue):
+                    return {"key": f"2026later_{level}{s_}m{n}" if level != "qm" else f"2026later_qm{n}",
+                            "comp_level": level, "set_number": s_, "match_number": n, "time": 1000 + n,
+                            "alliances": {"red": {"team_keys": [f"frc{t}" for t in (254, 1678, 971)], "score": red,
+                                                  "surrogate_team_keys": ["frc971"] if n == 2 else []},
+                                          "blue": {"team_keys": ["frc604", "frc649", "frc8033"], "score": blue}}}
+                # TBA's own order is not playing order.
+                body = _json.dumps([m("qf", 1, 2, -1, -1), m("qm", 1, 2, -1, -1), m("qf", 2, 1, -1, -1),
+                                    m("qm", 1, 1, 50, 40), m("qf", 1, 1, -1, -1)]).encode()
+                self.send_response(200); self.end_headers(); self.wfile.write(body); return
+            if self.path == "/api/v3/event/2026later/simple":
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{"name": "Later Event"}'); return
             if self.path != "/api/v3/event/2026later/teams/simple":
                 self.send_response(404); self.end_headers(); return
             body = _json.dumps([{"team_number": 1678, "nickname": "Citrus Circuits"},
@@ -3680,6 +3694,23 @@ def test_watchtower_settings():
         check("a wrong key and a missing event key each say what to fix",
               "refused" in St.tba_teams("2026later", "bad")["error"]
               and "event key first" in St.tba_teams("", "goodkey")["error"])
+        r = St.tba_matches("2026LATER", "goodkey")
+        ms = r.get("matches") or []
+        check("TBA's schedule for the match queue comes in playing order, qf1m1 qf2m1 qf1m2",
+              r.get("name") == "Later Event"
+              and [x["key"] for x in ms] == ["qm1", "qm2", "qf1m1", "qf2m1", "qf1m2"])
+        check("in the shape Watchtower's state has: team numbers, surrogates, played = has a score",
+              ms[0]["red"] == [254, 1678, 971] and ms[0]["status"] == "committed" and ms[0]["red_score"] == 50
+              and ms[1]["status"] == "scheduled" and ms[1]["surrogates"] == [971] and ms[1]["time"] == 1002)
+        import os
+        saved_key = os.environ.pop("TBA_AUTH_KEY", None)     # a maintainer's own key would answer
+        no_key = St.tba_matches("2026later", "")
+        if saved_key is not None:
+            os.environ["TBA_AUTH_KEY"] = saved_key
+        check("no Read key, a wrong one, and no event key each say what to fix",
+              "Read API key" in no_key["error"]
+              and "refused" in St.tba_matches("2026later", "bad")["error"]
+              and "event key" in St.tba_matches("", "goodkey")["error"])
     finally:
         srv.shutdown()
     pasted = St.parse_team_text("team_number,team_name,city,state_prov,country,robot_image_url\n"
