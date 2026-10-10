@@ -5187,6 +5187,12 @@ def test_plugin_combines_like_hubtally():
                        {"confirm": {"blue": 2}}, steps=8)
     check("confirm (exits now + recent entries) is the page's too: 40, not 70",
           plugin == hub == 40)
+    from types import SimpleNamespace as Z
+    o, e = Z(kind="outline"), Z(kind="exit")
+    check("the console calls outline + exit 'the larger', never 'sum' (it read as a double count)",
+          HC.describe_combine([o, e], "sum") == "the larger of outline and exit"
+          and HC.describe_combine([o, o], "sum") == "sum" and HC.describe_combine([o], "sum") == ""
+          and HC.describe_combine([o, o, e], "max") == "the larger of outline and exit (2 outlines by max)")
     one = FC.ColourCounter({"hub": "blue", "outline": mouth, "ball_area": 300})
     one._build(frame)
     one.counters = [Fake(mouth)]

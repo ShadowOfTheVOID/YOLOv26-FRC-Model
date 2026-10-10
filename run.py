@@ -843,7 +843,7 @@ def cmd_hubfeed(args, cfg):
     for hub in setup.hubs():
         n = len(setup.zones(hub))
         if n > 1:
-            print(f"  {hub}: {n} zones combined by {setup.combine[hub]}")
+            print(f"  {hub}: {n} zones, {hubcount.describe_combine(setup.zones(hub), setup.combine[hub])}")
     relay = None
     if args.partner_port:
         relay = hubfeed.RelayIn(args.partner_port)

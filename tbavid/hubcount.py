@@ -1183,6 +1183,21 @@ def setup_from_flags(source: str, outlines: Dict[str, Sequence[Point]],
     return Setup(cams)
 
 
+def describe_combine(zones: Sequence["Zone"], how: str) -> str:
+    """How a hub's zones make its count, in words for the console: an
+    outline with an exit line takes the larger kind, never the sum (Setup).
+    The console said "sum" for those, which read as a double count."""
+    kinds = {}
+    for z in zones:
+        kinds[z.kind] = kinds.get(z.kind, 0) + 1
+    if len(zones) < 2:
+        return ""
+    if len(kinds) > 1:
+        each = ", ".join(f"{n} {k}s by {how}" for k, n in kinds.items() if n > 1)
+        return "the larger of outline and exit" + (f" ({each})" if each else "")
+    return how
+
+
 def combined(counts: Sequence[int], how: str) -> int:
     """Zones of one kind on one hub, combined by `how` (Setup's docstring)."""
     counts = sorted(counts)
@@ -1621,7 +1636,8 @@ def status_line(sender, health: Dict[str, Health], tally: HubTally) -> str:
         if not zs:
             continue
         detail = ", ".join(f"{z.name} {z.reported}" for z in zs)
-        how = f" {tally.setup.combine[hub]}" if len(zs) > 1 else ""
+        d = describe_combine(zs, tally.setup.combine[hub])
+        how = f" ({d})" if d else ""
         parts.append(f"{hub} {tally.value(hub)}{how} [{detail}]")
     if hasattr(sender, "links"):            # fmslink.FanOut: every target's link
         link += "  (" + ", ".join(f"{n} {'ok' if up else 'NO REPLY'}"
