@@ -5086,6 +5086,12 @@ def test_fanout_watchtower_and_bioarena():
     check("vision.yaml's address when it has one",
           ns["counter_target"](dict(ev, field_feed="192.168.1.50:8411"))
           == "http://K@127.0.0.1:8000, 192.168.1.50:8411")
+    check("main() uses it", "ctl.default_target = counter_target(ev)" in src
+          and '"field_feed": vf or FIELD_FEED' in src)
+    try:
+        import yaml  # noqa: F401  (CI has no PyYAML; the app bundles it)
+    except ImportError:
+        return
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "config").mkdir()
         check("no vision.yaml: no feed", ns["vision_feed"](Path(d)) == "")
@@ -5105,8 +5111,6 @@ def test_fanout_watchtower_and_bioarena():
             (Path(d) / "config" / "vision.yaml").write_text(text)
             check(f"vision.yaml {text.strip()!r} -> {want!r}, never a crash at launch",
                   ns["vision_feed"](Path(d)) == want)
-    check("main() uses it", "ctl.default_target = counter_target(ev)" in src
-          and '"field_feed": vf or FIELD_FEED' in src)
 
 
 def test_plugin_combines_like_hubtally():
