@@ -140,6 +140,26 @@ def problems(cfg: Dict) -> List[str]:
     return out
 
 
+def double_count_risks(cfg: Dict) -> List[str]:
+    """Setups that add the same balls twice: one camera with two outlines
+    on one hub, combined by sum (the default). Sum is right for outlines
+    that see different balls; on a split-screen broadcast (the main view
+    and an inset both show the hub) or two outlines over one mouth, every
+    ball is counted in each. Watchtower showed blue 221 auto fuel on
+    2026-10-10 against a broadcast's 110 total points. A warning, not a
+    problem: a hub with two mouths in one picture is summed rightly."""
+    out = []
+    how = cfg.get("combine") or {}
+    for c in cfg.get("cameras") or []:
+        for hub in HUBS:
+            n = sum(1 for z in c.get("zones") or [] if z.get("hub") == hub and not z.get("line"))
+            if n > 1 and how.get(hub, "sum") == "sum":
+                out.append(f"{c['name']}: {n} {hub} outlines are ADDED (combine: sum). "
+                           f"If they show the same balls -- a split-screen broadcast, two "
+                           f"views of one hub -- every ball counts {n} times: set {hub} to max.")
+    return out
+
+
 def _has_ultralytics() -> bool:
     import importlib.util
     return importlib.util.find_spec("ultralytics") is not None
@@ -866,6 +886,8 @@ class HubController:
         if issues:
             raise ValueError("Not ready yet: " + " ".join(issues))
         setup = hubcount.setup_from_dict(cfg)
+        for w in double_count_risks(cfg):
+            self.say("! " + w)
         from .fmslink import is_fms_target, make_sender, sender_name, split_targets
         # One target or several, e.g. Watchtower on the M4 and bioarena:
         # "http://KEY@127.0.0.1:8000, 10.0.100.5:8411" (fmslink.FanOut).
@@ -1192,6 +1214,7 @@ class HubController:
                "kinds": kinds, "stream_warning": STREAM_WARNING,
                "wireless_warning": WIRELESS_WARNING,
                "problems": problems(cfg), "pictures": pictures,
+               "double_count": double_count_risks(cfg),
                "builtin_model": bundled_model() is not None,
                "default_target": self.default_target,
                # This box's address, for the partner box's "Send counts to"

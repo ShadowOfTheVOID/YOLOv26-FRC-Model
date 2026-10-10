@@ -3030,7 +3030,7 @@ def test_frc_fms_sender():
           ok and url == "http://fms:8000/api/vision/events" and key == "k"
           and body["events"] == {"red": [[1_700_000_099.5, 2], [1_700_000_100.0, 1]],
                                  "blue": [[1_700_000_100.0, 1]]}
-          and body["source"] == "live" and s.pending() == 0 and s.linked())
+          and body["source"].startswith("tbavid ") and s.pending() == 0 and s.linked())
     check("cumulative counts stay for the page and the board",
           s.counts == {"red": 3, "blue": 1})
     import tbavid.hubcount as HC2
@@ -5027,6 +5027,22 @@ def test_fanout_watchtower_and_bioarena():
     check("practice mode moves only bioarena to the local stand-in",
           prac.primary.target == ("127.0.0.1", 8411) and prac.senders[0].url == "http://m4:8000")
     prac.close()
+    check("each FmsSender labels its events, so Watchtower's fuel table shows who sent what",
+          web.source.startswith("tbavid ") and web.source != prac.senders[0].source)
+
+    # The broadcast double count (2026-10-10, blue 221 auto fuel against 110
+    # total points): one camera, two outlines on a hub, summed.
+    from tbavid import hubapp as HA0
+    cam = lambda zones: {"cameras": [{"name": "stream", "zones": zones}]}
+    two = [{"hub": "blue", "outline": [[0, 0], [1, 0], [1, 1]]},
+           {"hub": "blue", "outline": [[5, 5], [6, 5], [6, 6]]}]
+    w = HA0.double_count_risks(cam(two))
+    check("two blue outlines on one camera, summed: warned", len(w) == 1 and "set blue to max" in w[0])
+    check("not once combine is max", HA0.double_count_risks(dict(cam(two), combine={"blue": "max"})) == [])
+    check("not for one outline per hub, nor exit lines",
+          HA0.double_count_risks(cam(two[:1] + [{"hub": "blue", "line": [[0, 0], [1, 1]], "out": [0, 1]}])) == [])
+    check("not for two cameras each with one outline (other sides of the hub)",
+          HA0.double_count_risks({"cameras": [{"name": "a", "zones": two[:1]}, {"name": "b", "zones": two[1:]}]}) == [])
 
     # Practice mode with both targets: test balls must never reach the live
     # Watchtower, which credits them to the match its timeline has open.

@@ -9,6 +9,20 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Double counts are flagged and traceable.** On 2026-10-10, Watchtower
+  showed blue 221 auto fuel against a broadcast's 110 total points.
+  - **Outlines added together:** a hub with several outlines adds them by
+    default (combine: sum). One camera with two outlines on one hub, as on
+    a split-screen broadcast or two views of the same hub, counts every
+    ball in each. The camera page now warns under step 2, and Start says so
+    in the log ("set blue to max"). It is a warning, not a block, because
+    two separate mouths in one picture are summed rightly.
+  - **Two senders:** Watchtower adds every event from every sender and
+    removes no duplicates. Its own vision runner (`./run.sh` starts it) and
+    our counter both labelled their events "live". Ours now posts as
+    `tbavid <id>`, unique per run, so Watchtower's fuel table shows who
+    sent what.
+
 - **Hub counter to Watchtower and bioarena at once.** At the scrimmage,
   Watchtower runs on the M4 (port 8000) and bioarena takes the UDP count
   feed (8411), each on its own address. The counter sent to only one

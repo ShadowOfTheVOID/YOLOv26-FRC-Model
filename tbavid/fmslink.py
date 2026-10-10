@@ -70,6 +70,12 @@ class FmsSender:
             raise ValueError("frc-fms needs its vision_key: put it in the URL, "
                              "http://KEY@host:8000 (server.vision_key in event.yaml)")
         self.session = "frc-fms"
+        # Watchtower stores every event it is sent, from every sender, with
+        # this label (its fuel table's `source`) and no dedupe. Its own
+        # vision runner and ours both said "live", so a double count could
+        # not be traced to a sender. Ours now names itself, once per run.
+        import secrets
+        self.source = f"tbavid {secrets.token_hex(3)}"
         self.peer = "frc-fms"      # what status lines call the other end
         self.counts: Dict[str, int] = {h: 0 for h in HUBS}
         self.info = ""
@@ -134,7 +140,7 @@ class FmsSender:
             status = {h: dict(live.get(h) or {"counter": "tbavid colour"},
                               session_total=self.counts[h], info=self.info)
                       for h in (live or HUBS)}
-        body = {"events": batch, "status": status, "source": "live"}
+        body = {"events": batch, "status": status, "source": self.source}
         sent_at = self.clock()
         try:
             reply = self._post(f"{self.url}/api/vision/events", body, self.key)
