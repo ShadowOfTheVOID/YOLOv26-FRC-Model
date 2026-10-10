@@ -280,9 +280,13 @@ async function refresh(){
   // only the raw IP stays, for when the website or the internet is down.
   $("phoneurl2").textContent=pub?("if the website is down, on the Wi-Fi: "+s.phone_url):(s.phone_name?("or "+s.phone_url):"");
   $("queueurl").textContent=(pub||s.phone_name||s.phone_url)+"/queue";
-  $("fieldurl").textContent=s.field_feed||"—";
-  $("fieldsub").textContent=(s.field_from==="vision.yaml"?"from config/vision.yaml":"the feed spec's address")
-    +(h.running?(h.links&&h.links["udp "+s.field_feed]?" · bioarena answering":" · no reply from bioarena yet"):"");
+  // While counting, the address the counter really sends to (the camera
+  // page's target box can be edited, and practice mode uses a local one).
+  const fl=Object.entries(h.links||{}).find(([n])=>/^udp /.test(n));
+  $("fieldurl").textContent=(h.running&&fl?fl[0].slice(4):s.field_feed)||"—";
+  $("fieldsub").textContent=h.running&&!fl?"not sending to bioarena (see Hub cameras, Send counts to)":
+    (s.field_from==="vision.yaml"?"from config/vision.yaml":"the feed spec's address")
+    +(h.running?(fl[1]?" · bioarena answering":" · no reply from bioarena yet"):"");
   if(qrUrl!==qrFor){qrFor=qrUrl;try{$("qr").innerHTML=await api().qr(qrUrl);}catch(e){}}
 }
 async function renderUpdate(running){let u;try{u=await api().update_status();}catch(e){return;}

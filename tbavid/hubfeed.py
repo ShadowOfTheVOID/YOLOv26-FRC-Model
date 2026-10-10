@@ -226,13 +226,18 @@ class Receiver:
         self.info = ""
         self.restarts = 0
         self.dropped: Dict[str, int] = {}
-        # Sessions a newer one replaced. A restarted counter never goes back
-        # to its old session, so one that does is a SECOND sender on the same
-        # receiver -- e.g. Watchtower's mock vision, which since
-        # watchtower-fms PR #3 feeds the field from vision.yaml's feeds:,
-        # beside the real counter. Read as restarts, two senders alternating
-        # carry each other's whole total on every heartbeat: true red 5 read
-        # 80 after one second and kept climbing. Their datagrams are dropped.
+        # A second sender on one receiver -- e.g. Watchtower's mock vision,
+        # which since watchtower-fms PR #3 feeds vision.yaml's feeds: beside
+        # the real counter. Read as restarts, two senders alternating carried
+        # each other's whole total on every heartbeat: true red 5 read 80
+        # after one second and kept climbing. So a new session is a restart
+        # only once the current one has gone quiet (OFFLINE_S, as a restarted
+        # counter has); while it is live the newcomer is dropped, and the
+        # sender that was there first keeps the feed. Keeping the newest
+        # instead silenced the real counter whenever a mock started after it.
+        # Sessions replaced by a restart are retired: a counter never goes
+        # back to its old one, so a late or reordered datagram from it is
+        # dropped too.
         self.retired: list = []
 
     def reset_match(self) -> None:
@@ -271,6 +276,8 @@ class Receiver:
             return self._drop("missing or bad field")
         event = "count"
         if session in self.retired:
+            return self._drop(SECOND_SENDER)
+        if session != self.session and self.session is not None and self.online():
             return self._drop(SECOND_SENDER)
         if session != self.session:
             if self.session is not None:

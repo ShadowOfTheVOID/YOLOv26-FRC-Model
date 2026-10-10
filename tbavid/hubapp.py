@@ -866,22 +866,23 @@ class HubController:
         if issues:
             raise ValueError("Not ready yet: " + " ".join(issues))
         setup = hubcount.setup_from_dict(cfg)
-        from .fmslink import FmsSender, is_fms_target, make_sender, split_target, split_targets
+        from .fmslink import is_fms_target, make_sender, sender_name, split_targets
         # One target or several, e.g. Watchtower on the M4 and bioarena:
         # "http://KEY@127.0.0.1:8000, 10.0.100.5:8411" (fmslink.FanOut).
         parts = split_targets(target) or [DEFAULT_TARGET]
         udp = [t for t in parts if not is_fms_target(t)]
-        if len(udp) > 1:
-            raise ValueError("Send counts to one bioarena only (one host:port); "
-                             "add Watchtower as http://KEY@host:8000 beside it.")
         if practice and not udp:
             self.say("practice mode is for bioarena's UDP feed; sending to frc-fms instead")
             practice = False
-        fms = not udp
-        host, port = ("", 0) if fms else hubfeed.parse_target(udp[0])
+        if practice and len(udp) < len(parts):
+            # Practice balls are test balls: Watchtower would credit them to
+            # whatever match its timeline has open. Only the local stand-in.
+            self.say("practice mode: Watchtower left out, test balls go to the "
+                     "local test receiver only")
+            parts = udp
+        port = hubfeed.parse_target(udp[0])[1] if udp else 0
         self.practice = practice
         if practice:
-            host = "127.0.0.1"
             self.listen_stop = threading.Event()
             threading.Thread(target=hubfeed.listen, daemon=True,
                              kwargs=dict(port=port, bind="127.0.0.1",
@@ -892,19 +893,10 @@ class HubController:
             base = os.path.dirname(os.path.abspath(self.path)) if self.path else os.getcwd()
             log_path = os.path.join(base, time.strftime("hubfeed_%Y%m%d_%H%M%S.csv"))
             self.say(f"logging counts to {log_path}")
-        if len(parts) > 1:
-            # Watchtower and bioarena both; practice swaps bioarena for the
-            # local stand-in only. Keys are never in feed_target.
-            self.sender = make_sender(", ".join(parts), udp_host=host if practice else "")
-            self.feed_target = self.sender.describe()
-        elif fms:
-            # frc-fms: timestamped events over HTTP (tbavid/fmslink.py). The
-            # key is in the URL; it is not shown or logged.
-            self.sender = FmsSender(parts[0])
-            self.feed_target = split_target(parts[0])[0]
-        else:
-            self.sender = hubfeed.FeedSender((host, port))
-            self.feed_target = f"{host}:{port}"
+        # bioarena (UDP), Watchtower / frc-fms (a URL: timestamped events over
+        # HTTP), or both. Keys are in the URL; never in feed_target or logs.
+        self.sender = make_sender(", ".join(parts), udp_host="127.0.0.1" if practice else "")
+        self.feed_target = sender_name(self.sender)
         self.stop_evt = threading.Event()
         self.monitor = {}
         realtime = realtime and any(source_kind(c.source) in ("file", "stream")
@@ -1219,8 +1211,8 @@ class HubController:
         if s is not None:
             live.update(counts=dict(s.counts), linked=s.linked(),
                         reply=s.last_reply, rtt_ms=s.rtt_ms, session=s.session)
-            if hasattr(s, "links"):
-                live["links"] = s.links()
+            from .fmslink import sender_links
+            live["links"] = sender_links(s)
         health = self.monitor.get("health") or {}
         now = time.monotonic()
         for n, h in health.items():
@@ -1269,7 +1261,9 @@ class HubController:
         stale = [n for n, h in health.items()
                  if running and now - h.last_frame > 0.5]
         lags = [h.lag_ms() for h in health.values()]
-        if s is not None and getattr(s, "peer", "bioarena") != "bioarena":
+        # By whether a bioarena target exists at all (FanOut.primary), not by
+        # who answers right now: that would flip /board on every late reply.
+        if s is not None and getattr(getattr(s, "primary", s), "peer", "bioarena") != "bioarena":
             v = board_view(dict(s.counts), running, False, None, stale,
                            round(max(lags)) if lags else None,
                            list(self.monitor.get("errors", [])), False,
@@ -1278,8 +1272,10 @@ class HubController:
             if running and not s.linked() and "alert" not in v:
                 v["alert"] = f"frc-fms not answering: {s.last_error or 'no reply yet'}"
             return v
+        field_up = bool(s and getattr(s, "field_linked", s.linked()))
+        field_reply = (getattr(s, "field_reply", s.last_reply) if s else None)
         return board_view(dict(s.counts) if s else {}, running,
-                          bool(s and s.linked()), s.last_reply if s else None,
+                          field_up, field_reply,
                           stale, round(max(lags)) if lags else None,
                           list(self.monitor.get("errors", [])),
                           bool(getattr(self, "practice", False)),

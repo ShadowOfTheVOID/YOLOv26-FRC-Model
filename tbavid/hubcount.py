@@ -1505,7 +1505,8 @@ def run(sender, setup: Setup, realtime: bool = False,
     threads = [threading.Thread(target=loop, args=(c,), daemon=True,
                                 name=f"cam {c.name}") for c in setup.cameras]
     if relay is not None:
-        relay.reply_source = lambda: getattr(sender, "last_reply", None)
+        relay.reply_source = lambda: getattr(sender, "field_reply",
+                                             getattr(sender, "last_reply", None))
         if monitor is not None:
             monitor["relay"] = relay
         mine = setup.hubs()

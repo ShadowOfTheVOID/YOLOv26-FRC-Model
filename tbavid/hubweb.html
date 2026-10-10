@@ -599,12 +599,15 @@ function renderLive(){const v=S.live,F=fieldName();
   else if(modelBehind(v).length)setStatus("warn","Model falling behind",modelBehind(v).join(", ")+" — the model is skipping frames, so its half of the count runs low. Use Apple silicon or a GPU, or turn the model off.");
   else if(Object.keys(v.slow||{}).length)setStatus("warn","Camera too slow",Object.entries(v.slow).map(([n,f])=>`${n} ${Math.round(f)} fps`).join(", ")+" — counts run low under 30 fps. Add light or lower the resolution.");
   else if(Object.values(v.check||{}).some(c=>c.warn))setStatus("warn","Check the cameras",Object.entries(v.check).filter(([h,c])=>c.warn).map(([h,c])=>`${h}: exits ${c.exit} against outline ${c.due}`).join(", ")+" — one of the two is losing balls. Still counting.");
-  else if(v.linked&&v.links&&Object.values(v.links).some(up=>!up))setStatus("warn","One target not answering",
-    Object.entries(v.links).filter(([n,up])=>!up).map(([n])=>n).join(", ")+" — no reply. The others still get every ball; check that address and port.");
   else if(v.linked){const r=v.reply||{};const delayed=Object.values(S.kinds).includes("stream");
     // a Wi-Fi camera is not flagged here: its delay is small and shown as fps
     const parts=[(r.match_state||"").replace(/_/g," ").toLowerCase(),r.shift||"",`${v.rtt_ms} ms`].filter(Boolean);
-    setStatus(delayed?"warn":"ok",`Connected to ${F}`,parts.join(" · ")+(delayed?" · counting from a delayed stream":""));}
+    // Several targets (Watchtower and bioarena): connected while any answers,
+    // and the silent one named. At a venue with no bioarena that is bioarena.
+    const ups=Object.entries(v.links||{}),down=ups.filter(([n,up])=>!up).map(([n])=>n);
+    const to=down.length?ups.filter(([n,up])=>up).map(([n])=>/^udp /.test(n)?"bioarena":"Watchtower").join(" and "):F;
+    if(down.length)parts.push("no reply from "+down.join(", "));
+    setStatus(delayed||down.length?"warn":"ok",`Connected to ${to}`,parts.join(" · ")+(delayed?" · counting from a delayed stream":""));}
   else setStatus("warn","Sending, no reply yet",`No answer from ${v.target}. Check the cable and address.`);
   $("xcheck").innerHTML=Object.entries(v.check||{}).map(([h,c])=>`<span class="chip"${c.warn?' style="color:#f5a524"':""} title="exits now against the outline ${c.lag_s} s ago${c.confirming?" · exits confirm this hub":""}">${h} exit ${c.exit} / outline ${c.due}${c.ratio!=null?` <b class="tnum">${Math.round(c.ratio*100)}%</b>`:""}${c.warn?" · check the cameras":""}</span>`).join("");
   renderTests(v);

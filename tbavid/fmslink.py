@@ -175,8 +175,13 @@ def make_sender(target: str, udp_host: str = ""):
     FanOut for several of them separated by commas. `udp_host` replaces the
     host of every UDP target (practice mode's local stand-in)."""
     from .hubfeed import FeedSender, parse_target
+    targets = split_targets(target) or [target]
+    if sum(not is_fms_target(t) for t in targets) > 1:
+        # Checked before any sender exists: FmsSender starts a thread.
+        raise ValueError("send counts to one bioarena only (one host:port); "
+                         "add Watchtower as http://KEY@host:8000 beside it")
     senders = []
-    for t in split_targets(target) or [target]:
+    for t in targets:
         if is_fms_target(t):
             senders.append(FmsSender(t))
         else:
@@ -228,6 +233,11 @@ class FanOut:
     peer = property(lambda self: getattr(self.lead(), "peer", "bioarena"))
     last_reply = property(lambda self: self.lead().last_reply)
     rtt_ms = property(lambda self: self.lead().rtt_ms)
+    # bioarena's own reply and link, whoever leads: the partner box's relay
+    # and /board need bioarena's status, never Watchtower's {"record": ...}
+    # (and /board must not flip views each time bioarena's 1 s link blinks).
+    field_reply = property(lambda self: self.primary.last_reply)
+    field_linked = property(lambda self: self.primary.linked())
     send_errors = property(lambda self: sum(x.send_errors for x in self.senders))
 
     @property
@@ -279,5 +289,24 @@ def _name(sender) -> str:
     """'udp 10.0.100.5:8411' / 'http://m4:8000' -- never the key."""
     if isinstance(sender, FmsSender):
         return sender.url
-    host, port = sender.target
-    return f"udp {host}:{port}"
+    t = getattr(sender, "target", None)
+    if isinstance(t, tuple) and len(t) == 2:
+        return f"udp {t[0]}:{t[1]}"
+    return str(getattr(sender, "peer", "bioarena"))
+
+
+def sender_links(sender) -> Dict[str, bool]:
+    """{destination: answering} for one sender or a FanOut's every target."""
+    if isinstance(sender, FanOut):
+        return sender.links()
+    return {_name(sender): sender.linked()}
+
+
+def sender_name(sender) -> str:
+    """What the page and log call a sender's destination, without the key:
+    'http://m4:8000', '10.0.100.5:8411', or a FanOut's list."""
+    if isinstance(sender, FanOut):
+        return sender.describe()
+    if isinstance(sender, FmsSender):
+        return sender.url
+    return "{}:{}".format(*sender.target)

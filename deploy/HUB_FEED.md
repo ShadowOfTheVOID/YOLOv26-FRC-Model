@@ -960,11 +960,13 @@ total again: with a real 5 and a mock 3, the stand-in read red 80 after
 one second, and the count kept climbing. The usual second sender is
 Watchtower's mock vision, which feeds `vision.yaml`'s `feeds:` since
 watchtower-fms PR #3 (deploy/FRC_FMS.md). `hubfeed-listen` and the main
-box's partner port therefore drop a session that a newer one replaced, and
-print `replaced session: is a second counter sending?` once. The total
-still includes what the second sender got in before it was refused, so stop
-it and restart the match. bioarena's own receiver follows the spec, not
-this rule, so make sure only one counter sends there.
+box's partner port therefore take a new session as a restart only once the
+current one has been quiet for 1 s. While it is live, the newcomer is
+dropped and `replaced session: is a second counter sending?` is printed
+once. The sender that was there first keeps the feed, so a mock started
+after the real counter adds nothing. If the mock was there first, it is the
+one counted: stop it, then start the real counter. bioarena's own receiver
+follows the spec, not this rule, so make sure only one counter sends there.
 
 ## 4. Run it
 

@@ -93,19 +93,34 @@ def first_setup(d: Path, src: Path) -> dict:
 def vision_feed(d: Path) -> str:
     """The first `feeds:` entry of config/vision.yaml as host:port: the
     field system Watchtower's own vision would send to (and, since
-    watchtower-fms PR #3, its mock runs too). "" if none or unreadable."""
+    watchtower-fms PR #3, its mock runs too). "" if none or unreadable.
+
+    The app reads this at launch, so nothing in the file may stop it: a
+    hand-made `feeds: 10.0.100.5` (a string, once read a character at a
+    time) or a port like "8411/udp" (int() raised and the app did not open)
+    is taken as written where it can be and skipped where it cannot."""
+    import re
     import yaml
     try:
         feeds = (yaml.safe_load((d / "config" / "vision.yaml").read_text()) or {}).get("feeds")
     except (OSError, yaml.YAMLError, AttributeError):
         return ""
-    if isinstance(feeds, dict):
+    if not isinstance(feeds, list):
         feeds = [feeds]
-    for f in feeds or []:
-        if isinstance(f, dict) and f.get("host"):
-            return f"{f['host']}:{int(f.get('port') or 8411)}"
-        if isinstance(f, str) and f.strip():
-            return f.strip() if ":" in f else f"{f.strip()}:8411"
+    for f in feeds:
+        if isinstance(f, dict):
+            host, port = str(f.get("host") or "").strip(), f.get("port") or 8411
+        elif isinstance(f, str):
+            host, _, port = f.strip().partition(":")
+            port = port or 8411
+        else:
+            continue
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            continue
+        if re.fullmatch(r"[A-Za-z0-9.-]+", host) and 0 < port < 65536:
+            return f"{host}:{port}"
     return ""
 
 
@@ -125,12 +140,12 @@ def read_event(d: Path) -> dict:
     import yaml
     ev = yaml.safe_load((d / "config" / "event.yaml").read_text()) or {}
     srv, e = ev.get("server") or {}, ev.get("event") or {}
+    vf = vision_feed(d)                  # read once: the two fields agree
     return {"name": e.get("name", ""), "date": str(e.get("date") or ""),
             "teams": list(e.get("teams") or []),
             "pins": srv.get("pins") or {}, "key": srv.get("vision_key", ""),
             "public_url": str(srv.get("public_url") or "").rstrip("/"),
-            "field_feed": vision_feed(d) or FIELD_FEED,
-            "field_from": "vision.yaml" if vision_feed(d) else "spec",
+            "field_feed": vf or FIELD_FEED, "field_from": "vision.yaml" if vf else "spec",
             "port": int(srv.get("port") or FMS_PORT)}
 
 

@@ -2302,7 +2302,13 @@ def test_hub_feed_receiver_rules():
     rx.accept(d(seq=8, red=6, blue=1), ok)
     check("match counts are relative to ResetMatch",
           rx.match_counts() == {"red": 2, "blue": 0})
+    # A second session while this one is live is a second sender, not a
+    # restart (watchtower-fms PR #3: mock vision feeds vision.yaml's feeds:).
+    check("a new session while the current one is live is dropped",
+          rx.accept(d(session="bb", seq=1, red=9, blue=9), ok) == (False, HF.SECOND_SENDER)
+          and rx.restarts == 0 and rx.match_counts() == {"red": 2, "blue": 0})
     # A counter restarted mid-match loses only what it missed while down.
+    clock.t += 1.01                        # the old session has gone quiet
     ok_, what = rx.accept(d(session="bb", seq=1, red=1, blue=0), ok)
     check("a new session is a restart, not a drop",
           ok_ and what == "hub counter restarted" and rx.restarts == 1)
@@ -2311,22 +2317,25 @@ def test_hub_feed_receiver_rules():
     check("a new session may start its seq anywhere, even lower",
           rx.accept(d(session="bb", seq=2, red=1, blue=2), ok)[0]
           and rx.match_counts() == {"red": 3, "blue": 2})
-    # A replaced session that comes back is a second sender (watchtower-fms
-    # PR #3: mock vision feeds vision.yaml's feeds: beside the real counter).
-    # Read as restarts, every alternation re-carried the other's total.
-    check("a replaced session coming back is dropped, not another restart",
+    # A replaced session never comes back; a late datagram from it is dropped.
+    clock.t += 5
+    check("a replaced session coming back is dropped, even once quiet",
           rx.accept(d(session="aa", seq=99, red=9, blue=9), ok)
           == (False, HF.SECOND_SENDER)
           and rx.restarts == 1 and rx.match_counts() == {"red": 3, "blue": 2})
-    two = HF.Receiver()
-    sq = {"m1": 0, "m2": 0}
-    for _ in range(10):                    # 1 s of heartbeats from each
-        for sess, red in (("m1", 5), ("m2", 3)):
+    t2 = _FakeClock()
+    two = HF.Receiver(clock=t2)
+    sq = {"real": 0, "mock": 0}
+    for i in range(20):                    # 2 s at 10 Hz; the mock starts after
+        for sess, red in (("real", 5 + i), ("mock", 3)):
+            if sess == "mock" and i < 3:
+                continue
             sq[sess] += 1
             two.accept(d(session=sess, seq=sq[sess], red=red), ok)
-    check("two counters on one receiver: the count stops at 5 + 3, not 80",
-          two.match_counts()["red"] == 8 and two.restarts == 1
-          and two.dropped[HF.SECOND_SENDER] == 9)
+        t2.t += 0.1
+    check("a mock started after the real counter is dropped; the real one keeps scoring",
+          two.match_counts()["red"] == 24 and two.restarts == 0
+          and two.dropped[HF.SECOND_SENDER] == 17 and two.session == "real")
     rx.reset_match()
     check("a restart before ResetMatch carries nothing into the next match",
           rx.match_counts() == {"red": 0, "blue": 0})
@@ -4743,7 +4752,7 @@ def test_hub_setup_streamlined():
               len(runs) == 2 and c3.running and c3.restarts == 1)
         c3.live_frames["cam0"] = view()
         n = len(checked)
-        time.sleep(0.3)
+        __import__("time").sleep(0.3)
         check("the moved-camera check keeps running after a restart",
               len(checked) > n and checked[-1] == 2)
         c3.stop()
@@ -4751,7 +4760,7 @@ def test_hub_setup_streamlined():
         while time.monotonic() < end and c3.running:
             time.sleep(0.02)
         n = len(checked)
-        time.sleep(0.3)
+        __import__("time").sleep(0.3)
         check("... and ends with the session", not c3.running and len(checked) == n)
     finally:
         H.run, keepawake.hold, A.RESTART_FIRST_S, A.ALIGN_EVERY_S = real
@@ -4776,20 +4785,23 @@ def test_two_boxes_one_feed():
     check("a duplicate or a count going backwards is dropped, as bioarena would",
           relay.handle(dg("p1", 2, 0, 5), "10.0.100.22") is None
           and relay.handle(dg("p1", 3, 0, 1), "10.0.100.22") is None)
+    check("a second partner session while the first is live is dropped",
+          relay.handle(dg("p2", 1, 0, 2), "10.0.100.22") is None)
+    t[0] = 102.5                           # the partner restarted: p1 went quiet
     r = relay.handle(dg("p2", 1, 0, 2), "10.0.100.22")
     check("the partner restarting keeps what it had sent: its new 2 adds to 3",
-          r == [("blue", 2, 101.0)] and relay.forwarded["blue"] == 5
+          r == [("blue", 2, 102.5)] and relay.forwarded["blue"] == 5
           and relay.rx.restarts == 1)
     check("and the old partner session sending again is a second sender, dropped",
           relay.handle(dg("p1", 9, 0, 9), "10.0.100.22") is None
           and relay.forwarded["blue"] == 5
-          and relay.state()["dropped"].get(HF.SECOND_SENDER) == 1)
+          and relay.state()["dropped"].get(HF.SECOND_SENDER) == 2)
     relay.reply_source = lambda: {"v": 1, "seq": 777, "match_state": "AUTO_PERIOD",
                                   "credited": {"red": 1, "blue": 5}}
     rep = _json.loads(relay.reply())
     check("the partner gets bioarena's reply, with its own seq echoed",
           rep["match_state"] == "AUTO_PERIOD" and rep["seq"] == 1)
-    t[0] = 103.0
+    t[0] = 104.0
     check("a partner silent for 1 s is offline (it holds the main box's heartbeat)",
           not relay.online() and relay.state()["counts"] == {"red": 0, "blue": 5})
     strict = HF.RelayIn(partner="10.0.100.22", clock=lambda: t[0])
@@ -5006,10 +5018,35 @@ def test_fanout_watchtower_and_bioarena():
                           NS(zones={"red": [], "blue": []}, setup=NS(combine={})))
     check("and the console says Watchtower took it, bioarena not answering",
           "frc-fms took it" in line and "udp 10.0.100.5:8411 NO REPLY" in line)
+    check("the partner relay and /board still get bioarena's own reply, not Watchtower's",
+          fan.field_reply["match_state"] == "AUTO_PERIOD" and not fan.field_linked
+          and "record" not in fan.field_reply)
+    check("names without the key", FL.sender_name(fan) == "http://m4:8000, udp 10.0.100.5:8411"
+          and FL.sender_name(udp) == "10.0.100.5:8411" and FL.sender_name(web) == "http://m4:8000")
     prac = FL.make_sender("http://k@m4:8000, 10.0.100.5:8411", udp_host="127.0.0.1")
     check("practice mode moves only bioarena to the local stand-in",
           prac.primary.target == ("127.0.0.1", 8411) and prac.senders[0].url == "http://m4:8000")
     prac.close()
+
+    # Practice mode with both targets: test balls must never reach the live
+    # Watchtower, which credits them to the match its timeline has open.
+    from tbavid import hubapp as HA, hubcount as HCo
+    real_run, real_listen, real_problems = HCo.run, HF.listen, HA.problems
+    try:
+        HCo.run = lambda sender, setup, stop=None, **kw: stop.wait(5)
+        HF.listen = lambda **kw: None
+        HA.problems = lambda cfg: []
+        ctl = HA.HubController(None)
+        ctl.cfg = {"cameras": [{"name": "c", "source": "rec.mp4", "ball_area": 100,
+                   "zones": [{"hub": "red", "outline": [[0, 0], [10, 0], [10, 10]]}]}]}
+        ctl.start("http://K@127.0.0.1:8000, 10.0.100.5:8411", practice=True)
+        check("practice with Watchtower and bioarena: only the local test receiver",
+              isinstance(ctl.sender, HF.FeedSender) and ctl.sender.target == ("127.0.0.1", 8411)
+              and ctl.feed_target == "127.0.0.1:8411")
+        ctl.stop()
+        __import__("time").sleep(0.3)
+    finally:
+        HCo.run, HF.listen, HA.problems = real_run, real_listen, real_problems
 
     # The Watchtower app: bioarena's address is never typed. vision.yaml's
     # first feeds: entry, else the spec's; Phones & PINs only shows it.
@@ -5043,8 +5080,17 @@ def test_fanout_watchtower_and_bioarena():
             "feeds:\n  - name: bioarena\n    host: 192.168.1.50\n")
         check("vision.yaml's first feed, default port 8411",
               ns["vision_feed"](Path(d)) == "192.168.1.50:8411")
+        for text, want in (("feeds: 10.0.100.5\n", "10.0.100.5:8411"),
+                           ("feeds: {host: 10.0.100.6, port: 9000}\n", "10.0.100.6:9000"),
+                           ("feeds: ['10.0.100.7:8411']\n", "10.0.100.7:8411"),
+                           ("feeds: [{host: a, port: 8411/udp}, {host: 10.0.100.8}]\n", "10.0.100.8:8411"),
+                           ("feeds: [{host: 'udp://x'}]\n", ""), ("feeds: 7\n", ""),
+                           ("feeds: [\n", "")):
+            (Path(d) / "config" / "vision.yaml").write_text(text)
+            check(f"vision.yaml {text.strip()!r} -> {want!r}, never a crash at launch",
+                  ns["vision_feed"](Path(d)) == want)
     check("main() uses it", "ctl.default_target = counter_target(ev)" in src
-          and '"field_feed": vision_feed(d) or FIELD_FEED' in src)
+          and '"field_feed": vf or FIELD_FEED' in src)
 
 
 def main() -> int:

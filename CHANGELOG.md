@@ -20,10 +20,11 @@ the build rather than publishing an empty release.
   each keeps its own rules (session, seq and heartbeat for bioarena, the
   never-dropped queue for Watchtower). A dead Watchtower cannot hold
   bioarena's feed, nor the other way round. bioarena is the primary target:
-  the page's *Connected*, the match state and `/board` come from it. A
-  target that stops answering is named on the page and in the console.
-  Two bioarena targets are refused. Practice mode swaps only bioarena for
-  the local stand-in. Checked end to end over real sockets: Watchtower's
+  the match state comes from it while it answers, and `/board` and the
+  partner box's relay always use bioarena's own reply. A target that stops
+  answering is named on the page and in the console. Two bioarena targets
+  are refused. Practice mode sends only to the local test receiver and
+  leaves Watchtower out, so test balls never reach a live match. Checked end to end over real sockets: Watchtower's
   HTTP stand-in got all 3 balls with the vision key, and `hubfeed-listen`
   counted red 3.
 - **Watchtower app: bioarena is built in, nothing to type.** The camera
@@ -49,11 +50,14 @@ the build rather than publishing an empty release.
   `feeds:`, beside this repo's counter. The spec reads every new session as
   a restart and carries the old session's count. Two senders taking turns
   carried each other's total on every heartbeat: a real red 5 with a mock
-  3 read 80 after one second. `hubfeed-listen` and the main box's partner
-  port (`hubfeed.Receiver`) now drop a session once a newer one has
-  replaced it (a restarted counter never returns to its old session). They
-  print `replaced session: is a second counter sending?`, and the count
-  stops at 8. The deploy guides (deploy/HUB_FEED.md step 3,
+  3 read 80 after one second. In `hubfeed-listen` and the main box's
+  partner port (`hubfeed.Receiver`), a new session now counts as a restart
+  only once the current one has gone quiet for 1 s, as a restarted counter
+  has. While the current one is live, the newcomer is dropped with
+  `replaced session: is a second counter sending?`, so the sender that was
+  there first keeps the feed. A real counter with a mock started after it
+  counts only the real balls. A replaced session is never taken back, which
+  also drops a late datagram from just before a restart. The deploy guides (deploy/HUB_FEED.md step 3,
   deploy/FRC_FMS.md) say to set `feeds: []` in `vision.mock.yaml` while our
   counter is feeding bioarena; bioarena's own receiver follows the spec.
   `.github/watchtower-release` stays at v0.1.0 until the PR is tagged.
