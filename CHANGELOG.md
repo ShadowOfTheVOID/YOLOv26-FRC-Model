@@ -9,6 +9,17 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.5.8 — 2026-10-10
+
+- **Fixed: the Watchtower app on a Mac could not open any camera.** Find
+  cameras said 'ERROR: recursion is detected during loading of "cv2"
+  binary extensions', even on a fresh start, so nothing on the Hub cameras
+  tab worked. OpenCV's own loader imports itself a second time to reach its
+  compiled module, and in the Mac app that second import refused. Both apps
+  now load OpenCV once at start (`tbavid/cvload.py`), and when the loader
+  refuses, the compiled module is loaded directly (the whole OpenCV API).
+  Checked with the loader in that refusing state; not checked on a Mac.
+
 ## v0.5.7 — 2026-10-10
 
 Scrimmage-day fixes. The one that changes scores: Watchtower's vision
