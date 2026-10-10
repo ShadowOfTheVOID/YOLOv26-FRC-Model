@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#161a1f">
+<link rel="apple-touch-icon" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/style.css">
+<title>Match Queue</title>
+<!-- Served by the Watchtower app at /queue on the FMS port (so also on the
+     public address). No PIN: it only reads /ws, the state every page gets.
+     Teams in the pits and the queuers' line had to ask the scorekeeper what
+     was next; Watchtower's own pages show only the current match. -->
+<style>
+  .wrap { max-width: 920px; margin: 0 auto; padding: 1rem 1rem 2rem; }
+  .top { display: flex; align-items: center; gap: .8rem; margin: .4rem 0 1rem; flex-wrap: wrap; }
+  .top img { width: 40px; height: 40px; border-radius: 10px; background: var(--ink); }
+  .top h1 { font-size: 1.3rem; }
+  .top .sp { flex: 1; }
+  .team { display: flex; gap: .4rem; align-items: center; }
+  .team input { width: 7.5rem; min-height: var(--tap); padding: .4rem .7rem; border-radius: var(--r-sm);
+    border: 1px solid var(--line-strong); background: var(--panel); font-weight: 650; }
+  .conn { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); flex: none; }
+  .conn.on { background: var(--ok); }
+  .mine { background: var(--ink); color: #fff; border-radius: var(--r-lg); padding: .9rem 1.1rem; margin-bottom: 1rem; font-size: 1.05rem; }
+  .mine b { font-size: 1.2rem; }
+  .sec { font-size: .78rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 1.2rem 0 .5rem; }
+  .m { display: grid; grid-template-columns: 8.5rem 1fr 1fr; gap: .6rem; align-items: stretch; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: .7rem; margin-bottom: .55rem; }
+  .m.field { border: 2px solid var(--fuel); }
+  .m.hl { outline: 3px solid var(--ink); outline-offset: -1px; }
+  .who { display: flex; flex-direction: column; justify-content: center; padding-left: .3rem; }
+  .who b { font-size: 1.15rem; }
+  .who .tag { font-size: .78rem; font-weight: 700; color: var(--muted); }
+  .m.field .who .tag { color: #8a6d00; }
+  .m.deck .who .tag { color: var(--ok); }
+  .al { border-radius: var(--r-md); padding: .45rem .6rem; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+  .al.red { background: var(--red-soft); border: 1px solid var(--red-line); }
+  .al.blue { background: var(--blue-soft); border: 1px solid var(--blue-line); }
+  .al .an { font-size: .72rem; font-weight: 750; width: 100%; }
+  .al.red .an { color: var(--red); } .al.blue .an { color: var(--blue); }
+  .t { font: 750 1.2rem/1.2 ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; padding: .1rem .35rem; border-radius: 6px; }
+  .al.red .t { color: var(--red); } .al.blue .t { color: var(--blue); }
+  .t.me { background: var(--ink); color: #fff !important; }
+  .t sup { font-size: .6em; }
+  .empty { text-align: center; color: var(--muted); padding: 2.5rem 1rem; background: var(--panel); border-radius: var(--r-lg); border: 1px dashed var(--line-strong); }
+  .more { color: var(--muted); text-align: center; font-size: .9rem; margin-top: .6rem; }
+  @media (max-width: 620px) {
+    .m { grid-template-columns: 1fr 1fr; }
+    .m { gap: .4rem; padding: .55rem; }
+    .who { grid-column: 1 / -1; flex-direction: row; gap: .6rem; align-items: baseline; justify-content: flex-start; text-align: left; }
+    .al { padding: .35rem .4rem; gap: .1rem; flex-wrap: nowrap; justify-content: space-between; }
+    .al .an { display: none; }
+    .t { font-size: 1rem; padding: .1rem .2rem; }
+  }
+  /* A pit TV across the room: ?tv=1 */
+  body.tv .wrap { max-width: 1400px; }
+  body.tv .m { grid-template-columns: 12rem 1fr 1fr; padding: 1rem; }
+  body.tv .t { font-size: 2rem; }
+  body.tv .who b { font-size: 1.7rem; }
+  body.tv .team { display: none; }
+</style>
+</head><body>
+<main class="wrap">
+  <div class="top"><img src="/static/icon.svg" alt=""><div><h1 id="ev">Match queue</h1>
+    <div class="muted small" id="sub">Connecting…</div></div><span class="sp"></span>
+    <label class="team"><span class="muted small">Your team</span>
+      <input id="team" inputmode="numeric" placeholder="e.g. 254" autocomplete="off"></label>
+    <span class="conn" title="Live"></span></div>
+  <div class="mine" id="mine" hidden></div>
+  <div id="list"></div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+const P = new URLSearchParams(location.search);
+const SHOW = Math.max(1, parseInt(P.get("n") || "10", 10) || 10);
+if (P.get("tv") === "1") document.body.classList.add("tv");
+const esc = FMS.esc, box = document.getElementById("team");
+// ?team= wins (a link or a QR made for one team), else what this phone typed last.
+let team = (P.get("team") || (() => { try { return localStorage.getItem("queue_team") || ""; } catch (e) { return ""; } })()).replace(/\D/g, "");
+box.value = team;
+box.oninput = () => {
+  team = box.value.replace(/\D/g, "");
+  try { localStorage.setItem("queue_team", team); } catch (e) {}
+  if (FMS.state) render(FMS.state);
+};
+
+function title(m) {
+  if (m.comp_level === "qm") return `Qual ${m.match_number}`;
+  if (m.comp_level === "f") return `Final ${m.match_number}`;
+  return `Playoff ${m.set_number}` + (m.match_number > 1 ? `-${m.match_number}` : "");
+}
+const has = (m, t) => !!t && [...(m.red || []), ...(m.blue || [])].some((x) => String(x) === t);
+const station = (m, t) => {
+  for (const a of ["red", "blue"]) { const i = (m[a] || []).findIndex((x) => String(x) === t); if (i >= 0) return `${a} ${i + 1}`; }
+  return "";
+};
+
+// What is queued: every match not played yet, in schedule order, with the
+// one the scorekeeper has selected first (they can run them out of order).
+function queue(s) {
+  const ms = s.matches || [];
+  const field = ms.find((m) => m.status === "running") || null;
+  let q = ms.filter((m) => m.status === "scheduled");
+  const cur = s.current;
+  if (cur && cur.status === "scheduled") q = [q.find((m) => m.key === cur.key), ...q.filter((m) => m.key !== cur.key)].filter(Boolean);
+  return { field, q };
+}
+
+function alliance(m, a) {
+  const sur = new Set((m.surrogates || []).map(String));
+  const n = m[a + "_alliance"];
+  return `<div class="al ${a}"><span class="an">${a === "red" ? "Red" : "Blue"}${n ? " · Alliance " + esc(n) : ""}</span>` +
+    (m[a] || []).map((t) => `<span class="t${String(t) === team ? " me" : ""}">${esc(t)}${sur.has(String(t)) ? "<sup>S</sup>" : ""}</span>`).join("") + "</div>";
+}
+function row(m, cls, tag) {
+  return `<div class="m ${cls}${has(m, team) ? " hl" : ""}"><div class="who"><b>${esc(title(m))}</b>` +
+    `<span class="tag">${esc(tag)}</span></div>${alliance(m, "red")}${alliance(m, "blue")}</div>`;
+}
+
+function render(s) {
+  document.getElementById("ev").textContent = (s.event && s.event.name) || "Match queue";
+  const { field, q } = queue(s);
+  const played = (s.matches || []).filter((m) => m.status === "committed" || m.status === "review").length;
+  document.getElementById("sub").textContent = (s.matches || []).length
+    ? `${played} played · ${q.length} to go` : "Match queue";
+  let h = "";
+  if (field) h += `<div class="sec">On the field</div>` + row(field, "field", "Playing now");
+  if (q.length) {
+    h += `<div class="sec">Queue</div>`;
+    q.slice(0, SHOW).forEach((m, i) => {
+      const tag = i === 0 ? (field ? "On deck" : "Up next") : i <= 2 ? "Queue now" : (m.scheduled ? `Planned ${m.scheduled}` : `#${i + 1} in line`);
+      h += row(m, i === 0 ? "deck" : "", tag);
+    });
+    if (q.length > SHOW) h += `<div class="more">and ${q.length - SHOW} more</div>`;
+  } else if (!field) {
+    h += `<div class="empty">${(s.matches || []).length ? "Every scheduled match has been played." : "No matches scheduled yet."}</div>`;
+  }
+  document.getElementById("list").innerHTML = h;
+
+  const mine = document.getElementById("mine");
+  if (!team) { mine.hidden = true; return; }
+  mine.hidden = false;
+  const i = q.findIndex((m) => has(m, team));
+  if (field && has(field, team)) mine.innerHTML = `<b>${esc(team)}</b> is on the field now (${esc(station(field, team))}).`;
+  else if (i < 0) mine.innerHTML = `<b>${esc(team)}</b> has no more matches scheduled.`;
+  else {
+    const m = q[i], ahead = i + (field ? 1 : 0);
+    mine.innerHTML = `<b>${esc(team)}</b>: next is <b>${esc(title(m))}</b>, ${esc(station(m, team))}` +
+      (ahead ? ` — ${ahead} match${ahead > 1 ? "es" : ""} before it` : " — up next") +
+      (m.scheduled ? ` (planned ${esc(m.scheduled)})` : "") + ".";
+  }
+}
+FMS.on(render);
+FMS.connect();
+</script>
+</body></html>

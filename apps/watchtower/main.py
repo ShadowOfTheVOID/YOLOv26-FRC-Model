@@ -101,6 +101,18 @@ def read_event(d: Path) -> dict:
             "port": int(srv.get("port") or FMS_PORT)}
 
 
+def add_pages(app) -> None:
+    """Our pages on Watchtower's own server, so phones and the public address
+    reach them like /ref or /display. /queue: the matches still to play, for
+    teams in the pits, who otherwise had to ask the scorekeeper what was next
+    (Watchtower's pages show only the current match). It reads the same /ws
+    state as every other page, so it needs no PIN."""
+    from fastapi.responses import FileResponse
+    queue = Path(getattr(sys, "_MEIPASS", HERE)) / "queue.html"
+    app.add_api_route("/queue", lambda: FileResponse(queue, headers={"Cache-Control": "no-store"}),
+                      methods=["GET"])
+
+
 class FmsServer:
     """Watchtower's FastAPI app under uvicorn, in a thread, as `python -m
     fms.server` runs it (same host and port from event.yaml)."""
@@ -108,6 +120,7 @@ class FmsServer:
     def __init__(self, host: str, port: int):
         import uvicorn
         from fms import server             # reads config/event.yaml at import
+        add_pages(server.app)
         self.server = uvicorn.Server(uvicorn.Config(server.app, host=host, port=port,
                                                     log_level="warning"))
         self.thread = threading.Thread(target=self.server.run, daemon=True, name="watchtower fms")
@@ -132,6 +145,7 @@ VIEWS = {   # name: (window title, path on the FMS, or None for the hub counter,
     "control": ("Watchtower: Scorekeeper", "/control", (1320, 860)),
     "hub": ("Watchtower: Hub cameras", None, (1400, 900)),
     "display": ("Watchtower: Field display", "/display", (1280, 720)),
+    "queue": ("Watchtower: Match queue", "/queue", (1000, 800)),
 }
 
 

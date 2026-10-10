@@ -9,6 +9,19 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Match queue page on Watchtower** (`/queue` on the FMS port, so on the
+  Wi-Fi address and the public one alike, e.g.
+  watchtower.systemoverload.org/queue). Shows the match on the field, then
+  every match still to play in schedule order, the scorekeeper's selected
+  one first, with each alliance's teams and planned time. No PIN. A team
+  types its number (or opens `/queue?team=841`) to have its matches
+  highlighted and a line saying which match is next for it, its station
+  and how many matches come before. `?tv=1` is a large layout for a pit
+  TV, `?n=` sets how many are listed (10). Live over the same websocket as
+  Watchtower's own pages. Overview has its address and an Open button.
+  Checked in a browser against Watchtower v0.1.0 with a 14-match schedule
+  and one match running, at desktop and phone widths.
+
 ## v0.5.5 — 2026-10-09
 
 - **Counting restarts itself.** A camera unplugged, a USB hub browning out

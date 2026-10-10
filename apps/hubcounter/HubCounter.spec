@@ -56,6 +56,7 @@ if APP == "watchtower":
     WAPP = os.path.join(ROOT, "apps", "watchtower")
     EXTRA_PATH = [WSRC, WAPP]
     EXTRA_DATAS = [(os.path.join(WAPP, "home.html"), "."),
+                   (os.path.join(WAPP, "queue.html"), "."),
                    (os.path.join(WSRC, "fms", "static"), "fms/static"),
                    (os.path.join(WSRC, "config", "event.example.yaml"), "config"),
                    (os.path.join(WSRC, "config", "vision.example.yaml"), "config")]

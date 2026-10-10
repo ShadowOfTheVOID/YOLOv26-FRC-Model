@@ -3472,6 +3472,11 @@ def test_hub_counter_app():
     check("and one spec builds it, with the FMS pages and example configs",
           'APP == "watchtower"' in spec and '"fms", "static"' in spec
           and "event.example.yaml" in spec)
+    queue = (root / "apps" / "watchtower" / "queue.html").read_text()
+    check("the match queue is a page on the FMS itself, bundled, no PIN",
+          'add_api_route("/queue"' in wt and '"queue.html"' in spec
+          and "/static/common.js" in queue and "FMS.connect()" in queue
+          and "gate(" not in queue)
     launcher = (root / "apps" / "hubcounter" / "main.py").read_text()
     readme = (root / "apps" / "hubcounter" / "README.md").read_text()
     check("a Pi with no screen can share from the command line, and start at boot",

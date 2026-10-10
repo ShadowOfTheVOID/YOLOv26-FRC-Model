@@ -55,6 +55,11 @@ Watchtower combines our camera setup with Watchtower's own parts:
   their own window from Overview (Watchtower keeps their logins, which a
   page framed inside Home would lose). Drag Field display to the projector and press Full
   screen.
+- **Match queue** at `/queue` on the phone address (and the public
+  address): the match on the field and every match still to play, with
+  teams and planned times, updating live. No PIN, so share it with teams.
+  A team types its number to see its next match and how many come before
+  it; `/queue?team=841` links straight to that, `/queue?tv=1` fills a pit TV.
 - **Saving settings** checks them first (the scorekeeper PIN must differ from
   the others, times must be HH:MM, ...), writes them, and restarts the app in
   a few seconds. Matches are kept.
