@@ -2311,6 +2311,22 @@ def test_hub_feed_receiver_rules():
     check("a new session may start its seq anywhere, even lower",
           rx.accept(d(session="bb", seq=2, red=1, blue=2), ok)[0]
           and rx.match_counts() == {"red": 3, "blue": 2})
+    # A replaced session that comes back is a second sender (watchtower-fms
+    # PR #3: mock vision feeds vision.yaml's feeds: beside the real counter).
+    # Read as restarts, every alternation re-carried the other's total.
+    check("a replaced session coming back is dropped, not another restart",
+          rx.accept(d(session="aa", seq=99, red=9, blue=9), ok)
+          == (False, HF.SECOND_SENDER)
+          and rx.restarts == 1 and rx.match_counts() == {"red": 3, "blue": 2})
+    two = HF.Receiver()
+    sq = {"m1": 0, "m2": 0}
+    for _ in range(10):                    # 1 s of heartbeats from each
+        for sess, red in (("m1", 5), ("m2", 3)):
+            sq[sess] += 1
+            two.accept(d(session=sess, seq=sq[sess], red=red), ok)
+    check("two counters on one receiver: the count stops at 5 + 3, not 80",
+          two.match_counts()["red"] == 8 and two.restarts == 1
+          and two.dropped[HF.SECOND_SENDER] == 9)
     rx.reset_match()
     check("a restart before ResetMatch carries nothing into the next match",
           rx.match_counts() == {"red": 0, "blue": 0})
@@ -4764,6 +4780,10 @@ def test_two_boxes_one_feed():
     check("the partner restarting keeps what it had sent: its new 2 adds to 3",
           r == [("blue", 2, 101.0)] and relay.forwarded["blue"] == 5
           and relay.rx.restarts == 1)
+    check("and the old partner session sending again is a second sender, dropped",
+          relay.handle(dg("p1", 9, 0, 9), "10.0.100.22") is None
+          and relay.forwarded["blue"] == 5
+          and relay.state()["dropped"].get(HF.SECOND_SENDER) == 1)
     relay.reply_source = lambda: {"v": 1, "seq": 777, "match_state": "AUTO_PERIOD",
                                   "credited": {"red": 1, "blue": 5}}
     rep = _json.loads(relay.reply())

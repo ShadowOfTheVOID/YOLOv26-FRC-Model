@@ -302,7 +302,11 @@ the fake counts can reach the score. (bioarena `main` has no receiver yet,
 deploy/HUB_FEED.md; `run.py hubfeed-listen` is the stand-in.) Put `feeds: []` in `vision.mock.yaml` before a
 rehearsal while the real counter is feeding bioarena.
 `deploy/frc-fms.vision.yaml` has no `feeds:`, so copying it over
-`vision.yaml` also stops the mock run from feeding the field.
+`vision.yaml` also stops the mock run from feeding the field. Under the
+spec, two senders take turns being "the restarted counter", and each turn
+adds the other's whole total again (deploy/HUB_FEED.md, step 3). Our
+`hubfeed-listen` and partner port now drop the second sender and say so.
+bioarena's receiver does not.
 
 ## Using a retrained model with frc-fms's `zone` counter
 

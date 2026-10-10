@@ -9,13 +9,19 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
-- **Docs: Watchtower's mock vision can feed bioarena** (watchtower-fms
-  PR #3). A `vision.mock.yaml` with no `feeds:` key takes the feeds in
-  `vision.yaml`, so a rehearsal's random fuel goes to bioarena too.
-  `deploy/FRC_FMS.md` says to set `feeds: []` there while this repo's
-  counter is the bioarena source. No code change: the Watchtower app runs
-  our counter, not Watchtower's vision, and `.github/watchtower-release`
-  stays at v0.1.0 until the PR is tagged (v0.1.1 changed only CI and docs).
+- **A second counter on one receiver is dropped, not counted again and
+  again.** watchtower-fms PR #3 makes its mock vision send to `vision.yaml`'s
+  `feeds:`, beside this repo's counter. The spec reads every new session as
+  a restart and carries the old session's count. Two senders taking turns
+  carried each other's total on every heartbeat: a real red 5 with a mock
+  3 read 80 after one second. `hubfeed-listen` and the main box's partner
+  port (`hubfeed.Receiver`) now drop a session once a newer one has
+  replaced it (a restarted counter never returns to its old session). They
+  print `replaced session: is a second counter sending?`, and the count
+  stops at 8. The deploy guides (deploy/HUB_FEED.md step 3,
+  deploy/FRC_FMS.md) say to set `feeds: []` in `vision.mock.yaml` while our
+  counter is feeding bioarena; bioarena's own receiver follows the spec.
+  `.github/watchtower-release` stays at v0.1.0 until the PR is tagged.
 
 ## v0.5.6 — 2026-10-10
 
