@@ -20,6 +20,30 @@ the build rather than publishing an empty release.
   refuses, the compiled module is loaded directly (the whole OpenCV API).
   Checked with the loader in that refusing state; not checked on a Mac.
 
+## v0.5.7 — 2026-10-10
+
+Scrimmage-day fixes. The one that changes scores: Watchtower's vision
+counted every ball twice on a hub with both an outline and an exit line.
+Checked in a real Watchtower (watchtower-fms main) on a synthetic 60 fps
+match of 24 blue and 15 red balls: the old plugin stored 48 / 30, this one
+24 / 15. The counter can now feed Watchtower and bioarena at once, and the
+Watchtower app's settings save again. The fuel models are unchanged
+(v0.4.0's, as before).
+
+- **Fixed: Watchtower's plugin counted a ball twice when a hub had an
+  outline and an exit line.** The `tbavid-colour` / `tbavid-combo` counters
+  that Watchtower's vision loads (`tbavid/fms_counter.py`) added every zone
+  of the hub. A scored ball crosses the outline going in and the exit line
+  coming out, so each one counted twice. On 2026-10-10 Watchtower showed
+  blue 221 auto fuel against a broadcast's 110 total points. The camera
+  page's own counter has taken the larger kind since v0.5.3; the plugin was
+  older and never changed, and it also ignored the setup's combine and
+  confirm. The plugin now counts through the same `HubTally`: each kind
+  combined by the setup's rule, then the larger kind, with confirm. Its
+  `/control` line uses the same rule. A test drives both from one setup
+  file and requires the same count. On the old plugin it read 78 where
+  the page read 40.
+
 - **Fixed: Watchtower app settings could not be saved** ("could not write
   Public address ... safely; nothing was saved", whichever field was
   changed). Public address and Read key are this app's own settings, not
@@ -38,20 +62,6 @@ the build rather than publishing an empty release.
   and any other job that fails shows a toast. The same applies to Measure,
   Refresh picture, Test a recording, Check a recording and Calibrate.
 
-- **Fixed: Watchtower's plugin counted a ball twice when a hub had an
-  outline and an exit line.** The `tbavid-colour` / `tbavid-combo` counters
-  that Watchtower's vision loads (`tbavid/fms_counter.py`) added every zone
-  of the hub. A scored ball crosses the outline going in and the exit line
-  coming out, so each one counted twice. On 2026-10-10 Watchtower showed
-  blue 221 auto fuel against a broadcast's 110 total points. The camera
-  page's own counter has taken the larger kind since v0.5.3; the plugin was
-  older and never changed, and it also ignored the setup's combine and
-  confirm. The plugin now counts through the same `HubTally`: each kind
-  combined by the setup's rule, then the larger kind, with confirm. Its
-  `/control` line uses the same rule. A test drives both from one setup
-  file and requires the same count. On the old plugin it read 78 where
-  the page read 40.
-
 - **Double counts are flagged and traceable.** On 2026-10-10, Watchtower
   showed blue 221 auto fuel against a broadcast's 110 total points.
   - **Outlines added together:** a hub with several outlines adds them by
@@ -65,6 +75,12 @@ the build rather than publishing an empty release.
     our counter both labelled their events "live". Ours now posts as
     `tbavid <id>`, unique per run, so Watchtower's fuel table shows who
     sent what.
+
+- **The console no longer says "sum" for an outline with an exit line.**
+  `run.py hubfeed` printed "red: 2 zones combined by sum" and its status
+  line "red 15 sum [...]" for a hub that takes the larger of the two, which
+  read as the double count's cause. It now says "the larger of outline and
+  exit". No count changes.
 
 - **Hub counter to Watchtower and bioarena at once.** At the scrimmage,
   Watchtower runs on the M4 (port 8000) and bioarena takes the UDP count
@@ -84,6 +100,7 @@ the build rather than publishing an empty release.
   leaves Watchtower out, so test balls never reach a live match. Checked end to end over real sockets: Watchtower's
   HTTP stand-in got all 3 balls with the vision key, and `hubfeed-listen`
   counted red 3.
+
 - **Watchtower app: bioarena is built in, nothing to type.** The camera
   page starts out sending to Watchtower and bioarena. bioarena's address is
   the first `feeds:` entry in Watchtower's `config/vision.yaml`, or else the
@@ -91,16 +108,6 @@ the build rather than publishing an empty release.
   whether bioarena is answering. The link reads as connected while any
   target answers (at a venue with no bioarena, through Watchtower) and
   names the one that does not.
-- **An offline page for watchtower.systemoverload.org in Watchtower's own
-  look** (`deploy/watchtower-offline.html`, `deploy/Caddyfile.watchtower`).
-  The page Caddy served while the FMS was down was dark, unlike every
-  Watchtower page. The new one uses Watchtower's tokens, panel and pill,
-  inlined because the FMS that serves `style.css` is down. It keeps the
-  same words, has no outside requests, and fits a phone (390 px, no
-  sideways scroll). It checks `/` every 15 s and reloads when Watchtower
-  answers. Checked against a local server that answered 502, then 200: it
-  was on the real page within 17 s. The server copy is put in place by
-  hand; see the Caddyfile's header.
 
 - **A second counter on one receiver is dropped, not counted again and
   again.** watchtower-fms PR #3 makes its mock vision send to `vision.yaml`'s
@@ -118,6 +125,17 @@ the build rather than publishing an empty release.
   deploy/FRC_FMS.md) say to set `feeds: []` in `vision.mock.yaml` while our
   counter is feeding bioarena; bioarena's own receiver follows the spec.
   `.github/watchtower-release` stays at v0.1.0 until the PR is tagged.
+
+- **An offline page for watchtower.systemoverload.org in Watchtower's own
+  look** (`deploy/watchtower-offline.html`, `deploy/Caddyfile.watchtower`).
+  The page Caddy served while the FMS was down was dark, unlike every
+  Watchtower page. The new one uses Watchtower's tokens, panel and pill,
+  inlined because the FMS that serves `style.css` is down. It keeps the
+  same words, has no outside requests, and fits a phone (390 px, no
+  sideways scroll). It checks `/` every 15 s and reloads when Watchtower
+  answers. Checked against a local server that answered 502, then 200: it
+  was on the real page within 17 s. The server copy is put in place by
+  hand; see the Caddyfile's header.
 
 ## v0.5.6 — 2026-10-10
 
