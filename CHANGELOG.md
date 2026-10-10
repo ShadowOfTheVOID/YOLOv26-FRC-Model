@@ -9,6 +9,20 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Fixed: Watchtower's plugin counted a ball twice when a hub had an
+  outline and an exit line.** The `tbavid-colour` / `tbavid-combo` counters
+  that Watchtower's vision loads (`tbavid/fms_counter.py`) added every zone
+  of the hub. A scored ball crosses the outline going in and the exit line
+  coming out, so each one counted twice. On 2026-10-10 Watchtower showed
+  blue 221 auto fuel against a broadcast's 110 total points. The camera
+  page's own counter has taken the larger kind since v0.5.3; the plugin was
+  older and never changed, and it also ignored the setup's combine and
+  confirm. The plugin now counts through the same `HubTally`: each kind
+  combined by the setup's rule, then the larger kind, with confirm. Its
+  `/control` line uses the same rule. A test drives both from one setup
+  file and requires the same count. On the old plugin it read 78 where
+  the page read 40.
+
 - **Double counts are flagged and traceable.** On 2026-10-10, Watchtower
   showed blue 221 auto fuel against a broadcast's 110 total points.
   - **Outlines added together:** a hub with several outlines adds them by

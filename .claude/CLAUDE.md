@@ -262,7 +262,8 @@ four. E4/5/8 are in the model's training set; fair E1 estimate 7-9%. Do
 not raise w on the E4/5/8 fit (0.7) -- that is the training set talking. User chose: if crops don't clearly work, retrain (option 2).
 frc-fms (github.com/arnan-bajaj/frc-fms, the team's own scrimmage FMS;
 2026-10-01) is supported alongside bioarena (deploy/FRC_FMS.md): plugin
-tbavid.fms_counter:ColourCounter for its run_vision.py, and fmslink.FmsSender
+tbavid.fms_counter:ColourCounter for its run_vision.py (counts through
+HubTally like hubcount.run -- it once summed outline + exit, 2x on 2026-10-10), and fmslink.FmsSender
 when --target is http://KEY@host:8000 (wall-clock event times, never-dropped
 queue). Both verified against a running frc-fms. Its `zone` counter takes all
 model classes -- a 3-class model would count robots as fuel.

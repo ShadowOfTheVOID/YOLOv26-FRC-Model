@@ -5109,6 +5109,93 @@ def test_fanout_watchtower_and_bioarena():
           and '"field_feed": vf or FIELD_FEED' in src)
 
 
+def test_plugin_combines_like_hubtally():
+    """Watchtower's plugin (fms_counter) and the page's counter (hubcount.run)
+    must give one hub the same count from the same setup.
+
+    The plugin added every zone, so an outline and an exit line on one hub
+    counted each ball going in and again coming out: on 2026-10-10
+    Watchtower showed blue 221 auto fuel against a broadcast's 110 total
+    points. HubTally (the page's counter since v0.5.3) takes the larger kind.
+    """
+    import json as _json
+    from types import SimpleNamespace as NS
+    from tbavid import fms_counter as FC
+    from tbavid import hubcount as HC
+
+    class Fake:                        # a zone counter whose count is set by hand
+        def __init__(self, poly):
+            self.poly, self.reported = poly, 0
+        def update(self, blobs):
+            pass
+
+    mouth = [[100, 100], [300, 100], [300, 160], [100, 160]]
+    mouth2 = [[400, 100], [600, 100], [600, 160], [400, 160]]
+    exit_ = {"line": [[100, 400], [300, 400]], "out": [200, 450]}
+    frame = np.zeros((720, 1280, 3), np.uint8)
+
+    def both(zones, counts, extra=None, steps=1):
+        """(plugin total, the page's count) for blue with these zone counts:
+        each a final count reached evenly over `steps` seconds, or a list of
+        the count at each second."""
+        cfg = {"cameras": [{"name": "cam", "source": "0", "ball_area": 300,
+                            "zones": [dict(z, hub="blue", name=f"z{i}") for i, z in enumerate(zones)]}]}
+        cfg.update(extra or {})
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "cams.json"
+            path.write_text(_json.dumps(cfg))
+            pc = FC.ColourCounter({"hub": "blue", "setup": str(path), "camera": "cam"})
+            setup = HC.load_setup(str(path))
+        pc._build(frame)
+        pc.counters = [Fake(c.poly) for c in pc.counters]
+        pc.eyes = [NS(blobs=lambda f: []) for _ in pc.counters]     # no OpenCV here
+        tally = HC.HubTally(setup)
+        page = setup.zones("blue")
+        for z in page:
+            z.counter = NS(reported=0)
+        t = 0.0
+        for step in range(1, steps + 1):
+            t += 1.0
+            for i, n in enumerate(counts):
+                now = n[step - 1] if isinstance(n, list) else n * step // steps
+                pc.counters[i].reported = page[i].counter.reported = now
+            pc.process(frame, t)
+            tally.tick(t)
+            tally.rise("blue")              # as hubcount.run does every frame
+        return pc.total, tally.sent["blue"]
+
+    plugin, hub = both([{"outline": mouth}, exit_], [40, 38])
+    check("outline 40 + exit line 38 on one hub: 40 (the larger), not 78",
+          plugin == hub == 40)
+    plugin, hub = both([{"outline": mouth}, exit_], [12, 30])
+    check("and an exit line that sees more wins", plugin == hub == 30)
+    plugin, hub = both([{"outline": mouth}, {"outline": mouth2}], [20, 15])
+    check("two outlines combine by the setup's sum", plugin == hub == 35)
+    plugin, hub = both([{"outline": mouth}, {"outline": mouth2}], [20, 15],
+                       {"combine": {"blue": "max"}})
+    check("or its max", plugin == hub == 20)
+    plugin, hub = both([{"outline": mouth}, {"outline": mouth2}, exit_], [20, 15, 30],
+                       {"combine": {"blue": "max"}})
+    check("each kind combined, then the larger kind", plugin == hub == 30)
+    entries = [5 * k for k in range(1, 9)]              # 5 a second, 40 in all
+    exits = [0, 0] + entries[:-2]                       # each out 2 s after it went in
+    plugin, hub = both([{"outline": mouth}, exit_], [entries, exits],
+                       {"confirm": {"blue": 2}}, steps=8)
+    check("confirm (exits now + recent entries) is the page's too: 40, not 70",
+          plugin == hub == 40)
+    one = FC.ColourCounter({"hub": "blue", "outline": mouth, "ball_area": 300})
+    one._build(frame)
+    one.counters = [Fake(mouth)]
+    one.eyes = [NS(blobs=lambda f: [])]
+    one.counters[0].reported = 7
+    check("a single outline from vision.yaml counts as before", one.process(frame, 1.0) == 7)
+    pc = FC.ColourCounter({"hub": "blue", "outline": mouth, "ball_area": 300})
+    pc._build(frame)
+    pc.counters = [Fake(mouth)]
+    pc.counters[0].reported = 5
+    check("and /control's colour figure is the hub's count", pc.status()["detail"] == "colour 5")
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5131,7 +5218,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_app_update,
+               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day):
