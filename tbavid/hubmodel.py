@@ -107,6 +107,34 @@ COREML = "coreml"
 COREML_EXT = ".mlpackage"
 
 
+# The whole Mac froze (8 GB M2, three cameras, 2026-10-11). Each camera
+# loaded its own copy of the model, and PyTorch's MPS allocator by default
+# may take 1.7x the GPU's recommended working set -- more than an 8 GB Mac
+# has -- so macOS swapped until nothing answered. Now one copy is shared by
+# every camera (`_shared`), and MPS is capped at half the working set: past
+# that PyTorch raises, ModelWorker drops the model and the colour counter
+# carries on, where before the machine stopped. Read when MPS first
+# allocates, so setting it at import is in time; an explicit value wins.
+os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.5")
+
+_SHARED: Dict[Tuple[str, str], tuple] = {}
+_LOADING = __import__("threading").Lock()   # cameras start their models at once
+
+
+def _shared(path: str, coreml: bool):
+    """(model, lock): one loaded copy per file, for every camera. Ultralytics'
+    predictor is not thread-safe, so each prediction holds the lock -- one
+    GPU / Neural Engine does one at a time anyway."""
+    import threading
+    key = (os.path.abspath(path), "coreml" if coreml else "torch")
+    with _LOADING:
+        if key not in _SHARED:
+            from ultralytics import YOLO
+            model = YOLO(path, task="detect") if coreml else YOLO(path)
+            _SHARED[key] = (model, threading.Lock())
+        return _SHARED[key]
+
+
 def coreml_twin(weights: str) -> Optional[str]:
     """The Core ML export beside a .pt (x.pt -> x.mlpackage), or None."""
     root, ext = os.path.splitext(weights)
@@ -230,16 +258,12 @@ class ModelEye:
 
     def __init__(self, weights: str, polys: Dict[str, Sequence[Point]],
                  device: str = ""):
-        from ultralytics import YOLO
         self.weights = resolve_weights(weights)
         path, dev = choose_backend(self.weights, device)
         self.coreml = dev == COREML
-        if self.coreml:
-            self.model = YOLO(path, task="detect")
-            self.device = "cpu"     # the tensors' side; Core ML picks its own units
-        else:
-            self.model = YOLO(path)
-            self.device = dev or pick_device()
+        self.model, self.lock = _shared(path, self.coreml)
+        # Core ML: "cpu" is only the tensors' side; Core ML picks its own units.
+        self.device = "cpu" if self.coreml else (dev or pick_device())
         self.ran = False
         self.note = ""
         self.polys = dict(polys)
@@ -255,21 +279,22 @@ class ModelEye:
         kw = dict(imgsz=MODEL_IMGSZ, conf=DET_CONF, max_det=1500, classes=[0],
                   verbose=False, device=self.device)
         if not self.coreml:
-            return self.model.predict(imgs, **kw)
+            with self.lock:
+                return self.model.predict(imgs, **kw)
         # The export takes one image at a time (batch 1), so one call a crop.
         try:
-            rs = [self.model.predict(im, **kw)[0] for im in imgs]
+            with self.lock:
+                rs = [self.model.predict(im, **kw)[0] for im in imgs]
         except Exception as e:
             if self.ran:
                 raise
             # Core ML loads at the first prediction; a build without
             # coremltools, or an export this macOS cannot run, fails here.
             # Counting on the GPU beats not counting.
-            from ultralytics import YOLO
             self.note = f"Core ML failed ({type(e).__name__}: {e}); using the GPU"
             self.coreml = False
             self.device = pick_device()
-            self.model = YOLO(self.weights)
+            self.model, self.lock = _shared(self.weights, False)
             return self._predict(imgs)
         self.ran = True
         return rs

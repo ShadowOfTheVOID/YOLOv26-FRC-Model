@@ -5248,6 +5248,7 @@ def test_model_uses_core_ml_on_a_mac():
     real_mod, real_plat, real_pick = sys.modules.get("ultralytics"), HM.sys.platform, HM.pick_device
     sys.modules["ultralytics"] = types.SimpleNamespace(YOLO=YOLO)
     try:
+        HM._SHARED.clear()
         HM.choose_backend.__defaults__ = ("", "darwin")
         HM.pick_device = lambda: "mps"
         eye = HM.ModelEye(pt, {"red": [(0, 0), (100, 0), (100, 100), (0, 100)]})
@@ -5257,7 +5258,17 @@ def test_model_uses_core_ml_on_a_mac():
         check("Core ML failing at the first frame falls back to the GPU and still counts",
               not eye.coreml and eye.device == "mps" and loaded == [ml, pt] and len(dets) == 1
               and "Core ML failed" in eye.note)
+        # The whole 8 GB Mac froze with one model copy per camera.
+        HM.choose_backend.__defaults__ = ("", "linux")
+        n = len(loaded)
+        eyes = [HM.ModelEye(pt, {"red": [(0, 0), (9, 0), (9, 9)]}) for _ in range(3)]
+        check("three cameras share one loaded model, not three copies",
+              len(loaded) == n and len({id(e.model) for e in eyes}) == 1
+              and len({id(e.lock) for e in eyes}) == 1)
+        check("MPS may not take more than half the working set",
+              os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO") == "0.5")
     finally:
+        HM._SHARED.clear()
         HM.choose_backend.__defaults__ = ("", real_plat)
         HM.pick_device = real_pick
         if real_mod is None:

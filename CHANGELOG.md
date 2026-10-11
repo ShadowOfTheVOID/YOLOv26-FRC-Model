@@ -9,6 +9,15 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Fixed: the model could freeze a whole 8 GB Mac.** Every camera loaded its
+  own copy of the model, and PyTorch on a Mac lets the GPU take more memory
+  than an 8 GB machine has, so macOS swapped until nothing answered. Now all
+  cameras share one copy (one prediction at a time; there is one GPU), and
+  the GPU is capped at half its working set
+  (`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.5`, an explicit value wins). Past the
+  cap the model is dropped and the colour counter carries on instead of the
+  computer locking up. Not yet run on the M2 that froze.
+
 - **Mac: the built-in model runs on Apple's Neural Engine.** On an 8 GB M2
   the model lagged with three cameras: each camera runs it ~30 times a
   second, all on the one GPU (MPS). The Mac build now ships a Core ML copy
