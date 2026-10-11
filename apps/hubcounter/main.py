@@ -57,7 +57,9 @@ def selftest_model(out: str) -> int:
     What this proves is that the model and its libraries are inside the
     build. If the GPU device fails -- GitHub's macOS runners are VMs, where
     Apple's GPU (MPS) may not work as on a real Mac -- it says so and tries
-    the CPU, which exercises the same bundled code."""
+    the CPU, which exercises the same bundled code. On a Mac the first try
+    is the default, the Core ML copy, and the message says whether it ran
+    or fell back to the GPU."""
     import time
     msg, code = "", 1
     try:
@@ -66,14 +68,16 @@ def selftest_model(out: str) -> int:
         frame = np.zeros((720, 1280, 3), np.uint8)
         poly = {"red": [(100, 100), (300, 100), (300, 200), (100, 200)]}
         notes = []
-        for device in dict.fromkeys([pick_device(), "cpu"]):
+        for device in dict.fromkeys(["", pick_device(), "cpu"]):
             t = time.time()
             try:
-                ModelEye(BUILTIN, poly, device).detect(frame)
-                msg, code = "; ".join(notes + [f"model ran on {device} in {time.time() - t:.1f} s"]), 0
+                eye = ModelEye(BUILTIN, poly, device)
+                eye.detect(frame)
+                notes += [eye.note] if eye.note else []
+                msg, code = "; ".join(notes + [f"model ran on {eye.backend} in {time.time() - t:.1f} s"]), 0
                 break
             except Exception as e:                  # report it, then the CPU
-                notes.append(f"{device} failed: {type(e).__name__}: {e}")
+                notes.append(f"{device or 'default'} failed: {type(e).__name__}: {e}")
         else:
             msg = "; ".join(notes)
     except Exception as e:                          # report anything, never hang

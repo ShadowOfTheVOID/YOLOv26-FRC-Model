@@ -84,6 +84,17 @@ MODEL = os.path.join(ROOT, "models", "fuel_relabel.pt")
 if not os.path.isfile(MODEL) and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
     raise SystemExit(f"{MODEL} is missing (hub-app.yml downloads it from the release)")
 MODELS = [(MODEL, "models")] if os.path.isfile(MODEL) else []
+# Mac: the Core ML copy for the Neural Engine (hub-app.yml exports it; the
+# model lagged on an 8 GB M2's GPU with three cameras) and coremltools to
+# run it. Ultralytics checks coremltools' version through its metadata, and
+# would try to pip-install it inside the app without it.
+COREML_MODEL = os.path.join(ROOT, "models", "fuel_relabel.mlpackage")
+COREML_DATAS, COREML_BINS, COREML_IMPORTS = [], [], []
+if sys.platform == "darwin" and os.path.isdir(COREML_MODEL):
+    from PyInstaller.utils.hooks import collect_all, copy_metadata
+    COREML_DATAS, COREML_BINS, COREML_IMPORTS = collect_all("coremltools")
+    COREML_DATAS = COREML_DATAS + copy_metadata("coremltools") + [
+        (COREML_MODEL, "models/fuel_relabel.mlpackage")]
 
 
 def torchvision_ops():
@@ -99,17 +110,17 @@ def torchvision_ops():
 a = Analysis(
     [ENTRY],
     pathex=[ROOT] + EXTRA_PATH,
-    binaries=torchvision_ops(),
+    binaries=torchvision_ops() + COREML_BINS,
     datas=[(os.path.join(TB, "hubweb.html"), "tbavid"),
            (os.path.join(TB, "hubboard.html"), "tbavid")] + MODELS
           # Ultralytics reads its default.yaml and tracker yamls at import
           # and builds layers by name, so all of it goes in.
-          + collect_data_files("ultralytics") + EXTRA_DATAS,
+          + collect_data_files("ultralytics") + EXTRA_DATAS + COREML_DATAS,
     hiddenimports=["tbavid.hubweb", "tbavid.hubapp", "tbavid.hubcount",
                    "tbavid.hubfeed", "tbavid.fmslink", "tbavid.hubmodel",
                    "tbavid.count", "tbavid.trackvis", "tbavid.camcheck",
                    "tbavid.camprofile", "cv2", "numpy", "yt_dlp",
-                   "torch", "torchvision"] + collect_submodules("ultralytics") + EXTRA_IMPORTS,
+                   "torch", "torchvision"] + collect_submodules("ultralytics") + EXTRA_IMPORTS + COREML_IMPORTS,
     excludes=SCRAPER + HEAVY,
     noarchive=False,
 )

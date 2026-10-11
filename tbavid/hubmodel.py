@@ -97,6 +97,38 @@ def bundled_model() -> Optional[str]:
     return None
 
 
+# Apple's Neural Engine. On an 8 GB M2 the model lagged on the GPU (MPS) with
+# three cameras (2026-10-11): each camera runs it ~30 times a second, so
+# three ask ~90 runs a second of one GPU. A Core ML copy of the model runs on
+# the Neural Engine instead, which on Apple silicon is usually several times
+# faster for a network this size. The Mac build exports it beside the .pt
+# (fuel_relabel.mlpackage); cams.json's "device": "mps" still forces the GPU.
+COREML = "coreml"
+COREML_EXT = ".mlpackage"
+
+
+def coreml_twin(weights: str) -> Optional[str]:
+    """The Core ML export beside a .pt (x.pt -> x.mlpackage), or None."""
+    root, ext = os.path.splitext(weights)
+    p = root + COREML_EXT
+    return p if ext.lower() == ".pt" and os.path.isdir(p) else None
+
+
+def choose_backend(weights: str, device: str = "",
+                   platform: str = sys.platform) -> Tuple[str, str]:
+    """(file to load, device). On a Mac, with no device asked for (or
+    "coreml"), the Core ML twin of the weights when there is one; anything
+    else is the .pt on `device` as before. An .mlpackage given directly is
+    Core ML whatever `device` says."""
+    if weights.lower().rstrip("/\\").endswith(COREML_EXT):
+        return weights, COREML
+    if platform == "darwin" and device in ("", COREML):
+        twin = coreml_twin(weights)
+        if twin:
+            return twin, COREML
+    return weights, "" if device == COREML else device
+
+
 def resolve_weights(weights: str) -> str:
     """A weights path as given, or the built-in model's real path."""
     if weights == BUILTIN:
@@ -189,8 +221,9 @@ class ModelEye:
     """Runs the model on every model zone of one camera, one batch a frame.
 
     Loads Ultralytics lazily: the API host and the colour-only counter never
-    import torch. `device` is passed to Ultralytics; "" picks CUDA, then
-    Apple MPS, then CPU (`pick_device`). On a 4-core CPU two 640 px crops
+    import torch. `device` is passed to Ultralytics; "" picks the Core ML twin
+    on a Mac (`choose_backend`), else CUDA, then Apple MPS, then CPU
+    (`pick_device`). On a 4-core CPU two 640 px crops
     took 0.3 s, too slow to keep up live; a laptop GPU or Apple silicon is
     needed.
     """
@@ -198,12 +231,48 @@ class ModelEye:
     def __init__(self, weights: str, polys: Dict[str, Sequence[Point]],
                  device: str = ""):
         from ultralytics import YOLO
-        self.model = YOLO(resolve_weights(weights))
-        self.device = device or pick_device()
+        self.weights = resolve_weights(weights)
+        path, dev = choose_backend(self.weights, device)
+        self.coreml = dev == COREML
+        if self.coreml:
+            self.model = YOLO(path, task="detect")
+            self.device = "cpu"     # the tensors' side; Core ML picks its own units
+        else:
+            self.model = YOLO(path)
+            self.device = dev or pick_device()
+        self.ran = False
+        self.note = ""
         self.polys = dict(polys)
         self.crops: Dict[str, Tuple[int, int, int, int]] = {}
         self.prev = None
         self.ball_px = 18.0
+
+    @property
+    def backend(self) -> str:
+        return "Core ML (Neural Engine)" if self.coreml else self.device
+
+    def _predict(self, imgs):
+        kw = dict(imgsz=MODEL_IMGSZ, conf=DET_CONF, max_det=1500, classes=[0],
+                  verbose=False, device=self.device)
+        if not self.coreml:
+            return self.model.predict(imgs, **kw)
+        # The export takes one image at a time (batch 1), so one call a crop.
+        try:
+            rs = [self.model.predict(im, **kw)[0] for im in imgs]
+        except Exception as e:
+            if self.ran:
+                raise
+            # Core ML loads at the first prediction; a build without
+            # coremltools, or an export this macOS cannot run, fails here.
+            # Counting on the GPU beats not counting.
+            from ultralytics import YOLO
+            self.note = f"Core ML failed ({type(e).__name__}: {e}); using the GPU"
+            self.coreml = False
+            self.device = pick_device()
+            self.model = YOLO(self.weights)
+            return self._predict(imgs)
+        self.ran = True
+        return rs
 
     def detect(self, frame) -> Tuple[List[Tuple[XYXY, float]], List[XYXY]]:
         """Every crop's detections in full-frame pixels, and colour_assist's
@@ -214,9 +283,7 @@ class ModelEye:
             self.crops = {n: crop_box(p, w, h) for n, p in self.polys.items()}
         names = list(self.crops)
         imgs = [frame[y0:y1, x0:x1] for x0, y0, x1, y1 in (self.crops[n] for n in names)]
-        rs = self.model.predict(imgs, imgsz=MODEL_IMGSZ, conf=DET_CONF,
-                                max_det=1500, classes=[0], verbose=False,
-                                device=self.device)
+        rs = self._predict(imgs)
         dets: List[Tuple[XYXY, float]] = []
         for n, r in zip(names, rs):
             x0, y0 = self.crops[n][:2]

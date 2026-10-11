@@ -5210,6 +5210,62 @@ def test_plugin_combines_like_hubtally():
     check("and /control's colour figure is the hub's count", pc.status()["detail"] == "colour 5")
 
 
+def test_model_uses_core_ml_on_a_mac():
+    """The model lagged on an 8 GB M2's GPU with three cameras: the Mac uses
+    a Core ML copy (Neural Engine) when one sits beside the .pt, the GPU when
+    asked or when Core ML will not run, and other systems never see it."""
+    import os, sys, tempfile, types
+    from tbavid import hubmodel as HM
+    d = tempfile.mkdtemp()
+    pt = os.path.join(d, "fuel_relabel.pt")
+    open(pt, "wb").close()
+    check("no Core ML copy: the .pt as before",
+          HM.choose_backend(pt, "", "darwin") == (pt, ""))
+    os.mkdir(os.path.join(d, "fuel_relabel.mlpackage"))
+    ml = os.path.join(d, "fuel_relabel.mlpackage")
+    check("a Mac with the copy uses Core ML", HM.choose_backend(pt, "", "darwin") == (ml, "coreml"))
+    check("asking for the GPU still gets the GPU", HM.choose_backend(pt, "mps", "darwin") == (pt, "mps"))
+    check("Windows / Linux never use it", HM.choose_backend(pt, "", "win32") == (pt, "")
+          and HM.choose_backend(pt, "coreml", "linux") == (pt, ""))
+    check("an .mlpackage given directly is Core ML", HM.choose_backend(ml + "/", "cpu", "linux")[1] == "coreml")
+
+    class Boxes:
+        xyxy = types.SimpleNamespace(tolist=lambda: [[1.0, 2.0, 3.0, 4.0]])
+        conf = types.SimpleNamespace(tolist=lambda: [0.9])
+
+    loaded = []
+
+    class YOLO:
+        def __init__(self, path, task=None):
+            self.path = path
+            loaded.append(path)
+        def predict(self, imgs, **kw):
+            if self.path.endswith(".mlpackage"):
+                raise RuntimeError("no coremltools")
+            n = len(imgs) if isinstance(imgs, list) else 1
+            return [types.SimpleNamespace(boxes=Boxes()) for _ in range(n)]
+
+    real_mod, real_plat, real_pick = sys.modules.get("ultralytics"), HM.sys.platform, HM.pick_device
+    sys.modules["ultralytics"] = types.SimpleNamespace(YOLO=YOLO)
+    try:
+        HM.choose_backend.__defaults__ = ("", "darwin")
+        HM.pick_device = lambda: "mps"
+        eye = HM.ModelEye(pt, {"red": [(0, 0), (100, 0), (100, 100), (0, 100)]})
+        check("the Mac loads the Core ML copy first", eye.coreml and loaded == [ml])
+        import numpy as np
+        dets, _ = eye.detect(np.zeros((720, 1280, 3), np.uint8))
+        check("Core ML failing at the first frame falls back to the GPU and still counts",
+              not eye.coreml and eye.device == "mps" and loaded == [ml, pt] and len(dets) == 1
+              and "Core ML failed" in eye.note)
+    finally:
+        HM.choose_backend.__defaults__ = ("", real_plat)
+        HM.pick_device = real_pick
+        if real_mod is None:
+            sys.modules.pop("ultralytics", None)
+        else:
+            sys.modules["ultralytics"] = real_mod
+
+
 def test_find_cameras_sees_them_all():
     """Find cameras showed two of the cameras plugged in (v0.5.5): it tried
     numbers 0-5 only (Linux gives each USB camera two numbers, 0/2/4/6), and
@@ -5329,7 +5385,7 @@ def main() -> int:
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
                test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_find_cameras_sees_them_all, test_cvload_survives_a_refusing_loader, test_app_update,
+               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_find_cameras_sees_them_all, test_model_uses_core_ml_on_a_mac, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day):

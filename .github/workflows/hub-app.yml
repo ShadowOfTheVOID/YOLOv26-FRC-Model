@@ -111,6 +111,17 @@ jobs:
           print("fuel_relabel.pt", got)
           PY
 
+      # The model lagged on an 8 GB M2's GPU with three cameras. A Core ML
+      # copy runs on Apple's Neural Engine; the app uses it on a Mac and
+      # falls back to the GPU if it will not load (hubmodel.choose_backend).
+      # fp16, not int8: the balls are ~15 px, the size int8 loses first.
+      - name: Mac -- the built-in model for the Neural Engine (Core ML)
+        if: runner.os == 'macOS'
+        run: |
+          pip install "coremltools>=8.0"
+          python -c "from ultralytics import YOLO; YOLO('models/fuel_relabel.pt').export(format='coreml', imgsz=640, half=True, batch=1)"
+          test -d models/fuel_relabel.mlpackage
+
       - name: Build
         env:
           HUBCOUNTER_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}

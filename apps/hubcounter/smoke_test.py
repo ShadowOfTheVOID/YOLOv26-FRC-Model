@@ -67,6 +67,11 @@ def main(program: str) -> int:
         code = subprocess.run([program, "--selftest-model", result], env=env,
                               timeout=600).returncode
         msg = open(result).read().strip() if os.path.exists(result) else "no result"
+        if code == 0 and sys.platform == "darwin" and "Core ML" not in msg.split(";")[-1]:
+            # The Mac build ships a Core ML copy for the Neural Engine; a
+            # silent fall back to the GPU would hide a bundling mistake.
+            fail(f"the model ran, but not through Core ML: {msg}")
+            return 1
         if code == 0:
             print("OK: " + msg)
             # Shown on the PR's checks: which device the model ran on.

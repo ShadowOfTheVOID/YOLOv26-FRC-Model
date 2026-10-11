@@ -9,6 +9,18 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Mac: the built-in model runs on Apple's Neural Engine.** On an 8 GB M2
+  the model lagged with three cameras: each camera runs it ~30 times a
+  second, all on the one GPU (MPS). The Mac build now ships a Core ML copy
+  (`fuel_relabel.mlpackage`, fp16 -- int8 would cost the ~15 px balls first)
+  and uses it by default, one crop at a time. If Core ML will not load, the
+  app says so and falls back to the GPU rather than stop counting; a camera
+  set to `"device": "mps"` keeps the GPU. In a checkout, make the copy with
+  `yolo export model=models/fuel_relabel.pt format=coreml imgsz=640 half=True`.
+  **Not yet timed on an M2, and the Core ML copy's counts are not yet checked
+  against the hand-counted matches** -- run step 5's speed test and ball test
+  before trusting it.
+
 - **Fixed: Find cameras listed only some of the cameras plugged in** (two of
   three on a Mac whose System Settings showed all three, v0.5.5). It tried camera numbers 0-5 only. Linux and the Pi
   give every USB camera two numbers (0, 2, 4, 6...), and a Mac counts the
