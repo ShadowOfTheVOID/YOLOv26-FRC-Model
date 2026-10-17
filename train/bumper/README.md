@@ -20,3 +20,11 @@ not labelled: training on them would leak the test set.
 
 Central Valley: about a quarter of its red "robots" were fans in red shirts
 (detector false positives); they are unlabelled, not trained on.
+
+Adding Central Valley (31 crops, 236 strips in all) changed nothing measurable
+on Einstein 1 (2026-10-17): 71% forced / 84% of the 63% named at margin 2,
+against 74% / 83% without it -- one to three crops either way of 79. The
+released `bumper_ocr.pt` is the Einstein 4/5/8 one. More of the same
+broadcast fonts is not what is missing; the misses are fonts no training
+match has (2910's condensed digits), so the next labels worth having are
+of the teams at the event the reader will be used at.
