@@ -44,8 +44,15 @@ Box = Tuple[float, float, float, float]
 # Below this the digits were never sampled well enough to tell apart. Measured
 # on rendered, lightly blurred bumpers against six candidates that include
 # look-alikes (1678/1671, 254/245): numerals 15 px tall in the white mask
-# were right 6 of 6, 11 px wrong 2 of 6 (1671 read as 245, 971 as 8). identify.py's broadcast
-# bumpers are ~5 px, so this reads hub-side cameras, not broadcasts.
+# were right 6 of 6, 11 px wrong 2 of 6 (1671 read as 245, 971 as 8).
+#
+# Real frames (Einstein 8, 1080p, 2026-10-17): numerals there are 15-70 px,
+# not identify.py's 5 px (that was a 1920x504 wide shot), and a person reads
+# most of them. This scorer, on 25 held-out robot crops it named: 15 right of
+# 23 checkable (65%), the misses mostly red look-alikes (8613/6800/254) and
+# 1323/4414 called 4065. Over a 30 s clip the tracker made ~59 robot numbers
+# of 6 robots, so no vote was clear and nobody was named. Not ready to name
+# robots on its own; the template match is the weak part.
 MIN_DIGIT_PX = 14
 NORM_H = 32                      # numerals are compared at this height
 # The bumper is the bottom of the robot box; the top is mechanism and air.
@@ -90,6 +97,14 @@ def bumper_band(hsv: np.ndarray, alliance: str) -> Optional[Tuple[int, int]]:
             start = b
     runs.append((start, hit[-1]))
     top, bottom = max(runs, key=lambda r: r[1] - r[0])
+    # Grow into rows with any bumper colour at all. The numerals are the rows
+    # with the LEAST bumper colour -- they are white -- and on Einstein 8 the
+    # core run stopped above them: crop 6800's band was rows 28-42 and its
+    # digits rows 34-61, so readable bumpers gave no evidence.
+    while top > 0 and rows[top - 1] > 0.05:
+        top -= 1
+    while bottom + 1 < rows.size and rows[bottom + 1] > 0.05:
+        bottom += 1
     return int(top), int(bottom) + 1
 
 
