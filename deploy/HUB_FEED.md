@@ -435,8 +435,8 @@ clickers or paper.
    python run.py hubcount red_cam.mp4 --setup cams.json --camera red-cam --hand red=37
    # who scored: bumper reader + shot attribution, split of the hub count,
    # checked against person B
-   python run.py shots --weights fuel_withBotbest.pt --source field.mp4 \
-       --hub-red X,Y,W,H --ocr --ocr-weights bumper_ocr.pt \
+   python run.py shots --weights fuel_withBotbest.pt --setup field.json \
+       --ocr --ocr-weights bumper_ocr.pt \
        --roster "red=254,1678,971" --hub-counts red=37 \
        --hand 254=14,1678=15,971=8 --annotate check.mp4 --out shots.json
    ```
@@ -444,8 +444,10 @@ clickers or paper.
    `--hub-counts` is person A's count (or the hub counter's, to test the
    whole chain); `--hand` is person B's. The last line printed is the
    number of balls the split put on the wrong team or nowhere, as a
-   percentage of the hand count. `--hub-red` is the hub's box in the field
-   video, in pixels.
+   percentage of the hand count. `field.json` is where the hub is: open
+   the hub counter page (`run.py hubgui --setup field.json`), *Add
+   recording* -> the field video, draw *Red outline* around the hub with the
+   mouse, *Save*. No pixel numbers to type.
 6. Watch `check.mp4` and note every robot number that carries the wrong
    team: those are bumper-reading errors, and each crop of them is a
    training example (`train/train_bumper_ocr.py`, labels in

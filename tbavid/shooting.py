@@ -899,6 +899,57 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
             "robots_recovered": numbering.recovered}
 
 
+def hubs_from_setup(setup_path: str, camera: str = "", source: str = ""
+                    ) -> Tuple[Dict[str, Box], str, str]:
+    """Hub boxes from the outlines drawn on the hub counter page.
+
+    Typing --hub-red X,Y,W,H means reading pixel positions off a frame, which
+    nobody at a practice field should have to do. The hub counter page
+    already has each hub drawn with the mouse and saved in cams.json; a hub's
+    box is the bounding box of everything drawn for it on one camera
+    (outlines and exit lines). The camera is the one named, else the one
+    whose source is `source`, else the only one. Returns (hubs, camera name,
+    camera source).
+    """
+    import json
+    import os
+    cfg = json.load(open(setup_path))
+    cams = cfg.get("cameras") or []
+    if not cams:
+        raise ValueError(f"{setup_path} has no cameras: add the recording in "
+                         f"the hub counter page (step 1) and draw the hubs (step 2)")
+    pick = None
+    if camera:
+        pick = next((c for c in cams if c.get("name") == camera), None)
+        if pick is None:
+            raise ValueError(f"no camera {camera!r} in {setup_path}; it has "
+                             + ", ".join(repr(c.get("name")) for c in cams))
+    elif source:
+        same = lambda a, b: os.path.abspath(str(a)) == os.path.abspath(str(b))  # noqa: E731
+        pick = next((c for c in cams if same(c.get("source"), source)), None)
+    if pick is None:
+        if len(cams) > 1:
+            raise ValueError("several cameras in the setup; say which with --camera ("
+                             + ", ".join(repr(c.get("name")) for c in cams) + ")")
+        pick = cams[0]
+    pts: Dict[str, List] = {}
+    for z in pick.get("zones") or []:
+        drawn = z.get("outline") or z.get("line") or []
+        if isinstance(drawn, str):
+            nums = [float(v) for v in drawn.replace(";", ",").split(",") if v.strip()]
+            drawn = list(zip(nums[::2], nums[1::2]))
+        pts.setdefault(str(z.get("hub")), []).extend(tuple(map(float, p)) for p in drawn)
+    hubs = {}
+    for hub, ps in pts.items():
+        if hub in ("red", "blue") and ps:
+            xs, ys = [p[0] for p in ps], [p[1] for p in ps]
+            hubs[hub] = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+    if not hubs:
+        raise ValueError(f"camera {pick.get('name')!r} has no hub drawn yet: "
+                         f"draw the Red / Blue outline in step 2 and Save")
+    return hubs, str(pick.get("name")), str(pick.get("source"))
+
+
 def parse_teams(text: str) -> Dict[int, int]:
     """'3=254,7=254,5=1678' -> {3: 254, 7: 254, 5: 1678}.
 

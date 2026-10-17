@@ -5350,6 +5350,27 @@ def test_bumper_ocr_and_per_team_scoring():
     check("pooled reads name both fragments where neither alone was clear",
           f.assignments() == {1: 254, 5: 254})
 
+    import json as _json
+    import tempfile as _tmp
+    from tbavid import shooting as S
+    with _tmp.TemporaryDirectory() as d:
+        path = Path(d) / "cams.json"
+        path.write_text(_json.dumps({"cameras": [{
+            "name": "field", "source": str(Path(d) / "practice.mp4"),
+            "zones": [{"hub": "red", "outline": [[100, 80], [520, 80], [520, 300], [100, 300]]},
+                      {"hub": "red", "line": [[300, 320], [400, 330]], "out": [350, 400]},
+                      {"hub": "blue", "outline": "40,60,200,60,200,160"}]}]}))
+        hubs, cam, src = S.hubs_from_setup(str(path))
+        check("hubs come from the outlines drawn on the page, no pixel numbers typed",
+              hubs == {"red": (100.0, 80.0, 420.0, 250.0), "blue": (40.0, 60.0, 160.0, 100.0)}
+              and cam == "field" and src.endswith("practice.mp4"))
+        path.write_text(_json.dumps({"cameras": [{"name": "field", "source": "x.mp4"}]}))
+        try:
+            S.hubs_from_setup(str(path))
+            check("a camera with nothing drawn says to draw the hubs", False)
+        except ValueError as e:
+            check("a camera with nothing drawn says to draw the hubs", "draw" in str(e))
+
     check("a hand tally parses", B.parse_hand("frc254=12, 1678=8") == {254: 12, 1678: 8})
     hc = B.against_hand({254: {"alliance": "red", "scored": 10},
                          1678: {"alliance": "red", "scored": 9},

@@ -507,6 +507,17 @@ def cmd_shots(args, cfg):
         box = _hub_arg(raw, f"hub-{alliance}")
         if box:
             hubs[alliance] = box
+    if not hubs and args.setup:
+        try:
+            hubs, cam, cam_source = shooting.hubs_from_setup(
+                str(args.setup), args.camera, args.source or "")
+        except (OSError, ValueError) as exc:
+            raise SystemExit(str(exc))
+        args.source = args.source or cam_source
+        print(f"hubs drawn on camera {cam!r} in {args.setup}: "
+              + ", ".join(f"{a}={list(map(int, b))}" for a, b in hubs.items()))
+    if not args.source:
+        raise SystemExit("--source is needed (or --setup, to use its camera's recording)")
     if not hubs and args.event:
         con = dbmod.connect()
         hubs = counting.hubs_from_db(con, args.event)
@@ -1297,10 +1308,15 @@ def main(argv=None):
                             "shot, how many went in, how many missed")
     p.add_argument("--weights", type=Path, required=True,
                    help="the .pt -- it must detect robots as well as fuel")
-    p.add_argument("--source", required=True,
+    p.add_argument("--source", default="",
                    help="a match video, or a camera index such as 0. Not "
                         "exported frames: a ball in flight cannot be followed "
-                        "at 3 fps")
+                        "at 3 fps. With --setup, defaults to its camera's recording")
+    p.add_argument("--setup", type=Path,
+                   help="cams.json from the hub counter page: the hubs are the "
+                        "outlines drawn there (no pixel numbers to type)")
+    p.add_argument("--camera", default="",
+                   help="which camera of --setup, when it has several")
     p.add_argument("--event", help="event key, for hub geometry recorded "
                                    "with `run.py db hub`")
     p.add_argument("--hub-blue", dest="hub_blue", metavar="X,Y,W,H",
