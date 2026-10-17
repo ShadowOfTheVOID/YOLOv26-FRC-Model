@@ -91,11 +91,41 @@ def best_delay(rises: Sequence[Dict], launches: Sequence[Tuple[float, int, str]]
     return best
 
 
+SHARE_WINDOW_S = 1.0
+
+
+def share(rises: Sequence[Dict], launches: Sequence[Tuple[float, int, str]],
+          delay: float, window: float = SHARE_WINDOW_S) -> Tuple[Dict, Dict[str, int]]:
+    """Split each credited ball among the robots of its alliance that were
+    launching around t - delay, by how many launches each had there.
+
+    `match` pairs one ball with one launch, and the tracker resolves far
+    fewer launches than balls: on the first 30 s of Einstein 1 the counters
+    credited 193 balls and ShotCounter followed 56 launches, so matching
+    explained 50. A launch is better read as "this robot was shooting then";
+    shared that way the same 30 s attributed 172 of 193 at a 1.0 s window
+    (142 at 0.6 s, 186 at 2.0 s -- wider buys coverage by blaming whoever
+    was nearby). Credits are fractional; round for display only.
+    """
+    credit: Dict[int, float] = defaultdict(float)
+    unmatched: Dict[str, int] = defaultdict(int)
+    for r in rises:
+        want = float(r["t"]) - delay
+        near = [robot for t, robot, a in launches
+                if a == r["alliance"] and abs(t - want) <= window]
+        if not near:
+            unmatched[r["alliance"]] += int(r["balls"])
+            continue
+        for robot in near:
+            credit[robot] += int(r["balls"]) / len(near)
+    return dict(credit), dict(unmatched)
+
+
 def by_team(credit: Dict[int, int], unmatched: Dict[str, int],
             teams: Dict[int, int], alliance_of: Dict[int, str]) -> Dict:
     """Robot numbers -> teams (TeamVotes / --teams). Robots with no team
     become "unnamed <alliance>", next to the balls nobody launched."""
-    out: Dict = defaultdict(int)
+    out: Dict = defaultdict(float)
     for robot, n in credit.items():
         team = teams.get(robot)
         out[team if team is not None else f"unnamed {alliance_of.get(robot, '?')}"] += n
@@ -105,15 +135,23 @@ def by_team(credit: Dict[int, int], unmatched: Dict[str, int],
 
 
 def attribute(rises: Sequence[Dict], events: Iterable[Dict], teams: Dict[int, int],
-              delay: Optional[float] = None, tolerance: float = TOLERANCE_S) -> Dict:
+              delay: Optional[float] = None, tolerance: float = TOLERANCE_S,
+              window: Optional[float] = SHARE_WINDOW_S) -> Dict:
+    """Per-team credit for one match. The delay is fitted by one-to-one
+    matching (it needs exact pairs); the credit is then shared over a
+    `window` (see `share`), or one-to-one when `window` is None."""
     launches = launches_from(events)
     if delay is None:
         delay = best_delay(rises, launches, tolerance=tolerance)
-    credit, unmatched = match(rises, launches, delay, tolerance)
+    if window is None:
+        credit, unmatched = match(rises, launches, delay, tolerance)
+    else:
+        credit, unmatched = share(rises, launches, delay, window)
     alliance_of = {r: a for _, r, a in launches}
     total = sum(int(r["balls"]) for r in rises)
     named = sum(n for r, n in credit.items() if teams.get(r) is not None)
     return {"delay_s": delay, "credited": total,
-            "matched": sum(credit.values()), "named": named,
-            "by_team": by_team(credit, unmatched, teams, alliance_of),
+            "attributed": round(sum(credit.values()), 3), "named": round(named, 3),
+            "by_team": {k: round(v, 2) for k, v in
+                        by_team(credit, unmatched, teams, alliance_of).items()},
             "by_robot": credit}

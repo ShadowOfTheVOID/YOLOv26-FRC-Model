@@ -5447,7 +5447,7 @@ def test_score_rises_matched_to_launches():
     rises = [{"t": 2.2, "alliance": "red", "balls": 1}, {"t": 3.2, "alliance": "red", "balls": 1},
              {"t": 4.2, "alliance": "red", "balls": 1}, {"t": 6.2, "alliance": "red", "balls": 1},
              {"t": 10.2, "alliance": "red", "balls": 1}]
-    got = A.attribute(rises, events, {1: 254, 2: 1678})
+    got = A.attribute(rises, events, {1: 254, 2: 1678}, window=None)
     check("the launch-to-credit delay is found from the data", got["delay_s"] == 1.2)
     check("each credited ball goes to the launch before it; no launch in reach "
           "stays unattributed; a blue launch never pays for a red rise",
@@ -5455,6 +5455,13 @@ def test_score_rises_matched_to_launches():
     two = A.match([{"t": 2.7, "alliance": "red", "balls": 2}], A.launches_from(events), 1.2)
     check("two balls in one rise take two launches, nearest first",
           two == ({1: 2}, {}))
+    # Shared: robots 1 and 2 both launching in the window split a 3-ball rise
+    # by launch count (2:1); a rise with nobody shooting near it is unattributed.
+    shared = A.share([{"t": 3.0, "alliance": "red", "balls": 3},
+                      {"t": 20.0, "alliance": "red", "balls": 2}],
+                     [(1.6, 1, "red"), (1.9, 1, "red"), (2.2, 2, "red"), (1.8, 3, "blue")], 1.0)
+    check("a rise is shared among the robots shooting before it, by launch count",
+          shared == ({1: 2.0, 2: 1.0}, {"red": 2}))
 
 
 def main() -> int:
