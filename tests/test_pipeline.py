@@ -5350,6 +5350,15 @@ def test_bumper_ocr_and_per_team_scoring():
     check("pooled reads name both fragments where neither alone was clear",
           f.assignments() == {1: 254, 5: 254})
 
+    check("a hand tally parses", B.parse_hand("frc254=12, 1678=8") == {254: 12, 1678: 8})
+    hc = B.against_hand({254: {"alliance": "red", "scored": 10},
+                         1678: {"alliance": "red", "scored": 9},
+                         "unnamed red": {"alliance": "red", "scored": 4}},
+                        {254: 12, 1678: 8, 971: 3})
+    check("the split is scored against the hand tally: |10-12| + |9-8| + |0-3| = 6 of 23",
+          hc["off"] == 6 and hc["unnamed"] == 4 and hc["off_pct"] == round(600 / 23, 1)
+          and [r["diff"] for r in hc["rows"]] == [-2, -3, 1])
+
     try:
         import cv2
         import numpy as np

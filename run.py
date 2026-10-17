@@ -519,6 +519,7 @@ def cmd_shots(args, cfg):
         teams = shooting.parse_teams(args.teams)
         roster = bumperocr.parse_roster(args.roster)
         hub_counts = bumperocr.parse_counts(args.hub_counts)
+        hand = bumperocr.parse_hand(args.hand)
     except ValueError as exc:
         raise SystemExit(str(exc))
     if args.ocr and not roster and args.match:
@@ -645,6 +646,19 @@ def cmd_shots(args, cfg):
             name = f"team {key}" if isinstance(key, int) else key
             print(f"  {row['alliance']:<4} {name:<18} {row['scored']:>3} scored  "
                   f"({row['seen_made']} make(s) seen)")
+    check = None
+    if hand:
+        if not scored:
+            print("\n--hand needs --hub-counts: the split is what it checks")
+        else:
+            check = bumperocr.against_hand(scored, hand)
+            print("\nsplit against the hand tally:")
+            for r in check["rows"]:
+                want = "-" if r["hand"] is None else r["hand"]
+                diff = "" if r["diff"] is None else f"{r['diff']:+d}"
+                print(f"  team {r['team']:<6} split {r['split']:>3}  hand {want:>3}  {diff}")
+            print(f"  unnamed {check['unnamed']}; {check['off']} ball(s) on the wrong "
+                  f"team or none ({check['off_pct']}% of the hand count)")
     if by_team:
         print("\nby team:")
         for team, row in sorted(by_team.items(),
@@ -663,6 +677,7 @@ def cmd_shots(args, cfg):
             "teams": {str(k): v for k, v in teams.items()},
             "hub_counts": hub_counts,
             "scored": {str(k): v for k, v in scored.items()},
+            "hand_check": check,
             "unattributed": counter.unattributed,
             "ignored": counter.ignored,
             "stitched": counter.stitched, "reacquired": counter.reacquired,
@@ -1329,6 +1344,10 @@ def main(argv=None):
                    help="the hub counter's final count per hub, e.g. "
                         "red=63,blue=40: split across teams by the makes "
                         "attributed to each")
+    p.add_argument("--hand", default="",
+                   help="each team's makes counted by hand, e.g. "
+                        "254=12,1678=8: checks the --hub-counts split "
+                        "(the practice-hub test)")
     p.add_argument("--out", type=Path, help="write the results as JSON")
     p.add_argument("--device", default="",
                    help="mps on a Mac, 0 for a GPU, cpu; default: cuda, then "

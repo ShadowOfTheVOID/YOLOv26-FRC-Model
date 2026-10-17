@@ -449,6 +449,40 @@ def parse_roster(text: str) -> Dict[str, List[int]]:
     return out
 
 
+def parse_hand(text: str) -> Dict[int, int]:
+    """'254=12,1678=8' -> {254: 12, 1678: 8}: balls each team scored, counted by hand."""
+    out: Dict[int, int] = {}
+    for part in filter(None, (p.strip() for p in (text or "").split(","))):
+        team, _, n = part.partition("=")
+        team = team.strip().lower().replace("frc", "")
+        if not team.isdigit() or not n.strip().isdigit():
+            raise ValueError(f"--hand: {part!r} should look like 254=12")
+        out[int(team)] = int(n)
+    return out
+
+
+def against_hand(scored: Dict, hand: Dict[int, int]) -> Dict:
+    """The per-team split checked against a hand tally, for the practice test.
+
+    Rows for every team in either; `unnamed` is what the split could not
+    place; `off` is the sum of |split - hand| over the hand-counted teams, the
+    number of balls that landed on the wrong team or nowhere. Written for the
+    practice-hub session, where a person tallies each robot's makes: nothing
+    else measures whether the split can be trusted.
+    """
+    rows = []
+    for team in sorted(set(hand) | {k for k in scored if isinstance(k, int)}):
+        got = scored.get(team, {}).get("scored", 0)
+        want = hand.get(team)
+        rows.append({"team": team, "split": got, "hand": want,
+                     "diff": None if want is None else got - want})
+    unnamed = sum(r["scored"] for k, r in scored.items() if not isinstance(k, int))
+    off = sum(abs(r["diff"]) for r in rows if r["diff"] is not None)
+    total = sum(hand.values())
+    return {"rows": rows, "unnamed": unnamed, "off": off,
+            "off_pct": round(100.0 * off / total, 1) if total else None}
+
+
 def parse_counts(text: str) -> Dict[str, int]:
     """'red=63,blue=40' -> {"red": 63, "blue": 40}."""
     out: Dict[str, int] = {}

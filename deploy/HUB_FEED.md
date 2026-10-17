@@ -405,6 +405,56 @@ caught 17 of 159 and 83 of 810, it read 37 / 106 at 2.5-3 s against the
 outline's 194 / 771 -- which is why it is off by default and set per hub
 only from this test.
 
+## Practice session: hub count AND who scored (one recording, two tests)
+
+The hub count has never been checked on a real hub, and the per-team split
+(`run.py shots --hub-counts`) has never been checked at all: its accuracy
+rests on bumper reading (77% of robot numbers right on 60 s of Einstein 1)
+and on ShotCounter's attribution. One practice session measures both.
+
+**Bring:** the counter laptop with its cameras, a phone or camera on a
+tripod with a view of the robots *and* the hub (the "field" camera -- 60 fps,
+as close as is safe; bumper numbers must be 15 px or more tall, which is
+roughly a robot filling a fifth of the frame width), two people with
+clickers or paper.
+
+1. Set up the hub cameras as for a match (steps 1-3 of the section above)
+   and press *Record* on the page.
+2. Start the field camera recording. Say the time out loud on both, or clap
+   in view of all cameras, so the recordings can be lined up.
+3. Run 3-5 minutes of shooting with two or three robots on one alliance.
+   Mix single shots, fast streams, misses and rim bounces.
+4. Person A counts every ball that goes into the hub. Person B tallies
+   makes **per robot** (team number -> count). If you can, do it from the
+   field video afterwards at half speed instead: a person at full speed
+   misses streams too, and the point is a count you can trust.
+5. Afterwards, from a checkout:
+
+   ```bash
+   # hub count against person A
+   python run.py hubcount red_cam.mp4 --setup cams.json --camera red-cam --hand red=37
+   # who scored: bumper reader + shot attribution, split of the hub count,
+   # checked against person B
+   python run.py shots --weights fuel_withBotbest.pt --source field.mp4 \
+       --hub-red X,Y,W,H --ocr --ocr-weights bumper_ocr.pt \
+       --roster "red=254,1678,971" --hub-counts red=37 \
+       --hand 254=14,1678=15,971=8 --annotate check.mp4 --out shots.json
+   ```
+
+   `--hub-counts` is person A's count (or the hub counter's, to test the
+   whole chain); `--hand` is person B's. The last line printed is the
+   number of balls the split put on the wrong team or nowhere, as a
+   percentage of the hand count. `--hub-red` is the hub's box in the field
+   video, in pixels.
+6. Watch `check.mp4` and note every robot number that carries the wrong
+   team: those are bumper-reading errors, and each crop of them is a
+   training example (`train/train_bumper_ocr.py`, labels in
+   `train/bumper/`).
+
+What to send back: both recordings, the two hand tallies, and the two
+command outputs. Until this has been run, per-team scores are a guess with
+a known 23% robot-naming error and an unmeasured attribution error.
+
 ## Blur correction and still-yellow removal (per camera)
 
 Two settings per camera, both off by default:
