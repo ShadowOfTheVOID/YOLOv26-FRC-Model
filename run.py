@@ -514,10 +514,25 @@ def cmd_shots(args, cfg):
         if hubs:
             print(f"hub geometry from the database for {args.event}: "
                   + ", ".join(f"{a}={list(map(int, b))}" for a, b in hubs.items()))
+    from tbavid import bumperocr
     try:
         teams = shooting.parse_teams(args.teams)
+        roster = bumperocr.parse_roster(args.roster)
+        hub_counts = bumperocr.parse_counts(args.hub_counts)
     except ValueError as exc:
         raise SystemExit(str(exc))
+    if args.ocr and not roster and args.match:
+        # The six on the field, from the roster `db sync` stored for the match.
+        con = dbmod.connect()
+        for alliance, team in con.execute(
+                "SELECT alliance, team FROM match_teams WHERE match_key=? "
+                "ORDER BY station", (args.match,)):
+            roster.setdefault(alliance, []).append(int(team))
+        con.close()
+    if args.ocr and not roster:
+        raise SystemExit("--ocr needs the six teams: --roster red=254,1678,971;"
+                         "blue=118,148,2056, or --match with a synced match key")
+    votes = bumperocr.TeamVotes(roster) if args.ocr else None
 
     source = int(args.source) if str(args.source).isdigit() else args.source
     fps = args.fps or _source_fps(source)
@@ -551,10 +566,10 @@ def cmd_shots(args, cfg):
         state["flash"] = (e["t"], f"{label(e['robot'])}: {text}")
 
     def on_frame(frame, t, result, robots, balls, counter):
-        if not args.annotate:
-            return
         img = getattr(result, "orig_img", None)
-        if img is None:
+        if votes is not None and img is not None:
+            votes.observe(img, robots, t)
+        if not args.annotate or img is None:
             return
         import cv2
         if state["writer"] is None:
@@ -612,7 +627,20 @@ def cmd_shots(args, cfg):
     if result.get("robots_recovered"):
         print(f"  {result['robots_recovered']} robot(s) kept their number "
               f"after the tracker lost them")
+    if votes is not None:
+        print("\n" + "\n".join(votes.report()))
+        # Typed --teams win: a person who watched the video beats a vote.
+        teams = {**votes.assignments(), **teams}
     by_team = counter.by_team(teams) if teams else {}
+    scored = {}
+    if hub_counts:
+        scored = bumperocr.apportion(hub_counts, counter.per_robot, teams,
+                                     counter.unattributed)
+        print("\nhub counter's balls, split by who was seen shooting them:")
+        for key, row in sorted(scored.items(), key=lambda kv: (kv[1]["alliance"], -kv[1]["scored"])):
+            name = f"team {key}" if isinstance(key, int) else key
+            print(f"  {row['alliance']:<4} {name:<18} {row['scored']:>3} scored  "
+                  f"({row['seen_made']} make(s) seen)")
     if by_team:
         print("\nby team:")
         for team, row in sorted(by_team.items(),
@@ -628,6 +656,9 @@ def cmd_shots(args, cfg):
             "per_robot": {str(k): v for k, v in counter.per_robot.items()},
             "by_team": {str(k): v for k, v in by_team.items()},
             "hub_totals": counter.hub_totals(),
+            "teams": {str(k): v for k, v in teams.items()},
+            "hub_counts": hub_counts,
+            "scored": {str(k): v for k, v in scored.items()},
             "unattributed": counter.unattributed,
             "ignored": counter.ignored,
             "stitched": counter.stitched, "reacquired": counter.reacquired,
@@ -1274,6 +1305,21 @@ def main(argv=None):
                    help="write a video with robot ids, balls, hubs and each "
                         "outcome drawn on -- for assigning teams and for "
                         "checking shots by eye")
+    p.add_argument("--ocr", action="store_true",
+                   help="name robots by reading their bumpers against the "
+                        "six teams on the field (tbavid/bumperocr.py). Needs "
+                        "numerals >= 14 px tall: a hub-side camera, not a "
+                        "broadcast. --teams still overrides it")
+    p.add_argument("--roster", default="",
+                   help="the six teams for --ocr, e.g. "
+                        "'red=254,1678,971;blue=118,148,2056'")
+    p.add_argument("--match", default="",
+                   help="synced match key (2026nhdur_qm7): the --ocr roster "
+                        "from the database")
+    p.add_argument("--hub-counts", dest="hub_counts", default="",
+                   help="the hub counter's final count per hub, e.g. "
+                        "red=63,blue=40: split across teams by the makes "
+                        "attributed to each")
     p.add_argument("--out", type=Path, help="write the results as JSON")
     p.add_argument("--device", default="",
                    help="mps on a Mac, 0 for a GPU, cpu; default: cuda, then "

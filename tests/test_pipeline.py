@@ -5275,6 +5275,93 @@ def test_cvload_survives_a_refusing_loader():
           and "recursion" in cvload.error and not hasattr(sys, "OpenCV_LOADER"))
 
 
+def test_bumper_ocr_and_per_team_scoring():
+    """Bumper numbers voted into teams; the hub counter's count split by team.
+
+    The vote and the split are pure and always run. The image half needs
+    OpenCV, which CI does not install, so it runs where cv2 is present. It is
+    on rendered bumpers: it fixes the rules (the right one of six look-alike
+    candidates, abstain below MIN_DIGIT_PX), not the accuracy on real robots.
+    """
+    from tbavid import bumperocr as B
+
+    check("roster parses", B.parse_roster("red=254,frc1678,971; blue=118")
+          == {"red": [254, 1678, 971], "blue": [118]})
+    check("hub counts parse", B.parse_counts("red=63,blue=40") == {"red": 63, "blue": 40})
+    for bad in ("green=1", "red=x"):
+        try:
+            B.parse_roster(bad) if "green" in bad else B.parse_counts(bad)
+            check(f"{bad!r} refused", False)
+        except ValueError:
+            check(f"{bad!r} refused", True)
+    check("an OCR reading supports its own number most",
+          B.digit_similarity("1678", 1678) == 1.0
+          and B.digit_similarity("1671", 1678) > B.digit_similarity("254", 1678)
+          and B.digit_similarity("", 1678) == 0.0)
+
+    # Votes: robot 1 reads 254 clearly, robot 2 is 1678 but came back as robot 4
+    # (RobotNumbers missed the re-id), robot 3 never shows a readable bumper.
+    script = {1: {254: 1.0}, 2: {1678: 0.9, 971: 0.1}, 4: {1678: 0.8}, 3: {}}
+    v = B.TeamVotes({"red": [254, 1678, 971]}, sample_s=0.5,
+                    scorer=lambda crop, alliance, teams: script[crop],
+                    cropper=lambda img, box: box[0])       # the "crop" is the robot
+    for i in range(6):
+        v.observe(None, {n: ("red", (n, 0, 1, 1)) for n in script}, i * 0.25)
+    named = v.assignments()
+    check("each robot sampled every 0.5 s, not every frame", v.samples == 3 * len(script))
+    check("clear votes are named, a split robot keeps its team, silence stays unnamed",
+          named == {1: 254, 2: 1678, 4: 1678})
+    weak = B.TeamVotes({"red": [254, 1678]}, scorer=lambda c, a, t: {254: 0.5, 1678: 0.45},
+                       cropper=lambda img, box: None)
+    weak.observe(None, {1: ("red", (0, 0, 1, 1))}, 0.0)
+    weak.observe(None, {1: ("red", (0, 0, 1, 1))}, 1.0)
+    weak.observe(None, {1: ("red", (0, 0, 1, 1))}, 2.0)
+    check("a close vote names nobody: a wrong team is worse than none",
+          weak.assignments() == {})
+
+    per_robot = {1: {"alliance": "red", "made": 6}, 2: {"alliance": "red", "made": 3},
+                 4: {"alliance": "red", "made": 1}, 3: {"alliance": "red", "made": 2},
+                 7: {"alliance": "blue", "made": 5}}
+    out = B.apportion({"red": 63, "blue": 40}, per_robot, named, {"red": 3})
+    check("every hub's shares sum to the hub counter's count",
+          sum(r["scored"] for r in out.values() if r["alliance"] == "red") == 63
+          and sum(r["scored"] for r in out.values() if r["alliance"] == "blue") == 40)
+    check("shares follow the makes seen: 254 6 of 15, 1678 4 of 15 (two numbers)",
+          out[254]["scored"] == round(63 * 6 / 15) and out[1678]["scored"] == round(63 * 4 / 15))
+    check("unnamed robots and unseen shooters keep their share, per hub",
+          out["unnamed red"]["seen_made"] == 5 and out["unnamed blue"]["scored"] == 40)
+    check("a hub nobody was seen scoring in stays unnamed",
+          B.apportion({"red": 5}, {}, {}) == {"unnamed red": {"alliance": "red", "scored": 5,
+                                                               "seen_made": 0}})
+
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        print("  (no OpenCV: rendered-bumper checks skipped)")
+        return
+
+    def robot(team, digit, blur=1.0):
+        img = np.full((200, 260, 3), 60, np.uint8)
+        y0 = 200 - digit - 24
+        cv2.rectangle(img, (0, y0), (260, 200), (30, 30, 200), -1)
+        (tw, th), _ = cv2.getTextSize(str(team), cv2.FONT_HERSHEY_DUPLEX, digit / 22, 5)
+        cv2.putText(img, str(team), ((260 - tw) // 2, y0 + 12 + th),
+                    cv2.FONT_HERSHEY_DUPLEX, digit / 22, (255, 255, 255), 5, cv2.LINE_AA)
+        return cv2.GaussianBlur(img, (0, 0), blur)
+
+    six = [254, 1678, 1671, 245, 971, 8]
+    right = 0
+    for team in six:
+        s = B.score_crop(robot(team, 24), "red", six, use_tesseract=False)
+        right += bool(s) and max(s, key=s.get) == team
+    check("rendered bumpers pick the right one of six look-alikes", right == 6)
+    check("numerals under MIN_DIGIT_PX give no evidence, not a guess",
+          B.score_crop(robot(1671, 12), "red", six, use_tesseract=False) == {})
+    check("the wrong alliance colour finds no bumper",
+          B.score_crop(robot(254, 24), "blue", six, use_tesseract=False) == {})
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5300,7 +5387,8 @@ def main() -> int:
                test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
-               test_counter_keeps_going_on_match_day):
+               test_counter_keeps_going_on_match_day,
+               test_bumper_ocr_and_per_team_scoring):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

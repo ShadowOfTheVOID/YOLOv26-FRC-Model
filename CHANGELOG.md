@@ -9,6 +9,17 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Per-team scoring from the hub counter, with bumper OCR.** `run.py shots
+  --ocr` names robots by reading their bumpers, scoring each crop against
+  only the six teams on the field (`--roster`, or `--match` from the synced
+  database) and voting per robot over the match; a close vote names nobody.
+  `--hub-counts red=63,blue=40` takes the hub counter's totals as the score
+  and splits each hub across teams by the makes ShotCounter attributed to
+  them, unnamed and unseen shooters keeping their own share. Numerals must be
+  >= 14 px tall (rendered look-alikes: 15 px right 6/6, 11 px wrong 2/6), so
+  this is for a hub-side camera, not a broadcast (~5 px). Tested on rendered
+  bumpers only; check `--annotate` by eye, and `--teams` still overrides.
+
 ## v0.5.8 — 2026-10-10
 
 - **Fixed: the Watchtower app on a Mac could not open any camera.** Find
