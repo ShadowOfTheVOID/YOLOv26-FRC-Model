@@ -5430,6 +5430,33 @@ def test_bumper_ocr_and_per_team_scoring():
 
 
 
+def test_score_rises_matched_to_launches():
+    """Scoreboard rises given to the launches one delay before them.
+
+    The broadcast counter says when a ball was credited; launches say who.
+    Fixed: the delay is found from the data (1.2 s here), each launch is used
+    once, a rise with nobody launching in reach stays unattributed, and a
+    blue launch never pays for a red rise.
+    """
+    from tbavid import scoreattrib as A
+    events = ([{"robot": 1, "alliance": "red", "launched": t, "outcome": "missed"}
+               for t in (1.0, 2.0, 3.0)]
+              + [{"robot": 2, "alliance": "red", "launched": 5.0, "outcome": "missed"},
+                 {"robot": 3, "alliance": "blue", "launched": 9.0, "outcome": "made"},
+                 {"robot": None, "alliance": None, "t": 4.0, "outcome": "made"}])
+    rises = [{"t": 2.2, "alliance": "red", "balls": 1}, {"t": 3.2, "alliance": "red", "balls": 1},
+             {"t": 4.2, "alliance": "red", "balls": 1}, {"t": 6.2, "alliance": "red", "balls": 1},
+             {"t": 10.2, "alliance": "red", "balls": 1}]
+    got = A.attribute(rises, events, {1: 254, 2: 1678})
+    check("the launch-to-credit delay is found from the data", got["delay_s"] == 1.2)
+    check("each credited ball goes to the launch before it; no launch in reach "
+          "stays unattributed; a blue launch never pays for a red rise",
+          got["by_team"] == {254: 3, 1678: 1, "no launch seen (red)": 1})
+    two = A.match([{"t": 2.7, "alliance": "red", "balls": 2}], A.launches_from(events), 1.2)
+    check("two balls in one rise take two launches, nearest first",
+          two == ({1: 2}, {}))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5456,7 +5483,8 @@ def main() -> int:
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day,
-               test_bumper_ocr_and_per_team_scoring):
+               test_bumper_ocr_and_per_team_scoring,
+               test_score_rises_matched_to_launches):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
