@@ -16,10 +16,19 @@ the build rather than publishing an empty release.
   `--hub-counts red=63,blue=40` takes the hub counter's totals as the score
   and splits each hub across teams by the makes ShotCounter attributed to
   them, unnamed and unseen shooters keeping their own share. Numerals must be
-  >= 14 px tall. Tested on Einstein 8 (1080p, numerals 15-70 px): of 25
-  held-out robot crops it named, 15 of 23 checkable were right (65%); over
-  a 30 s clip the tracker split 6 robots into ~59 numbers and no robot was
-  named. Plumbing works; the reading does not yet -- keep using `--teams`.
+  read by `--ocr-weights bumper_ocr.pt`: a small CNN+GRU (tbavid/bumpernet.py)
+  that reads the whole number strip and scores each roster team by how
+  likely the strip reads as it, trained on synthetic digits plus hand-read
+  Einstein 4/5/8 crops (`train/train_bumper_ocr.py`, labels in
+  `train/bumper/`). Held out on Einstein 1: 83% of robot crops right on the
+  56% it is sure of (template matching: 56% overall). Fragments of one robot
+  are pooled before voting (`LINK_S` 3 s). On 60 s of Einstein 1, end to
+  end: 41 of 75 robot numbers named, 23 of 30 checkable right (77%); 2910's
+  condensed font was never read (its fragments went to 868/2046), and a
+  crowd false-positive was named. Without weights `--ocr` falls back to
+  template matching. Not good enough to trust unchecked: confirm names
+  with `--annotate` or keep `--teams`. Weights are not in git; attach
+  `bumper_ocr.pt` to the release by hand.
 
 ## v0.5.8 — 2026-10-10
 

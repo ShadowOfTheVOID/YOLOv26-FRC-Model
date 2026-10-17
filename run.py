@@ -532,7 +532,11 @@ def cmd_shots(args, cfg):
     if args.ocr and not roster:
         raise SystemExit("--ocr needs the six teams: --roster red=254,1678,971;"
                          "blue=118,148,2056, or --match with a synced match key")
-    votes = bumperocr.TeamVotes(roster) if args.ocr else None
+    scorer = None
+    if args.ocr and args.ocr_weights:
+        from tbavid import bumpernet
+        scorer = bumpernet.Reader(str(args.ocr_weights)).score
+    votes = bumperocr.TeamVotes(roster, scorer=scorer) if args.ocr else None
 
     source = int(args.source) if str(args.source).isdigit() else args.source
     fps = args.fps or _source_fps(source)
@@ -1310,6 +1314,11 @@ def main(argv=None):
                         "six teams on the field (tbavid/bumperocr.py). Needs "
                         "numerals >= 14 px tall: a hub-side camera, not a "
                         "broadcast. --teams still overrides it")
+    p.add_argument("--ocr-weights", dest="ocr_weights", type=Path,
+                   help="bumper reader weights (train/train_bumper_ocr.py; "
+                        "bumper_ocr.pt). Without it --ocr uses template "
+                        "matching, which is much weaker (56%% vs 83%% on a "
+                        "held-out match)")
     p.add_argument("--roster", default="",
                    help="the six teams for --ocr, e.g. "
                         "'red=254,1678,971;blue=118,148,2056'")

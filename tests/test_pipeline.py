@@ -5334,6 +5334,22 @@ def test_bumper_ocr_and_per_team_scoring():
           B.apportion({"red": 5}, {}, {}) == {"unnamed red": {"alliance": "red", "scored": 5,
                                                                "seen_made": 0}})
 
+    # Fragments: robot 1 vanishes at t=2, robot 5 appears beside it at t=3,
+    # each totalling 0.8 for 254 -- under MIN_VOTE alone, clear together. Robot 9 is
+    # on screen with robot 1, so it is another robot and is never joined to it.
+    reads = {1: {254: 0.16}, 5: {254: 0.16}, 9: {1678: 0.04}}   # x5 reads: 0.8 each
+    f = B.TeamVotes({"red": [254, 1678, 971]}, sample_s=0.5,
+                    scorer=lambda crop, alliance, teams: reads[crop],
+                    cropper=lambda img, box: box[3])      # box height carries the id
+    for i in range(5):
+        f.observe(None, {1: ("red", (100, 0, 100, 1)), 9: ("red", (900, 0, 100, 9))}, i * 0.5)
+    for i in range(5):
+        f.observe(None, {5: ("red", (150, 0, 100, 5)), 9: ("red", (900, 0, 100, 9))}, 3.0 + i * 0.5)
+    check("one robot's fragments are linked; two robots on screen at once are not",
+          [sorted(c) for c in f.chains()] in ([[1, 5], [9]], [[9], [1, 5]]))
+    check("pooled reads name both fragments where neither alone was clear",
+          f.assignments() == {1: 254, 5: 254})
+
     try:
         import cv2
         import numpy as np
@@ -5360,6 +5376,27 @@ def test_bumper_ocr_and_per_team_scoring():
           B.score_crop(robot(1671, 12), "red", six, use_tesseract=False) == {})
     check("the wrong alliance colour finds no bumper",
           B.score_crop(robot(254, 24), "blue", six, use_tesseract=False) == {})
+
+    try:
+        import tempfile
+        import torch
+        from tbavid import bumpernet as N
+    except ImportError:
+        print("  (no torch: bumper reader plumbing skipped)")
+        return
+    strips = N.regions(robot(1678, 24), "red")
+    check("the reader finds the number strip on a bumper", len(strips) >= 1
+          and strips[0].shape == (N.H, N.W))
+    net = N.build()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = str(Path(tmp) / "r.pt")
+        torch.save(net.state_dict(), path)
+        reader = N.Reader(path, min_margin=0.0)
+        nll = reader.nll(robot(1678, 24), "red", six)
+        check("an untrained reader still answers per candidate, and the scorer "
+              "names at most one team", nll is not None and len(nll) == len(six)
+              and len(reader.score(robot(1678, 24), "red", six)) <= 1)
+
 
 
 def main() -> int:

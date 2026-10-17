@@ -62,6 +62,13 @@ BUMPER_PART = 0.55
 MIN_VOTE = 1.5
 MIN_MARGIN = 0.25
 SAMPLE_S = 0.5                   # per robot; OCR every frame buys nothing
+# Fragments of one robot, linked for voting: a number that first appears
+# within LINK_S of another of its alliance vanishing, and within LINK_WIDTHS
+# robot widths of where that one was last seen. On a 30 s Einstein 8 clip
+# the tracker made ~59 robot numbers of 6 robots (RobotNumbers' own re-id is
+# 1 s), so a vote per number had a few reads each and none was clear.
+LINK_S = 3.0
+LINK_WIDTHS = 2.5
 
 _FONTS = None
 
@@ -285,37 +292,87 @@ class TeamVotes:
         self.alliance: Dict[int, str] = {}
         self.last: Dict[int, float] = {}
         self.samples = 0
+        # every sighting, sampled or not: (first t, first box, last t, last box)
+        self.span: Dict[int, List] = {}
+        self.sides: Dict[int, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     def observe(self, img: np.ndarray, robots: Dict[int, Tuple[str, Box]], t: float) -> None:
         for num, (alliance, box) in robots.items():
-            if alliance not in self.roster or t - self.last.get(num, -1e9) < self.sample_s:
+            if alliance not in self.roster:
+                continue
+            sp = self.span.setdefault(num, [t, box, t, box])
+            sp[2], sp[3] = t, box
+            # The detector's colour call flips on a frame now and then (a blue
+            # 1323 came back as robot_red on Einstein 8); the majority holds.
+            self.sides[num][alliance] += 1
+            self.alliance[num] = max(self.sides[num], key=self.sides[num].get)
+            if t - self.last.get(num, -1e9) < self.sample_s:
                 continue
             self.last[num] = t
-            self.alliance[num] = alliance
+            alliance = self.alliance[num]
             self.samples += 1
             for team, s in self.scorer(self.cropper(img, box), alliance,
                                        self.roster[alliance]).items():
                 self.votes[num][team] += s
 
-    def assignments(self) -> Dict[int, int]:
-        """Robot number -> team, only where the vote is clear.
+    def chains(self) -> List[List[int]]:
+        """Robot numbers grouped into one robot each (see LINK_S).
 
-        Several robot numbers may get the same team: RobotNumbers misses some
-        re-identifications, and a robot that came back under a new number is
-        still that team. Within one pass of best_assignment no team repeats, so
-        robots are assigned in rounds until no clear vote is left.
+        Greedy in order of appearance: each new number joins the nearest chain
+        of its alliance whose last sighting ended within LINK_S before it began
+        and within LINK_WIDTHS widths. A chain still on screen cannot take it --
+        two numbers seen at once are two robots.
+        """
+        def centre(b):
+            return b[0] + b[2] / 2, b[1] + b[3] / 2
+        chains: List[List[int]] = []
+        for num in sorted(self.span, key=lambda n: self.span[n][0]):
+            t0, box0 = self.span[num][0], self.span[num][1]
+            best, best_d = None, None
+            for ch in chains:
+                tail = self.span[ch[-1]]
+                if self.alliance.get(ch[-1]) != self.alliance.get(num):
+                    continue
+                if not (0 <= t0 - tail[2] <= LINK_S):
+                    continue
+                (ax, ay), (bx, by) = centre(tail[3]), centre(box0)
+                d = ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
+                if d <= LINK_WIDTHS * max(tail[3][2], box0[2], 1) and (best_d is None or d < best_d):
+                    best, best_d = ch, d
+            if best is None:
+                chains.append([num])
+            else:
+                best.append(num)
+        return chains
+
+    def assignments(self) -> Dict[int, int]:
+        """Robot number -> team, only where the pooled vote is clear.
+
+        Votes are summed over each chain of fragments, decided per chain, and
+        the team given to every number in it. Within one pass of
+        best_assignment no team repeats, so chains are assigned in rounds:
+        a robot the linking failed to join up is still allowed its team.
         """
         out: Dict[int, int] = {}
+        pooled: Dict[int, Dict[int, float]] = {}
+        members: Dict[int, List[int]] = {}
+        for i, ch in enumerate(self.chains()):
+            v: Dict[int, float] = defaultdict(float)
+            for n in ch:
+                for team, s in self.votes.get(n, {}).items():
+                    v[team] += s
+            pooled[i], members[i] = dict(v), ch
         for alliance, teams in self.roster.items():
-            left = {n: dict(v) for n, v in self.votes.items()
-                    if self.alliance.get(n) == alliance and self._clear(v)}
+            left = {i: v for i, v in pooled.items()
+                    if self.alliance.get(members[i][0]) == alliance and self._clear(v)}
             while left:
-                got = {n: t for n, t in best_assignment(left, teams).items() if t}
+                got = {i: t for i, t in best_assignment(left, teams).items() if t}
                 if not got:
                     break
-                out.update(got)
-                for n in got:
-                    del left[n]
+                for i, t in got.items():
+                    for n in members[i]:
+                        out[n] = t
+                    del left[i]
         return out
 
     def _clear(self, v: Dict[int, float]) -> bool:
