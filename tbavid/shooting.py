@@ -899,6 +899,10 @@ def run_shots(model, source, hubs: Optional[Dict[str, Box]] = None,
             "robots_recovered": numbering.recovered}
 
 
+HUB_DOWN = 0.5        # outline width, added below a drawn outline (the funnel)
+HUB_SIDE_PAD = 0.1    # outline width, added to each side
+
+
 def hubs_from_setup(setup_path: str, camera: str = "", source: str = ""
                     ) -> Tuple[Dict[str, Box], str, str]:
     """Hub boxes from the outlines drawn on the hub counter page.
@@ -906,8 +910,8 @@ def hubs_from_setup(setup_path: str, camera: str = "", source: str = ""
     Typing --hub-red X,Y,W,H means reading pixel positions off a frame, which
     nobody at a practice field should have to do. The hub counter page
     already has each hub drawn with the mouse and saved in cams.json; a hub's
-    box is the bounding box of everything drawn for it on one camera
-    (outlines and exit lines). The camera is the one named, else the one
+    box is the bounding box of its outline on one camera, grown down over
+    the funnel (HUB_DOWN). The camera is the one named, else the one
     whose source is `source`, else the only one. Returns (hubs, camera name,
     camera source).
     """
@@ -934,7 +938,9 @@ def hubs_from_setup(setup_path: str, camera: str = "", source: str = ""
         pick = cams[0]
     pts: Dict[str, List] = {}
     for z in pick.get("zones") or []:
-        drawn = z.get("outline") or z.get("line") or []
+        # Outlines only: an exit line sits below the hub, at the chute, and
+        # would stretch the box over balls rolling out of it.
+        drawn = z.get("outline") or []
         if isinstance(drawn, str):
             nums = [float(v) for v in drawn.replace(";", ",").split(",") if v.strip()]
             drawn = list(zip(nums[::2], nums[1::2]))
@@ -943,7 +949,16 @@ def hubs_from_setup(setup_path: str, camera: str = "", source: str = ""
     for hub, ps in pts.items():
         if hub in ("red", "blue") and ps:
             xs, ys = [p[0] for p in ps], [p[1] for p in ps]
-            hubs[hub] = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+            w, h = max(xs) - min(xs), max(ys) - min(ys)
+            # The page asks for the outline around the hood's opening, a strip
+            # above the hub; ShotCounter counts a make where a ball's track
+            # ENDS, and on Einstein 1 the tracks end in the funnel below it.
+            # Of the track ends near each hub in its first 60 s, 18 (red) and
+            # 23 (blue) were inside the outline's box; 97/101 within 0.4 of
+            # its width below, 98/101 at 0.5, 103/101 at 0.75 -- the funnel
+            # ends there. With the strip alone, 93 shots were 0 made.
+            hubs[hub] = (min(xs) - HUB_SIDE_PAD * w, min(ys),
+                         w * (1 + 2 * HUB_SIDE_PAD), h + HUB_DOWN * w)
     if not hubs:
         raise ValueError(f"camera {pick.get('name')!r} has no hub drawn yet: "
                          f"draw the Red / Blue outline in step 2 and Save")

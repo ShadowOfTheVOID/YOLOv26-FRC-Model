@@ -5361,8 +5361,9 @@ def test_bumper_ocr_and_per_team_scoring():
                       {"hub": "red", "line": [[300, 320], [400, 330]], "out": [350, 400]},
                       {"hub": "blue", "outline": "40,60,200,60,200,160"}]}]}))
         hubs, cam, src = S.hubs_from_setup(str(path))
-        check("hubs come from the outlines drawn on the page, no pixel numbers typed",
-              hubs == {"red": (100.0, 80.0, 420.0, 250.0), "blue": (40.0, 60.0, 160.0, 100.0)}
+        check("hubs come from the outlines drawn on the page, grown down over the funnel; "
+              "an exit line does not stretch them",
+              hubs == {"red": (58.0, 80.0, 504.0, 430.0), "blue": (24.0, 60.0, 192.0, 180.0)}
               and cam == "field" and src.endswith("practice.mp4"))
         path.write_text(_json.dumps({"cameras": [{"name": "field", "source": "x.mp4"}]}))
         try:
