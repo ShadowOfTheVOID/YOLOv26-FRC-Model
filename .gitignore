@@ -21,6 +21,7 @@ dist/
 *.tar.xz
 *.zip
 *.pt
+*.pth
 # YOLOE text encoder, downloaded beside the script on first use (242 MB)
 *.ts
 logs/

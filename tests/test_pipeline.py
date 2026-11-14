@@ -5275,6 +5275,57 @@ def test_cvload_survives_a_refusing_loader():
           and "recursion" in cvload.error and not hasattr(sys, "OpenCV_LOADER"))
 
 
+def test_bumper_snap_and_rfdetr_view():
+    """Bumper reads are snapped to the alliance, never trusted as read.
+
+    Moondream read "32 69" for 3268 at 14 px numerals and "131" off a bumper
+    whose first digit was hidden (experiments/bumper_moondream.py). The first
+    must snap; a two-digit read must not; two equally close teams must not;
+    and one frame never names a track on its own.
+    """
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "bumper_moondream", root / "experiments" / "bumper_moondream.py")
+    B = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(B)   # must load without torch: imports are lazy
+    blue = ["3268", "5687", "7407"]
+    check("bumper: '32 68' is 3268", B.snap("32 68", blue) == "3268")
+    check("bumper: one digit off snaps to the only close team", B.snap("32 69", blue) == "3268")
+    check("bumper: two digits never snap", B.snap("32", blue) is None)
+    check("bumper: unreadable is None", B.snap("unreadable", blue) is None)
+    check("bumper: a number off the alliance is None", B.snap("131", ["360", "254", "1678"]) is None)
+    check("bumper: two teams one edit away is None", B.snap("1234", ["1233", "1235", "9"]) is None)
+    check("bumper: one read does not name a track", B.vote(["3268", None, None]) is None)
+    check("bumper: agreeing reads do", B.vote(["3268", "3268", None, "5687"]) == "3268")
+    check("bumper: a split vote does not", B.vote(["3268", "3268", "5687", "5687"]) is None)
+
+    sys.path.insert(0, str(root / "train"))
+    import train_rfdetr as R
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        for kind in ("images", "labels"):
+            for split in ("train", "val"):
+                (d / "ds" / kind / split).mkdir(parents=True)
+        (d / "ds" / "labels" / "train" / "a.txt").write_text("1 0.5 0.5 0.1 0.1\n")
+        (d / "ds" / "dataset.yaml").write_text(
+            "path: .\ntrain: images/train\nval: images/val\nnames:\n  0: robot_blue\n  1: robot_red\n")
+        names = R.rfdetr_view(d / "ds" / "dataset.yaml", d / "view")
+        check("rfdetr view: class names come from the yaml", names == ["robot_blue", "robot_red"])
+        check("rfdetr view: labels are linked, not copied",
+              (d / "view" / "train" / "labels").is_symlink()
+              and (d / "view" / "train" / "labels" / "a.txt").read_text().startswith("1 "))
+        check("rfdetr view: val becomes valid", (d / "view" / "valid" / "images").is_symlink())
+        R.rfdetr_view(d / "ds" / "dataset.yaml", d / "view")   # a re-run replaces the links
+        check("rfdetr view: data.yaml written", "names: [robot_blue, robot_red]"
+              in (d / "view" / "data.yaml").read_text())
+    try:
+        R.check_resolution("small", 1000)
+        check("rfdetr: imgsz 1000 refused for small", False)
+    except SystemExit:
+        check("rfdetr: imgsz 1000 refused for small", True)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5300,7 +5351,7 @@ def main() -> int:
                test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
-               test_counter_keeps_going_on_match_day):
+               test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

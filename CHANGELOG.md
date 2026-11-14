@@ -9,6 +9,21 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Experiment: reading team numbers off bumpers** (`experiments/bumper_moondream.py`,
+  not wired into run.py). Moondream2 (Apache-2.0) is asked for the number on
+  each robot crop, and the answer is only accepted when it names one of the
+  three teams on that bumper colour's alliance and several frames agree. That
+  guard is needed: on one public field photo, shrunk to broadcast size,
+  three red digits read right down to 7 px numerals, but four blue digits
+  became "32 69" at 14 px, and a half-hidden bumper was read as a confident
+  "131". FRC numerals on a 1080p wide shot are about 10 px, right at the
+  edge. Not yet tried on broadcast frames.
+- **`train/train_rfdetr.py`**: trains RF-DETR (Apache-2.0, no NMS) on a
+  dataset prepared for YOLO26, through a symlinked view in RF-DETR's layout,
+  for a bake-off against YOLO26. Checked end to end on CPU with a 4-image
+  set; no real training run yet, so whether it beats YOLO26 on small fuel is
+  unknown.
+
 ## v0.5.8 — 2026-10-10
 
 - **Fixed: the Watchtower app on a Mac could not open any camera.** Find
