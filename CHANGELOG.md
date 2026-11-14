@@ -53,8 +53,23 @@ the build rather than publishing an empty release.
   release: painting out an unknown robot also removed the label of a
   labelled robot overlapping it.
 - The Colab notebook gained section 4b (SAM 3: compare, then optionally
-  relabel and train both models on the result, zipped to Drive). SAM 3
-  needs transformers 5 and RF-DETR needs 4; each cell installs its own.
+  relabel and train both models on the result, zipped to Drive).
+- **Moved to RF-DETR 1.12** (from 1.5). It runs on transformers 5 like SAM 3
+  and Moondream 2, so the notebook installs one set of versions instead of
+  swapping between cells; Moondream 2 read the same bumpers on 5 as on 4
+  (360, "32 68"). What 1.12 changed, each found by running it:
+  - it refuses a dataset whose split folder is a link leading outside it, so
+    the RF-DETR view is now real folders of per-file links, kept beside the
+    dataset. Kept under runs/ as before, it would also have failed in Colab,
+    where runs/ is in Google Drive and Drive cannot hold links;
+  - checkpoints moved to Lightning (`last.ckpt` to resume) and record their
+    classes differently; `load_rfdetr` reads both formats;
+  - at low thresholds it returns its no-object slot as `__background__`,
+    which our code had turned into a class named "2" (42 of 300 boxes on the
+    smoke model); those are now dropped, so the bumper reader never asks
+    Moondream to read a bumper on nothing;
+  - speed is timed with its optimised predictor, as YOLO's is.
+  YOLO26 is still Ultralytics' newest model (8.4.213); nothing newer to move to.
 - `experiments/bumper_moondream.py --moondream 3.1` uses Moondream 3.1
   through its Photon engine (Moondream Model License: building a product on
   it is allowed; offering Moondream itself as a hosted service is not).

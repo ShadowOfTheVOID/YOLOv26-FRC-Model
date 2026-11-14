@@ -166,14 +166,22 @@ def rfdetr_predictor(weights: Path, size: str = ""):
     (train_rfdetr.load_rfdetr) -- see there for the 1-based class_names trap."""
     from train_rfdetr import load_rfdetr
     m, names = load_rfdetr(weights, size)
-    if hasattr(m, "optimize_for_inference"):
+    # Time the model as it would be deployed, or RF-DETR's ms/image is unfairly
+    # high next to YOLO's: 1.12 has a separate optimised predictor (and warns
+    # that plain predict() is not optimised); 1.5 optimises in place.
+    if hasattr(m, "inference"):
+        m = m.inference()
+    elif hasattr(m, "optimize_for_inference"):
         m.optimize_for_inference()
+
+    from train_rfdetr import detection_names
 
     def run(path: Path) -> List[Pred]:
         from PIL import Image
         d = m.predict(Image.open(path).convert("RGB"), threshold=0.001)
-        return [(tuple(map(float, b)), float(s), names[int(c)] if int(c) < len(names) else str(int(c)))
-                for b, s, c in zip(d.xyxy, d.confidence, d.class_id)]
+        named = detection_names(d.class_id, names, (d.data or {}).get("class_name"))
+        return [(tuple(map(float, b)), float(s), n)
+                for b, s, n in zip(d.xyxy, d.confidence, named) if n]
     return run
 
 

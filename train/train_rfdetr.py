@@ -18,15 +18,22 @@ RF-DETR's YOLO reader wants:
 
     data.yaml   train/{images,labels}/   valid/{images,labels}/
 
-`rfdetr_view()` builds the second as symlinks to the first, so nothing is
-copied and the labels stay the single source of truth.
+`rfdetr_view()` builds the second beside the dataset (`<dataset>-rfdetr/`)
+as real folders holding one link per file, so nothing is copied and the
+labels stay the single source of truth. Two things ruled out simpler views:
+
+  * linking whole folders: RF-DETR 1.12 resolves each split folder and
+    refuses one that lands outside the dataset root ("YOLO split directory
+    resolves outside the dataset root"); a folder of file links stays inside.
+  * putting the view under runs/: the Colab notebook keeps runs/ in Google
+    Drive, which cannot store links at all.
 
 Resolution must be a multiple of patch_size * num_windows (32 for nano,
 small, medium). The default 960 matches train.py's, chosen there because fuel
 is ~17x12 px; RF-DETR's memory grows faster with resolution than YOLO's, so
 lower --batch before lowering --imgsz.
 
-    .venv-train/bin/pip install rfdetr
+    .venv-train/bin/pip install "rfdetr[train]>=1.12"   # 1.5 also works
     .venv-train/bin/python train/train_rfdetr.py --data dataset-scout/dataset.yaml \
         --size small --epochs 50
 """
@@ -34,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -45,9 +53,16 @@ SIZES = ("nano", "small", "medium", "base", "large")
 SPLITS = {"train": "train", "val": "valid"}  # ours -> RF-DETR's
 
 
+def view_dir(data_yaml: Path) -> Path:
+    """Where the RF-DETR view of a dataset goes: beside it, on the same disk."""
+    src = Path(data_yaml).resolve().parent
+    return src.parent / (src.name + "-rfdetr")
+
+
 def rfdetr_view(data_yaml: Path, out: Path) -> list:
-    """Symlink our images/<split>, labels/<split> into RF-DETR's layout under
-    `out`, write its data.yaml, and return the class names."""
+    """Link every file of our images/<split>, labels/<split> into RF-DETR's
+    layout under `out` (real folders, one link per file), write its
+    data.yaml, and return the class names. Re-running refreshes the links."""
     src = Path(data_yaml).resolve().parent
     names = yaml_names(Path(data_yaml).read_text())
     if not names:
@@ -58,11 +73,15 @@ def rfdetr_view(data_yaml: Path, out: Path) -> list:
             target = src / kind / ours
             if not target.is_dir():
                 raise SystemExit(f"{target} is missing -- run prepare_dataset.py first")
-            link = out / theirs / kind
-            link.parent.mkdir(exist_ok=True)
-            if link.is_symlink() or link.exists():
-                link.unlink()
-            link.symlink_to(target, target_is_directory=True)
+            folder = out / theirs / kind
+            if folder.is_symlink():          # a view from an older version
+                folder.unlink()
+            if folder.exists():
+                shutil.rmtree(folder)
+            folder.mkdir(parents=True)
+            for f in target.iterdir():
+                if f.is_file():
+                    (folder / f.name).symlink_to(f.resolve())
     (out / "data.yaml").write_text(
         "train: train/images\nval: valid/images\n"
         f"nc: {len(names)}\nnames: [{', '.join(names)}]\n")
@@ -79,6 +98,16 @@ def size_from_pretrain(name: str) -> str:
     return "base"
 
 
+def checkpoint_names(ckpt: dict) -> list:
+    """Class names, 0-based, from either checkpoint format: RF-DETR 1.5 keeps
+    an argparse Namespace under "args", 1.12 (Lightning) a dict."""
+    args = ckpt.get("args")
+    names = args.get("class_names") if isinstance(args, dict) else getattr(args, "class_names", None)
+    if not names:
+        raise SystemExit("checkpoint records no class names -- was it trained by train_rfdetr.py?")
+    return list(names)
+
+
 def load_rfdetr(weights, size: str = ""):
     """A trained RF-DETR plus its class names, 0-based like our label files.
 
@@ -88,15 +117,44 @@ def load_rfdetr(weights, size: str = ""):
     one with the other shifted every class by one: on the smoke-test model a
     red robot came out as robot_blue, which the bumper reader would then have
     matched against the wrong alliance. And the size and resolution must match
-    training, so both are read from the checkpoint rather than passed in.
+    training, so they come from the checkpoint rather than being passed in:
+    1.12 has RFDETR.from_checkpoint for that; 1.5 records the pretrained
+    weights' name and the resolution in its args.
     """
     import torch
     import rfdetr
-    args = torch.load(str(weights), map_location="cpu", weights_only=False)["args"]
-    size = size or size_from_pretrain(getattr(args, "pretrain_weights", ""))
+    ckpt = torch.load(str(weights), map_location="cpu", weights_only=False)
+    names = checkpoint_names(ckpt)
+    if hasattr(rfdetr, "RFDETR") and hasattr(rfdetr.RFDETR, "from_checkpoint") and not size:
+        return rfdetr.RFDETR.from_checkpoint(str(weights), trust_checkpoint=True), names
+    args = ckpt["args"]
+    get = args.get if isinstance(args, dict) else (lambda k, d=None: getattr(args, k, d))
+    mc = ckpt.get("model_config") or {}
+    size = size or size_from_pretrain(get("pretrain_weights", "") or mc.get("pretrain_weights", ""))
+    resolution = int(get("resolution", 0) or mc.get("resolution", 0) or 560)
     cls = getattr(rfdetr, "RFDETR" + size.capitalize())
-    model = cls(pretrain_weights=str(weights), resolution=int(args.resolution))
-    return model, list(args.class_names)
+    return cls(pretrain_weights=str(weights), resolution=resolution), names
+
+
+def detection_names(class_ids, names: list, library_names=None) -> list:
+    """A class name per RF-DETR detection, or None for one to drop.
+
+    RF-DETR 1.12 names its detections itself (detections.data["class_name"])
+    and, at low thresholds, returns the head's extra no-object slot as
+    "__background__" -- on the smoke-test model, id 2 of a 2-class head, 42 of
+    300 boxes at threshold 0.01. Indexed as a class it would have become a
+    class called "2", and the bumper reader would have asked Moondream to read
+    a bumper on nothing. 1.5 has no names in the data; its ids are 0-based
+    into the checkpoint's list, and an id past the end is the same slot.
+    """
+    out = []
+    for i, c in enumerate(class_ids):
+        if library_names is not None and len(library_names) > i:
+            n = str(library_names[i])
+            out.append(None if n.startswith("__") else n)
+        else:
+            out.append(names[int(c)] if 0 <= int(c) < len(names) else None)
+    return out
 
 
 def check_resolution(size: str, imgsz: int) -> None:
@@ -122,7 +180,7 @@ def main() -> None:
     args = ap.parse_args()
 
     check_resolution(args.size, args.imgsz)
-    view = ROOT / "runs" / args.name / "dataset"
+    view = view_dir(args.data)
     names = rfdetr_view(args.data, view)
     print(f"RF-DETR {args.size} @ {args.imgsz}: classes {names}; dataset view {view}")
 

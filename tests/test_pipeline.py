@@ -5313,12 +5313,24 @@ def test_bumper_snap_and_rfdetr_view():
         names = R.rfdetr_view(d / "ds" / "dataset.yaml", d / "view")
         check("rfdetr view: class names come from the yaml", names == ["robot_blue", "robot_red"])
         check("rfdetr view: labels are linked, not copied",
-              (d / "view" / "train" / "labels").is_symlink()
+              (d / "view" / "train" / "labels" / "a.txt").is_symlink()
               and (d / "view" / "train" / "labels" / "a.txt").read_text().startswith("1 "))
-        check("rfdetr view: val becomes valid", (d / "view" / "valid" / "images").is_symlink())
+        check("rfdetr view: split folders are real, inside the view (RF-DETR 1.12 refuses "
+              "a split folder that resolves outside the dataset root)",
+              not (d / "view" / "train" / "labels").is_symlink()
+              and (d / "view" / "train" / "labels").resolve().parent.parent == (d / "view").resolve())
+        check("rfdetr view: val becomes valid", (d / "view" / "valid" / "images").is_dir())
+        check("rfdetr view: beside the dataset, not under runs/ (Drive cannot hold links)",
+              R.view_dir(d / "ds" / "dataset.yaml") == (d / "ds-rfdetr").resolve())
         R.rfdetr_view(d / "ds" / "dataset.yaml", d / "view")   # a re-run replaces the links
         check("rfdetr view: data.yaml written", "names: [robot_blue, robot_red]"
               in (d / "view" / "data.yaml").read_text())
+    check("rfdetr: 1.12's own names win, background is dropped",
+          R.detection_names([1, 2], ["robot_blue", "robot_red"], ["robot_red", "__background__"]) == ["robot_red", None])
+    check("rfdetr: 1.5 ids are 0-based into the checkpoint's list; past the end is dropped",
+          R.detection_names([0, 1, 2], ["robot_blue", "robot_red"]) == ["robot_blue", "robot_red", None])
+    check("rfdetr: names from a 1.12 (dict) checkpoint",
+          R.checkpoint_names({"args": {"class_names": ["a", "b"]}}) == ["a", "b"])
     try:
         R.check_resolution("small", 1000)
         check("rfdetr: imgsz 1000 refused for small", False)

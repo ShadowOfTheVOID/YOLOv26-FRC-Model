@@ -168,14 +168,14 @@ def detector(weights: Path):
     if weights.suffix == ".pth":
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
-        from train_rfdetr import load_rfdetr   # 0-based names; see the 1-based trap there
+        from train_rfdetr import detection_names, load_rfdetr   # see the class-id traps there
         m, names = load_rfdetr(weights)
 
         def run(frame):
             d = m.predict(frame, threshold=0.4)
-            return [(int(x0), int(y0), int(x1), int(y1),
-                     names[int(c)] if int(c) < len(names) else str(int(c)))
-                    for (x0, y0, x1, y1), c in zip(d.xyxy, d.class_id)]
+            named = detection_names(d.class_id, names, (d.data or {}).get("class_name"))
+            return [(int(x0), int(y0), int(x1), int(y1), n)
+                    for (x0, y0, x1, y1), n in zip(d.xyxy, named) if n]
         return run
     from ultralytics import YOLO
     m = YOLO(str(weights))

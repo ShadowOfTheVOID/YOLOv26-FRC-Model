@@ -46,8 +46,8 @@ train.py / train_rfdetr.py:
     python train/autolabel_sam3.py --data dataset-scout/dataset.yaml --out dataset-sam3
 
 Needs transformers >= 5 and access to the gated facebook/sam3 weights
-(request it on Hugging Face; set HF_TOKEN). RF-DETR needs transformers < 5:
-run this in its own step and reinstall afterwards (the Colab notebook does).
+(request it on Hugging Face; set HF_TOKEN). RF-DETR 1.12+ and Moondream 2
+run on the same transformers 5, so one environment holds all three.
 SAM 3 is Meta's SAM License, not Apache: fine for producing training labels;
 the models that ship are YOLO26 / RF-DETR, not SAM 3.
 """
