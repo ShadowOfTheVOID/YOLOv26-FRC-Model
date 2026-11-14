@@ -37,6 +37,24 @@ the build rather than publishing an empty release.
   one. The bumper reader would have labelled a red robot `robot_blue` and
   matched it against the wrong alliance. Both scripts now take the 0-based
   list from the checkpoint (`train_rfdetr.load_rfdetr`).
+- **`train/autolabel_sam3.py`**: labels fuel and robots with SAM 3 text
+  prompts ("yellow ball", "robot") into a new dataset beside the old one,
+  which is never modified. The prompt is configurable for next season's game
+  piece. Robots go through `autolabel_robots.py`'s measured rules (box
+  screening, alliance from the bumper band, painting out unknown alliance,
+  the minimum-robots gate). Hub labels are copied from the hand-recorded
+  ones. Frames are tiled because SAM 3 squashes input to 1008x1008, which
+  would shrink fuel in our 1920x504 strips to about 9 px. A fuel box over 4x
+  the frame's median box is a pile SAM 3 returned as one object, so that
+  frame is left out. `--compare N` draws current vs SAM 3 labels to look at
+  first. Not run with the real weights (they are gated): checked with a
+  stand-in model for the dataset logic, and with a small random-weight SAM 3
+  for every transformers call. That second run found a bug, fixed before
+  release: painting out an unknown robot also removed the label of a
+  labelled robot overlapping it.
+- The Colab notebook gained section 4b (SAM 3: compare, then optionally
+  relabel and train both models on the result, zipped to Drive). SAM 3
+  needs transformers 5 and RF-DETR needs 4; each cell installs its own.
 - `experiments/bumper_moondream.py --moondream 3.1` uses Moondream 3.1
   through its Photon engine (Moondream Model License: building a product on
   it is allowed; offering Moondream itself as a hosted service is not).

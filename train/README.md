@@ -241,6 +241,11 @@ compared directly. Checkpoints go to Drive and a re-run resumes. Do the
 `DRY_RUN` on a T4 first. The notebook also runs the Moondream 2 vs 3.1 bumper
 test (`experiments/bumper_moondream.py`); 3.1 needs an L4 or A100.
 
+Its section 4b runs `autolabel_sam3.py`: SAM 3 text prompts instead of the
+colour heuristic, into a new dataset. Run `--compare` first and look: it is
+not measured on our frames yet. Remember that a model trained and scored on
+SAM 3's labels is measured against SAM 3, not against reality.
+
 ## Detection is not the answer to your actual question
 
 "How many balls went in from a specific bot" is three problems, and YOLO is

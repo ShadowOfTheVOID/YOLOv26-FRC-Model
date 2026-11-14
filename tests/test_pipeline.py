@@ -5361,6 +5361,50 @@ def test_detector_comparison_metric():
           and R.size_from_pretrain("rf-detr-base.pth") == "base")
 
 
+def test_sam3_autolabel_rules():
+    """autolabel_sam3.py's own rules; the robot rules are autolabel_robots'.
+
+    Tiles must cover a 1920x504 strip exactly (SAM 3 squashes its input to a
+    square, so whole strips would shrink fuel to ~9 px); a box cut by an inner
+    tile edge is dropped because the overlapping tile sees it whole; a fuel box
+    far over the median is a pile and keeps its frame out; hub lines come from
+    the hand-recorded source labels, never from SAM 3.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import autolabel_sam3 as S3
+    W, H = 1920, 504
+    ts = S3.tiles(W, H, 480)
+    covered = np.zeros((H, W), bool)
+    for x1, y1, x2, y2 in ts:
+        covered[y1:y2, x1:x2] = True
+    check("sam3: fuel tiles are 480 squares", all(x2 - x1 == 480 and y2 - y1 == 480 for x1, y1, x2, y2 in ts))
+    check("sam3: fuel tiles cover the whole strip", covered.all())
+    check("sam3: robot tiles shrink to the strip's height", all(y2 - y1 == 504 for _, y1, _, y2 in S3.tiles(W, H, 1008)))
+    check("sam3: a frame smaller than a tile is one tile", S3.tiles(300, 200, 480) == [(0, 0, 200, 200), (100, 0, 300, 200)])
+    t = (480, 0, 960, 480)
+    check("sam3: a box inside its tile is kept", S3.interior((600, 100, 640, 140), t, W, H))
+    check("sam3: a box cut by an inner tile edge is dropped", not S3.interior((470, 100, 520, 140), t, W, H))
+    check("sam3: a box on the image's own edge is kept", S3.interior((0, 0, 30, 30), (0, 0, 480, 480), W, H))
+    fuel = [(0, 0, 17, 12, .9)] * 5 + [(100, 100, 160, 140, .8)]
+    check("sam3: a pile 12x the median ball is a clump", S3.clumps(fuel) == [5])
+    check("sam3: no clump test on three balls", S3.clumps(fuel[:2] + fuel[5:]) == [])
+    names = ["fuel", "robot_blue", "robot_red", "hub_blue", "hub_red"]
+    src = "0 0.1 0.1 0.01 0.01\n3 0.5 0.5 0.2 0.4\n1 0.3 0.3 0.1 0.1\n4 0.8 0.5 0.2 0.4\n"
+    check("sam3: only hub lines carry over", S3.hub_lines(src, names) == ["3 0.5 0.5 0.2 0.4", "4 0.8 0.5 0.2 0.4"])
+    check("sam3: no hubs in a three-class set", S3.hub_lines(src, names[:3]) == [])
+    check("sam3: boxes are clamped to the frame", S3.yolo_line(0, (-10, -10, 10, 10), 100, 100) == "0 0.050000 0.050000 0.100000 0.100000")
+    robots = [("robot_blue", None), ("robot_red", None)]
+    check("sam3: a pile keeps the frame out", "pile" in S3.frame_verdict(1, robots, 0, 2, True))
+    check("sam3: too few robots keeps it out", "min-robots" in S3.frame_verdict(0, robots[:1], 0, 2, True))
+    check("sam3: unknown-alliance robots count, as they are painted out", S3.frame_verdict(0, robots[:1], 1, 2, True) == "")
+    check("sam3: fuel-only set has no robot gate", S3.frame_verdict(0, [], 0, 2, False) == "")
+    unknown = [(0, 0, 100, 100, .9)]
+    got = S3.assemble(["0 0.05 0.05 0.01 0.01", "0 0.9 0.9 0.01 0.01"], ["2 0.06 0.06 0.05 0.05"], unknown, 1000, 1000)
+    check("sam3: fuel inside a painted robot goes, fuel outside stays",
+          "0 0.05 0.05 0.01 0.01" not in got and "0 0.9 0.9 0.01 0.01" in got)
+    check("sam3: a labelled robot overlapping a painted one keeps its box", "2 0.06 0.06 0.05 0.05" in got)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5387,7 +5431,7 @@ def main() -> int:
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
-               test_detector_comparison_metric):
+               test_detector_comparison_metric, test_sam3_autolabel_rules):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

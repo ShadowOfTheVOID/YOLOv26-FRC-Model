@@ -106,6 +106,12 @@ more thresholds.
 
 ## Training on the AMD Developer Cloud MI300X
 
+**No longer available to the user (2026-11-14).** Training now runs on Colab
+Pro (200 compute units/month; L4 default): `train/colab_bakeoff.ipynb`, which
+also holds the RF-DETR bake-off, SAM 3 labelling (`train/autolabel_sam3.py`,
+gated weights, HF_TOKEN in Colab Secrets) and the Moondream bumper test. The
+notes below stay for the record.
+
 Full walkthrough: `deploy/AMD_DEVCLOUD.md`. What bit on the first real run:
 
 - On the PyTorch 1-Click image torch lives in a Docker container named `rocm`.
