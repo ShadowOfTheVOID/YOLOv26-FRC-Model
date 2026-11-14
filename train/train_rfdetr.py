@@ -69,6 +69,36 @@ def rfdetr_view(data_yaml: Path, out: Path) -> list:
     return names
 
 
+def size_from_pretrain(name: str) -> str:
+    """'rf-detr-nano.pth' -> 'nano'; the checkpoint records which pretrained
+    weights it started from, and that is the only place its size is written."""
+    stem = Path(str(name)).name.lower()
+    for size in SIZES:
+        if f"-{size}" in stem:
+            return size
+    return "base"
+
+
+def load_rfdetr(weights, size: str = ""):
+    """A trained RF-DETR plus its class names, 0-based like our label files.
+
+    Two traps this exists for. RF-DETR's `model.class_names` property returns
+    {1: first, 2: second, ...} -- 1-based, a COCO habit -- while a model
+    trained from YOLO labels predicts class_id 0 for the first class. Indexing
+    one with the other shifted every class by one: on the smoke-test model a
+    red robot came out as robot_blue, which the bumper reader would then have
+    matched against the wrong alliance. And the size and resolution must match
+    training, so both are read from the checkpoint rather than passed in.
+    """
+    import torch
+    import rfdetr
+    args = torch.load(str(weights), map_location="cpu", weights_only=False)["args"]
+    size = size or size_from_pretrain(getattr(args, "pretrain_weights", ""))
+    cls = getattr(rfdetr, "RFDETR" + size.capitalize())
+    model = cls(pretrain_weights=str(weights), resolution=int(args.resolution))
+    return model, list(args.class_names)
+
+
 def check_resolution(size: str, imgsz: int) -> None:
     step = 56 if size in ("base", "large") else 32  # patch 14 x 4 / patch 16 x 2
     if imgsz % step:

@@ -57,6 +57,12 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 MODEL = "vikhyatk/moondream2"
 REVISION = "5d6c926f44e26b07957b0dd315bbedcb4c17a5fe"  # Apache-2.0; pinned: remote code runs
+# Moondream 3.1 (9B MoE, 2B active; Moondream Model License 1.0 -- products
+# built on it are allowed, offering general-purpose Moondream as a hosted
+# service is not). It runs only through Moondream's Photon engine (`pip install
+# moondream`): NVIDIA Ampere or newer, or Apple Silicon -- not a Colab T4, not
+# AMD, not a CPU. Untested on bumpers until someone runs --scale-test with it.
+MODEL_31 = "moondream3.1-9B-A2B"
 QUESTION = ("What is the team number printed on this robot's bumper? Reply with only "
             "the digits. If you cannot read it, reply unreadable.")
 
@@ -112,7 +118,11 @@ def vote(snapped: Iterable[Optional[str]], min_votes: int = 2,
     return team if n >= min_votes and n / len(named) >= min_share else None
 
 
-def load_model():
+def load_model(version: str = "2"):
+    """Moondream "2" (transformers, runs anywhere) or "3.1" (Photon)."""
+    if version == "3.1":
+        import moondream
+        return moondream.vl(local=True, model=MODEL_31)
     import torch
     from transformers import AutoModelForCausalLM
     dev = "cuda" if torch.cuda.is_available() else (
@@ -127,13 +137,15 @@ def ask(model, crop) -> str:
     return model.query(crop, QUESTION)["answer"].strip()
 
 
-def scale_test(image: Path, boxes: List[str], heights: Sequence[int], ref: int) -> None:
+def scale_test(image: Path, boxes: List[str], heights: Sequence[int], ref: int,
+               version: str = "2") -> None:
     """Re-run the size table above on any photo: each --box x0,y0,x1,y1=TRUTH
     (empty truth = honestly unreadable) is shrunk so its numerals are H px."""
     from PIL import Image
     src = Image.open(image).convert("RGB")
-    model = load_model()
-    print(f"{'truth':>8} {'H px':>4}  {'answer':30} verdict")
+    model = load_model(version)
+    print(f"moondream {version}")
+    print(f"{'truth':>8} {'H px':>4}  {'answer':30} verdict  seconds")
     for spec in boxes:
         coords, _, truth = spec.partition("=")
         box = tuple(int(v) for v in coords.split(","))
@@ -144,25 +156,26 @@ def scale_test(image: Path, boxes: List[str], heights: Sequence[int], ref: int) 
             buf = io.BytesIO()
             c.save(buf, "JPEG", quality=70)
             c = Image.open(buf).convert("RGB")
+            t0 = time.time()
             a = ask(model, c)
             ok = digits(a) == truth if truth else not digits(a)
-            print(f"{truth or '-':>8} {h:>4}  {a[:30]!r:30} {'OK' if ok else 'WRONG'}", flush=True)
+            print(f"{truth or '-':>8} {h:>4}  {a[:30]!r:30} {'OK   ' if ok else 'WRONG'}  "
+                  f"{time.time() - t0:.1f}", flush=True)
 
 
 def detector(weights: Path):
     """frame (RGB numpy) -> [(x0, y0, x1, y1, class_name)] for robots."""
     if weights.suffix == ".pth":
-        import rfdetr
-        m = rfdetr.RFDETRSmall(pretrain_weights=str(weights))
-        names = getattr(m, "class_names", None) or {}
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+        from train_rfdetr import load_rfdetr   # 0-based names; see the 1-based trap there
+        m, names = load_rfdetr(weights)
 
         def run(frame):
             d = m.predict(frame, threshold=0.4)
-            out = []
-            for (x0, y0, x1, y1), c in zip(d.xyxy, d.class_id):
-                n = names[int(c)] if isinstance(names, (list, tuple)) else names.get(int(c), str(c))
-                out.append((int(x0), int(y0), int(x1), int(y1), n))
-            return out
+            return [(int(x0), int(y0), int(x1), int(y1),
+                     names[int(c)] if int(c) < len(names) else str(int(c)))
+                    for (x0, y0, x1, y1), c in zip(d.xyxy, d.class_id)]
         return run
     from ultralytics import YOLO
     m = YOLO(str(weights))
@@ -174,12 +187,12 @@ def detector(weights: Path):
 
 
 def video_reads(video: Path, weights: Path, red: List[str], blue: List[str],
-                every: float, out: Path) -> None:
+                every: float, out: Path, version: str = "2") -> None:
     """One Moondream read per robot box every `every` seconds, snapped to its
     alliance by the detector's colour class. Writes a CSV to check by eye."""
     import cv2
     from PIL import Image
-    find, model = detector(weights), load_model()
+    find, model = detector(weights), load_model(version)
     cap = cv2.VideoCapture(str(video))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     step, i = max(1, round(fps * every)), 0
@@ -217,13 +230,15 @@ def main() -> None:
     ap.add_argument("--blue", default="")
     ap.add_argument("--every", type=float, default=1.0, help="seconds between reads")
     ap.add_argument("--out", type=Path, default=Path("bumper_reads.csv"))
+    ap.add_argument("--moondream", choices=("2", "3.1"), default="2",
+                    help="3.1 needs `pip install moondream` and an Ampere+ GPU or Apple Silicon")
     args = ap.parse_args()
     if args.scale_test:
         scale_test(args.scale_test, args.box, [int(h) for h in args.heights.split(",")],
-                   args.ref_height)
+                   args.ref_height, args.moondream)
     elif args.video and args.weights:
         video_reads(args.video, args.weights, [t for t in args.red.split(",") if t],
-                    [t for t in args.blue.split(",") if t], args.every, args.out)
+                    [t for t in args.blue.split(",") if t], args.every, args.out, args.moondream)
     else:
         ap.error("give --scale-test, or --video with --weights")
 

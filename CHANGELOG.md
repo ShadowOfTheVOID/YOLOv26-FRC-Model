@@ -23,6 +23,23 @@ the build rather than publishing an empty release.
   for a bake-off against YOLO26. Checked end to end on CPU with a 4-image
   set; no real training run yet, so whether it beats YOLO26 on small fuel is
   unknown.
+- **`train/colab_bakeoff.ipynb`**: trains YOLO26 and RF-DETR on the same
+  data in Colab, then compares them, and runs the Moondream 2 vs 3.1 bumper
+  test. Checkpoints are kept in Drive and resume after a disconnect. Its
+  dataset, training, resume and compare cells were run locally on CPU with a
+  stand-in Drive folder; the Colab-only cells and Moondream 3.1 (which needs
+  an Ampere or newer GPU) have not been run.
+- **`train/compare_detectors.py`**: scores both models with one AP50, plus
+  AP50 on boxes under 24 px (the fuel column), recall and precision at the
+  working threshold, and ms per image, on the same validation images.
+- Fixed before release: RF-DETR reports class names 1-based while a model
+  trained on our labels predicts 0-based ids, which shifted every class by
+  one. The bumper reader would have labelled a red robot `robot_blue` and
+  matched it against the wrong alliance. Both scripts now take the 0-based
+  list from the checkpoint (`train_rfdetr.load_rfdetr`).
+- `experiments/bumper_moondream.py --moondream 3.1` uses Moondream 3.1
+  through its Photon engine (Moondream Model License: building a product on
+  it is allowed; offering Moondream itself as a hosted service is not).
 
 ## v0.5.8 — 2026-10-10
 

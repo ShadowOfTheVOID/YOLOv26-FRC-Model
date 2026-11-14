@@ -229,6 +229,18 @@ validation numbers only measure agreement with these pseudo-labels. A
 fuel-only model comes from
 `subset_classes.py --src dataset_relabel --classes fuel`.
 
+## RF-DETR against YOLO26, on Colab
+
+Without the MI300X, the comparison runs on Colab (an L4 is enough; Colab Pro's
+200 units a month cover both models). `train/colab_bakeoff.ipynb` does it in
+one place: dataset zip from Drive, YOLO26 via `train.py` and RF-DETR via
+`train_rfdetr.py` on the same data at the same size, then
+`compare_detectors.py`, which scores both with one AP on the same val images.
+Each trainer's own mAP is computed differently, so their logs cannot be
+compared directly. Checkpoints go to Drive and a re-run resumes. Do the
+`DRY_RUN` on a T4 first. The notebook also runs the Moondream 2 vs 3.1 bumper
+test (`experiments/bumper_moondream.py`); 3.1 needs an L4 or A100.
+
 ## Detection is not the answer to your actual question
 
 "How many balls went in from a specific bot" is three problems, and YOLO is

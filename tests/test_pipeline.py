@@ -5326,6 +5326,41 @@ def test_bumper_snap_and_rfdetr_view():
         check("rfdetr: imgsz 1000 refused for small", True)
 
 
+def test_detector_comparison_metric():
+    """compare_detectors.py scores YOLO26 and RF-DETR with one AP; it must be right.
+
+    Hand-checked cases: a perfect detector is AP 1; a false box scored above
+    the true one halves it; a box matched once cannot be matched twice; small
+    truths are scored separately (fuel is ~17x12 px). And RF-DETR's size is read
+    from the pretrained-weights name its checkpoint records.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import compare_detectors as C
+    import train_rfdetr as R
+    a = (0.0, 0.0, 10.0, 10.0)
+    check("compare: iou of a box with itself is 1", abs(C.iou(a, a) - 1) < 1e-9)
+    check("compare: half-overlapping boxes", abs(C.iou(a, (5.0, 0.0, 15.0, 10.0)) - 1 / 3) < 1e-9)
+    check("compare: perfect detector AP 1", C.average_precision([(0.9, True), (0.8, True)], 2) == 1.0)
+    check("compare: a higher-scored false box halves AP",
+          abs(C.average_precision([(0.9, False), (0.8, True)], 1) - 0.5) < 1e-9)
+    check("compare: missing truths cap AP at recall",
+          abs(C.average_precision([(0.9, True)], 2) - 0.5) < 1e-9)
+    m = C.match([(a, 0.9), (a, 0.8)], [a])
+    check("compare: one truth matches one prediction", [hit for _, _, hit, _ in m] == [True, False])
+    big, tiny = (0.0, 0.0, 100.0, 100.0), (200.0, 200.0, 217.0, 212.0)
+    per = [([(big, 0.9, "robot_red"), (tiny, 0.8, "fuel"), ((300.0, 300.0, 310.0, 310.0), 0.7, "fuel")],
+            [(big, "robot_red"), (tiny, "fuel")])]
+    st = C.evaluate(per, ["robot_red", "fuel"], conf=0.5)
+    check("compare: robot found", st["robot_red"]["AP50"] == 1.0 and st["robot_red"]["recall"] == 1.0)
+    check("compare: fuel truth counted as small", st["fuel"]["small"] == 1 and st["robot_red"]["small"] == 0)
+    check("compare: small false box lowers precision, not recall",
+          st["fuel"]["recall"] == 1.0 and abs(st["fuel"]["precision"] - 0.5) < 1e-9)
+    check("rfdetr: size from the pretrained weights' name",
+          R.size_from_pretrain("rf-detr-nano.pth") == "nano"
+          and R.size_from_pretrain("/x/rf-detr-small.pth") == "small"
+          and R.size_from_pretrain("rf-detr-base.pth") == "base")
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5351,7 +5386,8 @@ def main() -> int:
                test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
-               test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view):
+               test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
+               test_detector_comparison_metric):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
