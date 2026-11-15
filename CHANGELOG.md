@@ -54,6 +54,20 @@ the build rather than publishing an empty release.
   labelled robot overlapping it.
 - The Colab notebook gained section 4b (SAM 3: compare, then optionally
   relabel and train both models on the result, zipped to Drive).
+- **The notebook rebuilds the dataset from the Einstein videos** (now its
+  default, `SOURCE = "einstein"`), because the original images are gone.
+  It runs `relabel_video.py` with the settings in `train/README.md` and the
+  two models that built the original set, downloaded from the v0.3.0
+  release and checked against the checksums recorded here. The result is
+  saved to Drive as `dataset-relabel.zip`, so it is built once. It first
+  lists which of e1/e4/e5/e8.mp4 it found and flags any video that is not
+  1920x1080, since the split-screen and scoreboard settings assume that.
+  It needs at least one training and one validation video. The 2026nhdur
+  part of the original set is not rebuilt; it needs the Mac's harvest.
+  Checked with stand-in clips: building, reuse from Drive, training on the
+  result. An empty rebuild (e.g. a start time past the end of the video)
+  now stops with the reason instead of training on nothing, and is never
+  saved to Drive for reuse.
 - **Moved to RF-DETR 1.12** (from 1.5). It runs on transformers 5 like SAM 3
   and Moondream 2, so the notebook installs one set of versions instead of
   swapping between cells; Moondream 2 read the same bumpers on 5 as on 4
