@@ -68,6 +68,16 @@ the build rather than publishing an empty release.
   result. An empty rebuild (e.g. a start time past the end of the video)
   now stops with the reason instead of training on nothing, and is never
   saved to Drive for reuse.
+- **`train/unpaint_relabel.py`: SAM 3 is judged on frames without the
+  grey paint.** The rebuilt dataset paints grey over yellow its detector
+  could not box. Those are exactly the hard balls (piles, hoppers, in
+  flight) SAM 3 is being tried for, so on painted images the comparison
+  was rigged towards the old labels. The script re-cuts every image from
+  its video (the name holds the frame and tile; relabel_report.json the
+  split-screen rows and scoreboard masks, which stay greyed). The notebook
+  runs it before SAM 3 when `SOURCE = "einstein"`. Checked on stand-in
+  clips: pixels outside the paint match the labelled images to JPEG noise
+  (mean difference 1.2 levels), so the boxes still fit.
 - **Moved to RF-DETR 1.12** (from 1.5). It runs on transformers 5 like SAM 3
   and Moondream 2, so the notebook installs one set of versions instead of
   swapping between cells; Moondream 2 read the same bumpers on 5 as on 4

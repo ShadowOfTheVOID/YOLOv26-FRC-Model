@@ -5417,6 +5417,30 @@ def test_sam3_autolabel_rules():
     check("sam3: a labelled robot overlapping a painted one keeps its box", "2 0.06 0.06 0.05 0.05" in got)
 
 
+def test_unpaint_relabel_names_and_cut():
+    """unpaint_relabel.py re-cuts relabel_video.py's frames without its grey paint.
+
+    SAM 3 is being tried on exactly the balls the paint covers, so judging it on
+    painted frames rigs the comparison. The name says which frame and tile; the
+    report says the rows and scoreboard masks, which must stay greyed.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import unpaint_relabel as U
+    check("unpaint: whole frame name", U.parse_name("e4_007373.jpg") == ("e4", 7373, None))
+    check("unpaint: tile name", U.parse_name("e4_007373t1280-13.jpg") == ("e4", 7373, (1280, 13)))
+    check("unpaint: stems may hold underscores", U.parse_name("2026cmptx_f1m4_000060.jpg") == ("2026cmptx_f1m4", 60, None))
+    check("unpaint: other names are not guessed at", U.parse_name("frame.jpg") is None)
+    rows, masks = U.settings({"settings": {"rows": "0:700", "mask": ["440,0,1480,165"]}})
+    check("unpaint: settings from the report", rows == (0, 700) and masks == [(440, 0, 1480, 165)])
+    frame = np.full((1080, 1920, 3), 200, np.uint8)
+    out = U.cut(frame, rows, masks, None, None)
+    check("unpaint: rows cut, mask greyed with 118", out.shape == (700, 1920, 3)
+          and (out[10, 500] == 118).all() and (out[400, 500] == 200).all())
+    tile = U.cut(frame, rows, masks, (1280, 13), (640, 687))
+    check("unpaint: tile cut from the row-cut frame", tile.shape == (687, 640, 3))
+    check("unpaint: the source frame is not changed", (frame[10, 500] == 200).all())
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5443,7 +5467,8 @@ def main() -> int:
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
-               test_detector_comparison_metric, test_sam3_autolabel_rules):
+               test_detector_comparison_metric, test_sam3_autolabel_rules,
+               test_unpaint_relabel_names_and_cut):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
