@@ -198,15 +198,28 @@ def run_model(predict, images: List[Path], label_dir: Path, names: Sequence[str]
     return per_image, (statistics.median(times) * 1000 if times else float("nan"))
 
 
+def yolo_spec(spec: str, imgsz: int) -> Tuple[str, str, int]:
+    """'[NAME=]WEIGHTS[@IMGSZ]' -> (name, weights, imgsz). A bare path is
+    named 'yolo26', as the single --yolo of the first comparison was."""
+    name, sep, rest = spec.partition("=")
+    if not sep:
+        name, rest = "yolo26", spec
+    path, at, size = rest.rpartition("@")
+    if not at or not size.isdigit():
+        path, size = rest, str(imgsz)
+    return name, path, int(size)
+
+
 def table(results: Dict[str, Tuple[Dict[str, dict], float]], names: Sequence[str]) -> str:
-    rows = [f"{'model':10} {'class':12} {'truth':>6} {'AP50':>6} {'AP50sm':>7} "
+    w = max([10] + [len(m) for m in results])
+    rows = [f"{'model':{w}} {'class':12} {'truth':>6} {'AP50':>6} {'AP50sm':>7} "
             f"{'recall':>7} {'prec':>6}"]
     for model, (stats, ms) in results.items():
         for n in names:
             s = stats[n]
-            rows.append(f"{model:10} {n:12} {s['truth']:>6} {s['AP50']:>6.3f} "
+            rows.append(f"{model:{w}} {n:12} {s['truth']:>6} {s['AP50']:>6.3f} "
                         f"{s['AP50_small']:>7.3f} {s['recall']:>7.3f} {s['precision']:>6.3f}")
-        rows.append(f"{model:10} {'ms/image':12} {ms:>6.1f}")
+        rows.append(f"{model:{w}} {'ms/image':12} {ms:>6.1f}")
     return "\n".join(rows)
 
 
@@ -214,7 +227,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path, required=True)
-    ap.add_argument("--yolo", type=Path)
+    ap.add_argument("--yolo", action="append", default=[], metavar="[NAME=]WEIGHTS[@IMGSZ]",
+                    help="repeatable: several YOLO variants in one table, e.g. "
+                         "p2=runs/yolo26s_p2/weights/best.pt  hi=runs/x/weights/best.pt@1280")
     ap.add_argument("--rfdetr", type=Path)
     ap.add_argument("--rfdetr-size", default="",
                     help="default: read from the checkpoint")
@@ -228,9 +243,13 @@ def main() -> None:
     if args.limit:
         images = images[:args.limit]
     results = {}
-    if args.yolo:
-        per, ms = run_model(yolo_predictor(args.yolo, args.imgsz), images, label_dir, names)
-        results["yolo26"] = (evaluate(per, names, args.conf), ms)
+    for spec in args.yolo:
+        name, path, imgsz = yolo_spec(spec, args.imgsz)
+        if not Path(path).exists():
+            print(f"  ! {name}: {path} not found -- skipped")
+            continue
+        per, ms = run_model(yolo_predictor(Path(path), imgsz), images, label_dir, names)
+        results[name] = (evaluate(per, names, args.conf), ms)
     if args.rfdetr:
         per, ms = run_model(rfdetr_predictor(args.rfdetr, args.rfdetr_size),
                             images, label_dir, names)

@@ -5367,6 +5367,12 @@ def test_detector_comparison_metric():
     check("compare: fuel truth counted as small", st["fuel"]["small"] == 1 and st["robot_red"]["small"] == 0)
     check("compare: small false box lowers precision, not recall",
           st["fuel"]["recall"] == 1.0 and abs(st["fuel"]["precision"] - 0.5) < 1e-9)
+    check("compare: bare --yolo path keeps the old name",
+          C.yolo_spec("runs/a/weights/best.pt", 960) == ("yolo26", "runs/a/weights/best.pt", 960))
+    check("compare: named --yolo with its own image size",
+          C.yolo_spec("hi=runs/b/best.pt@1280", 960) == ("hi", "runs/b/best.pt", 1280))
+    check("compare: an @ in a path without a size is part of the path",
+          C.yolo_spec("x=dir@v2/best.pt", 960) == ("x", "dir@v2/best.pt", 960))
     check("rfdetr: size from the pretrained weights' name",
           R.size_from_pretrain("rf-detr-nano.pth") == "nano"
           and R.size_from_pretrain("/x/rf-detr-small.pth") == "small"
@@ -5452,6 +5458,35 @@ def test_unpaint_relabel_names_and_cut():
           and RV.torch_device("cpu") == "cpu" and RV.torch_device("cuda:1") == "cuda:1")
 
 
+def test_count_einstein_helpers():
+    """count_einstein.py judges models by counting Einstein 1, not by mAP.
+
+    Both detectors scored ~0.94 fuel AP50 on Einstein 1 frames (2026-11-16), so
+    mAP no longer separates models. The setup is rebuilt from the recorded
+    Einstein 4 outlines plus Einstein 1's recorded shift; the error is the
+    mean over both hubs at the buzzer, against the scoreboard.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import count_einstein as CE
+    setup = CE.e1_setup("e1.mp4", "m.pt")
+    cam = setup["cameras"][0]
+    check("count e1: blue outline is Einstein 4's moved +16,+13",
+          cam["zones"][0]["hub"] == "blue" and cam["zones"][0]["outline"][0] == [401, 275])
+    check("count e1: red outline moved +28,+5", cam["zones"][1]["outline"][0] == [1380, 267])
+    check("count e1: model blended at the shipped 0.5", cam["model"] == {"weights": "m.pt", "weight": 0.5})
+    check("count e1: no model without weights", "model" not in CE.e1_setup("e1.mp4")["cameras"][0])
+    from tbavid.hubcount import setup_from_dict
+    check("count e1: the shipped counter accepts the setup",
+          len(setup_from_dict(CE.e1_setup("e1.mp4")).cameras[0].zones) == 2)
+    check("count e1: zone names map to hubs",
+          CE.hub_values({"broadcast/blue0": 600.0, "broadcast/red1": 400.0}) == {"blue": 600.0, "red": 400.0})
+    check("count e1: perfect count is 0% error", CE.error({"blue": 621, "red": 415}, {"blue": 621, "red": 415}) == 0)
+    check("count e1: 10% over on both hubs is 10%",
+          abs(CE.error({"blue": 683.1, "red": 456.5}, {"blue": 621, "red": 415}) - 10.0) < 0.01)
+    check("count e1: timeline read at the AUTO time",
+          CE.at([(0, 0, 0), (29.5, 90, 80), (31, 99, 99)], 30.0) == {"red": 90, "blue": 80})
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5479,7 +5514,7 @@ def main() -> int:
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
                test_detector_comparison_metric, test_sam3_autolabel_rules,
-               test_unpaint_relabel_names_and_cut):
+               test_unpaint_relabel_names_and_cut, test_count_einstein_helpers):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

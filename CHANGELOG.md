@@ -68,6 +68,26 @@ the build rather than publishing an empty release.
   result. An empty rebuild (e.g. a start time past the end of the video)
   now stops with the reason instead of training on nothing, and is never
   saved to Drive for reuse.
+- **First real run on Colab (2026-11-16): YOLO26 vs RF-DETR on SAM 3 fuel
+  labels, scored the same way on 487 Einstein 1 frames neither trained on**
+  (82,581 fuel boxes): fuel AP50 0.940 vs 0.935 (small balls 0.933 vs
+  0.927), fuel precision 0.941 vs 0.884, robots 0.91 vs 0.89, 36 vs 34
+  ms/image; YOLO26 trained in 1 h, RF-DETR in about 3. A tie on fuel, so
+  YOLO26 stays: it is already in the counter, the apps and `run.py`.
+- **`train/count_einstein.py`: models judged by counting, not mAP.** Both
+  detectors are at the labels' ceiling (~0.94), so mAP no longer separates
+  them. This runs the shipped hub counter (`count_recording`: colour,
+  model on hub crops, and the 0.5 blend) on Einstein 1 once per model and
+  scores each against the scoreboard at the buzzer (blue 621, red 415). The
+  setup is rebuilt from the recorded Einstein 4 outlines and Einstein 1's
+  recorded shift, because the file behind the documented 9.1% was never
+  saved, so absolute errors may differ from it; every model gets the same
+  setup. `compare_detectors.py --yolo` now takes several named models.
+- **Notebook section 11, experiments:** YOLO26s with the P2 small-object
+  head, YOLO26m, YOLO26s at 1280 px and YOLO26n, each trained on the same
+  dataset (skipped once done, resumable), then one score table and the
+  Einstein 1 counting test with the current `fuel_relabel.pt` as baseline.
+  Checked on stand-in data end to end; not yet run for real.
 - **SAM 3 now boxes fuel only; robots are copied from the current labels**
   (`autolabel_sam3.py --robots labels`, the default). First real comparison,
   three Einstein frames (1/5/8), current labels vs SAM 3:
