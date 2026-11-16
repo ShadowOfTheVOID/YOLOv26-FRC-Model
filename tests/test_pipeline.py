@@ -5415,6 +5415,13 @@ def test_sam3_autolabel_rules():
     check("sam3: fuel inside a painted robot goes, fuel outside stays",
           "0 0.05 0.05 0.01 0.01" not in got and "0 0.9 0.9 0.01 0.01" in got)
     check("sam3: a labelled robot overlapping a painted one keeps its box", "2 0.06 0.06 0.05 0.05" in got)
+    names3 = ["fuel", "robot_blue", "robot_red"]
+    carried = S3.carried_robots("0 0.5 0.5 0.01 0.01\n1 0.25 0.5 0.1 0.2\n2 0.75 0.5 0.1 0.2\n", names3, 1000, 500)
+    check("sam3: robots carried from the source labels, fuel is not",
+          [c for c, _ in carried] == ["robot_blue", "robot_red"]
+          and abs(carried[0][1][0] - 200) < 1e-6 and abs(carried[0][1][3] - 300) < 1e-6)
+    check("sam3: a 5-class set's hubs are not carried as robots",
+          S3.carried_robots("3 0.5 0.5 0.1 0.1\n", names, 100, 100) == [])
 
 
 def test_unpaint_relabel_names_and_cut():

@@ -68,6 +68,20 @@ the build rather than publishing an empty release.
   result. An empty rebuild (e.g. a start time past the end of the video)
   now stops with the reason instead of training on nothing, and is never
   saved to Drive for reuse.
+- **SAM 3 now boxes fuel only; robots are copied from the current labels**
+  (`autolabel_sam3.py --robots labels`, the default). First real comparison,
+  three Einstein frames (1/5/8), current labels vs SAM 3:
+  - robots: SAM 3 found 0, 0 and 1 of about four per frame, so every
+    frame was left out by `--min-robots`. The current robot boxes come from
+    the scouting model, checked good by eye on qm7;
+  - fuel: SAM 3 gave one fitted box per ball, where the current labels have
+    several small overlapping boxes per ball in piles and hoppers (most of
+    the 470-vs-220 count gap). It also boxed about five balls at the hub
+    mouth that the current labels missed;
+  - SAM 3 still misses shaded balls behind clear plastic (hub bin, deep in
+    hoppers).
+  `--robots sam3` prompts for robots as before, for frames with no labels
+  yet (a new game at kickoff). Three frames is a small sample.
 - **`train/unpaint_relabel.py`: SAM 3 is judged on frames without the
   grey paint.** The rebuilt dataset paints grey over yellow its detector
   could not box. Those are exactly the hard balls (piles, hoppers, in

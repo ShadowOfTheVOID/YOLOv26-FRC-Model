@@ -213,6 +213,29 @@ class Sam3:
         return merge(found)
 
 
+def carried_robots(label_text: str, names: Sequence[str], W: int, H: int) -> list:
+    """(class, box) for the source's robot lines, in pixels.
+
+    Why robots are carried rather than prompted, measured on the first
+    real comparison (Einstein 1/5/8, 2026-11-16): SAM 3 with "robot" found
+    0, 0 and 1 of the robots in three frames, so all three were left out
+    by --min-robots. The source's robots came from the scouting model,
+    whose every box was checked as a real robot of the right alliance on
+    qm7. Its fuel, by contrast, was the weak part: several overlapping
+    boxes per ball in piles and hoppers, and balls at the hub mouth
+    missed, where SAM 3 gave one box per ball and found them.
+    """
+    robot_ids = {i: n for i, n in enumerate(names) if n in ("robot_blue", "robot_red")}
+    out = []
+    for ln in label_text.splitlines():
+        f = ln.split()
+        if len(f) >= 5 and f[0].isdigit() and int(f[0]) in robot_ids:
+            cx, cy, w, h = (float(v) for v in f[1:5])
+            out.append((robot_ids[int(f[0])],
+                        ((cx - w / 2) * W, (cy - h / 2) * H, (cx + w / 2) * W, (cy + h / 2) * H, 1.0)))
+    return out
+
+
 def label_image(sam: Sam3, bgr: np.ndarray, src_label: str, names: Sequence[str], args):
     """(label lines, painted image or None, verdict, drawable boxes) for one frame."""
     import cv2
@@ -228,7 +251,14 @@ def label_image(sam: Sam3, bgr: np.ndarray, src_label: str, names: Sequence[str]
         draw.append(("pile" if i in bad else "fuel", b))
     robots_wanted = "robot_blue" in idx and "robot_red" in idx
     labelled, unknown, robot_lines = [], [], []
-    if robots_wanted:
+    from_labels = robots_wanted and getattr(args, "robots", "labels") == "labels"
+    if from_labels:
+        # carried as they are; the source already decided these frames, so no --min-robots gate
+        for cls, d in carried_robots(src_label, names, W, H):
+            labelled.append((cls, d))
+            robot_lines.append(yolo_line(idx[cls], d, W, H))
+            draw.append((cls, d))
+    elif robots_wanted:
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         for d, why in screen(sam.tiled(rgb, args.robot_prompt, args.robot_tile, args.conf)):
             if why:
@@ -246,7 +276,8 @@ def label_image(sam: Sam3, bgr: np.ndarray, src_label: str, names: Sequence[str]
     lines += hub_lines(src_label, names)
     painted = paint(bgr, unknown, [d for _, d in labelled]) if unknown else None
     lines = assemble(lines, robot_lines, unknown, W, H)
-    verdict = frame_verdict(len(bad), labelled, len(unknown), args.min_robots, robots_wanted)
+    verdict = frame_verdict(len(bad), labelled, len(unknown), args.min_robots,
+                            robots_wanted and not from_labels)
     return lines, painted, verdict, draw
 
 
@@ -310,6 +341,10 @@ def main(argv=None) -> int:
     ap.add_argument("--splits", default="train,val")
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--fuel-prompt", default=FUEL_PROMPT)
+    ap.add_argument("--robots", choices=("labels", "sam3"), default="labels",
+                    help="labels: copy robot boxes from the source labels (default; SAM 3 found "
+                         "0-1 of ~4 robots per frame on Einstein). sam3: prompt for them -- for "
+                         "frames with no labels yet, e.g. a new game at kickoff")
     ap.add_argument("--robot-prompt", default=ROBOT_PROMPT)
     ap.add_argument("--conf", type=float, default=0.4)
     ap.add_argument("--fuel-tile", type=int, default=FUEL_TILE)
@@ -328,7 +363,8 @@ def main(argv=None) -> int:
     if "fuel" not in names and "robot_blue" not in names:
         raise SystemExit(f"{args.data}: no fuel or robot classes in {names}")
     sam = make_model(args.model)
-    print(f"SAM 3 on {sam.device}; classes {names}; prompts {args.fuel_prompt!r} / {args.robot_prompt!r}")
+    print(f"SAM 3 on {sam.device}; classes {names}; fuel prompt {args.fuel_prompt!r}; robots "
+          + (f"from the source labels" if args.robots == "labels" else f"prompted {args.robot_prompt!r}"))
 
     if args.compare:
         pool = [p for s in args.splits.split(",") for p in images_of(src, s)]
