@@ -5439,6 +5439,10 @@ def test_unpaint_relabel_names_and_cut():
     tile = U.cut(frame, rows, masks, (1280, 13), (640, 687))
     check("unpaint: tile cut from the row-cut frame", tile.shape == (687, 640, 3))
     check("unpaint: the source frame is not changed", (frame[10, 500] == 200).all())
+    import relabel_video as RV
+    check("relabel: Ultralytics' '0' becomes PyTorch's 'cuda:0' (Colab crash 2026-11-16)",
+          RV.torch_device("0") == "cuda:0" and RV.torch_device("1,2") == "cuda:1"
+          and RV.torch_device("cpu") == "cpu" and RV.torch_device("cuda:1") == "cuda:1")
 
 
 def main() -> int:
