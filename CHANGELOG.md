@@ -74,6 +74,16 @@ the build rather than publishing an empty release.
   0.927), fuel precision 0.941 vs 0.884, robots 0.91 vs 0.89, 36 vs 34
   ms/image; YOLO26 trained in 1 h, RF-DETR in about 3. A tie on fuel, so
   YOLO26 stays: it is already in the counter, the apps and `run.py`.
+- **The notebook stops redoing finished work on every Run all.** A result
+  in Drive that is newer than the models it was made from is shown, not
+  recomputed: the section 7 table, both bumper tests (and the Moondream 3.1
+  install), the experiments table and the Einstein 1 counting. With
+  `dataset-sam3.zip` already in Drive, SAM 3 no longer asks for the token or
+  re-cuts the unpainted frames from the videos. Estimated 15-25 L4 minutes
+  saved per resume. RF-DETR gets 8 data loader workers instead of 4.
+  Mixed precision was already on (bf16 on the L4 for RF-DETR, AMP for
+  YOLO), so nothing to gain there; FP8 and `torch.compile` were left out
+  as untested.
 - **Faster experiments:** 25 epochs instead of 40 (YOLO26s peaked at epochs
   10-25 on this data, and `best.pt` keeps the best one), decoded images
   cached in RAM with 8 loader workers, and an automatic batch size filling
