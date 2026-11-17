@@ -96,6 +96,32 @@ def average_precision(scored: Sequence[Tuple[float, bool]], n_truth: int) -> flo
     return ap
 
 
+def best_f1(scored: Sequence[Tuple[float, bool]], n_truth: int) -> Tuple[float, float]:
+    """(best F1, the confidence it is reached at) over every threshold.
+
+    Why: --conf picks one threshold for every model, and the first fair
+    comparison (2026-11-16) put RF-DETR's fuel precision at 0.884 against
+    YOLO26's 0.941 at conf 0.25. DETR-style models spread their scores
+    differently, so a threshold that suits one model can be wrong for the
+    other. Each model's best F1 at its own threshold is the fairer number;
+    deploying it means using that threshold.
+    """
+    if not n_truth:
+        return float("nan"), float("nan")
+    tp = fp = 0
+    best, at = 0.0, float("nan")
+    ordered = sorted(scored, key=lambda s: -s[0])
+    for i, (score, hit) in enumerate(ordered):
+        tp += hit
+        fp += not hit
+        if i + 1 < len(ordered) and ordered[i + 1][0] == score:
+            continue                       # a threshold cannot split equal scores
+        f1 = 2 * tp / (2 * tp + fp + (n_truth - tp))
+        if f1 > best:
+            best, at = f1, score
+    return best, at
+
+
 def evaluate(per_image: List[Tuple[List[Pred], List[Tuple[Box, str]]]],
              names: Sequence[str], conf: float) -> Dict[str, dict]:
     """per_image: (predictions, truths) for each val image -> per-class stats."""
@@ -127,6 +153,7 @@ def evaluate(per_image: List[Tuple[List[Pred], List[Tuple[Box, str]]]],
             "small": n_small,
             "recall": tp_at / n_truth if n_truth else float("nan"),
             "precision": tp_at / (tp_at + fp_at) if tp_at + fp_at else float("nan"),
+            **dict(zip(("F1best", "F1conf"), best_f1(scored, n_truth))),
         }
     return out
 
@@ -213,12 +240,13 @@ def yolo_spec(spec: str, imgsz: int) -> Tuple[str, str, int]:
 def table(results: Dict[str, Tuple[Dict[str, dict], float]], names: Sequence[str]) -> str:
     w = max([10] + [len(m) for m in results])
     rows = [f"{'model':{w}} {'class':12} {'truth':>6} {'AP50':>6} {'AP50sm':>7} "
-            f"{'recall':>7} {'prec':>6}"]
+            f"{'recall':>7} {'prec':>6} {'F1best':>7} {'@conf':>6}"]
     for model, (stats, ms) in results.items():
         for n in names:
             s = stats[n]
             rows.append(f"{model:{w}} {n:12} {s['truth']:>6} {s['AP50']:>6.3f} "
-                        f"{s['AP50_small']:>7.3f} {s['recall']:>7.3f} {s['precision']:>6.3f}")
+                        f"{s['AP50_small']:>7.3f} {s['recall']:>7.3f} {s['precision']:>6.3f} "
+                        f"{s.get('F1best', float('nan')):>7.3f} {s.get('F1conf', float('nan')):>6.3f}")
         rows.append(f"{model:{w}} {'ms/image':12} {ms:>6.1f}")
     return "\n".join(rows)
 
@@ -230,7 +258,8 @@ def main() -> None:
     ap.add_argument("--yolo", action="append", default=[], metavar="[NAME=]WEIGHTS[@IMGSZ]",
                     help="repeatable: several YOLO variants in one table, e.g. "
                          "p2=runs/yolo26s_p2/weights/best.pt  hi=runs/x/weights/best.pt@1280")
-    ap.add_argument("--rfdetr", type=Path)
+    ap.add_argument("--rfdetr", action="append", default=[], metavar="[NAME=]CHECKPOINT",
+                    help="repeatable, like --yolo; a bare path is named 'rfdetr'")
     ap.add_argument("--rfdetr-size", default="",
                     help="default: read from the checkpoint")
     ap.add_argument("--imgsz", type=int, default=960,
@@ -250,10 +279,15 @@ def main() -> None:
             continue
         per, ms = run_model(yolo_predictor(Path(path), imgsz), images, label_dir, names)
         results[name] = (evaluate(per, names, args.conf), ms)
-    if args.rfdetr:
-        per, ms = run_model(rfdetr_predictor(args.rfdetr, args.rfdetr_size),
-                            images, label_dir, names)
-        results["rfdetr"] = (evaluate(per, names, args.conf), ms)
+    for spec in args.rfdetr:
+        name, sep, path = spec.partition("=")
+        if not sep:
+            name, path = "rfdetr", spec
+        if not Path(path).exists():
+            print(f"  ! {name}: {path} not found -- skipped")
+            continue
+        per, ms = run_model(rfdetr_predictor(Path(path), args.rfdetr_size), images, label_dir, names)
+        results[name] = (evaluate(per, names, args.conf), ms)
     if not results:
         ap.error("give --yolo and/or --rfdetr")
     print(f"{len(images)} val images, conf {args.conf}, small = shorter side < {SMALL_PX} px")

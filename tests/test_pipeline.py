@@ -5367,6 +5367,15 @@ def test_detector_comparison_metric():
     check("compare: fuel truth counted as small", st["fuel"]["small"] == 1 and st["robot_red"]["small"] == 0)
     check("compare: small false box lowers precision, not recall",
           st["fuel"]["recall"] == 1.0 and abs(st["fuel"]["precision"] - 0.5) < 1e-9)
+    f1, at = C.best_f1([(0.9, True), (0.8, True), (0.3, False), (0.2, False)], 3)
+    check("compare: best F1 picks its own threshold (0.8: 2 of 3 found, no false box)",
+          abs(f1 - 0.8) < 1e-9 and at == 0.8)
+    f1, at = C.best_f1([(0.9, True), (0.8, True), (0.3, False), (0.2, True)], 3)
+    check("compare: a low threshold wins when it finds the last ball (F1 6/7 at 0.2)",
+          abs(f1 - 6 / 7) < 1e-9 and at == 0.2)
+    f1, at = C.best_f1([(0.9, True), (0.9, False)], 1)
+    check("compare: equal scores are never split by a threshold", abs(f1 - 2 / 3) < 1e-9 and at == 0.9)
+    check("compare: no truth, no F1", all(v != v for v in C.best_f1([(0.5, False)], 0)))
     check("compare: bare --yolo path keeps the old name",
           C.yolo_spec("runs/a/weights/best.pt", 960) == ("yolo26", "runs/a/weights/best.pt", 960))
     check("compare: named --yolo with its own image size",

@@ -157,6 +157,55 @@ def detection_names(class_ids, names: list, library_names=None) -> list:
     return out
 
 
+QUERY_PARAMS = ("refpoint_embed.weight", "query_feat.weight")
+
+
+def expand_queries(src, dst, target: int, noise: float = 0.05, seed: int = 0) -> int:
+    """Write a copy of pretrained weights with `target` query slots per group.
+
+    Why: RF-DETR small answers with at most 300 objects per image, and
+    Einstein frames average ~170 fuel with the crowded ones past 300
+    (82,581 boxes in 487 validation frames, 2026-11-16). Asking for 900
+    queries, RF-DETR 1.12's loader refuses the 300-query pretrained weights
+    ("size mismatch for refpoint_embed.weight: [3900, 4] vs [11700, 4]");
+    it can only shrink the count, never grow it.
+
+    So each training group's 300 pretrained slots are tiled up to `target`,
+    keeping the per-group layout the loader expects (group g owns rows
+    g*n .. (g+1)*n). Copies of a query would answer identically, so the
+    copies' reference points get gaussian noise of `noise` x that tensor's
+    spread; the originals are unchanged. The checkpoint's args record the
+    new count, so the loader takes it as it is. Returns the group count.
+    """
+    import torch
+    ck = torch.load(str(src), map_location="cpu", weights_only=False)
+    args = ck.get("args")
+    get = (lambda k: args.get(k)) if isinstance(args, dict) else (lambda k: getattr(args, k, None))
+    n = int(get("num_queries") or 300)
+    model = ck["model"]
+    rows = model[QUERY_PARAMS[0]].shape[0]
+    groups = int(get("group_detr") or rows // n)
+    if rows != n * groups:
+        raise SystemExit(f"{src}: {rows} query rows is not {n} queries x {groups} groups")
+    gen = torch.Generator().manual_seed(seed)
+    for name in list(model):
+        if not name.endswith(QUERY_PARAMS):
+            continue
+        t = model[name].reshape(groups, n, -1)
+        reps = -(-target // n)
+        big = t.repeat(1, reps, 1)[:, :target].clone()
+        if name.endswith("refpoint_embed.weight") and target > n:
+            big[:, n:] += torch.randn(big[:, n:].shape, generator=gen) * noise * float(t.std())
+        model[name] = big.reshape(groups * target, -1)
+    if isinstance(args, dict):
+        args.update(num_queries=target, num_select=target, group_detr=groups)
+    elif args is not None:
+        for k, v in (("num_queries", target), ("num_select", target), ("group_detr", groups)):
+            setattr(args, k, v)
+    torch.save(ck, str(dst))
+    return groups
+
+
 def check_resolution(size: str, imgsz: int) -> None:
     step = 56 if size in ("base", "large") else 32  # patch 14 x 4 / patch 16 x 2
     if imgsz % step:
@@ -177,6 +226,12 @@ def main() -> None:
     ap.add_argument("--device", default=None, help="cuda / cpu / mps; default: RF-DETR picks")
     ap.add_argument("--name", default="rfdetr")
     ap.add_argument("--resume", default="", help="checkpoint .pth to resume from")
+    ap.add_argument("--queries", type=int, default=0,
+                    help="most objects one image can hold (RF-DETR small: 300). Einstein frames "
+                         "average ~170 fuel and the crowded ones pass 300, so 900 for fuel")
+    ap.add_argument("--scheduler", choices=("default", "cosine"), default="default",
+                    help="cosine decays the learning rate over the run; the default step "
+                         "schedule drops it at epoch 100, so a 50-epoch run never decays")
     args = ap.parse_args()
 
     check_resolution(args.size, args.imgsz)
@@ -187,6 +242,23 @@ def main() -> None:
     import rfdetr  # late: the layout check above runs without torch
     cls = getattr(rfdetr, "RFDETR" + args.size.capitalize())
     kw = {"resolution": args.imgsz}
+    train_kw = {}
+    if args.queries:     # also on --resume: the model must be built with the checkpoint's count
+        # A DETR answers with a fixed number of queries; an image with more
+        # objects than that cannot be fully boxed however well it learns.
+        # Start from pretrained weights grown to that many (expand_queries).
+        base = cls(**kw)        # downloads the size's pretrained weights if needed
+        src = Path(str(base.model_config.pretrain_weights))
+        dst = ROOT / "runs" / args.name / f"{src.stem}-q{args.queries}.pth"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.exists():
+            g = expand_queries(src, dst, args.queries)
+            print(f"pretrained queries 300 -> {args.queries} per group ({g} groups): {dst}")
+        del base
+        kw.update(num_queries=args.queries, num_select=args.queries, pretrain_weights=str(dst))
+        train_kw["eval_max_dets"] = max(args.queries, 500)
+    if args.scheduler == "cosine":
+        train_kw["lr_scheduler"] = "cosine"
     if args.device:
         kw["device"] = args.device
     model = cls(**kw)
@@ -194,7 +266,7 @@ def main() -> None:
                 epochs=args.epochs, batch_size=args.batch,
                 grad_accum_steps=args.grad_accum, num_workers=args.workers,
                 output_dir=str(ROOT / "runs" / args.name),
-                class_names=names, resume=args.resume or None,
+                class_names=names, resume=args.resume or None, **train_kw,
                 **({"device": args.device} if args.device else {}))
     print(f"weights: {ROOT / 'runs' / args.name}/checkpoint_best_total.pth")
 

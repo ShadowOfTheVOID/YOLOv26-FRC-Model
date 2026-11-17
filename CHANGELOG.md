@@ -74,6 +74,21 @@ the build rather than publishing an empty release.
   0.927), fuel precision 0.941 vs 0.884, robots 0.91 vs 0.89, 36 vs 34
   ms/image; YOLO26 trained in 1 h, RF-DETR in about 3. A tie on fuel, so
   YOLO26 stays: it is already in the counter, the apps and `run.py`.
+- **Tuned RF-DETR in the experiments (`train_rfdetr.py --queries --scheduler`).**
+  RF-DETR small answers with at most 300 objects per image, and Einstein
+  frames average ~170 fuel with the crowded ones past 300 (82,581 boxes in
+  487 frames). `--queries 900` raises that. RF-DETR 1.12 refuses to grow the
+  pretrained 300 queries ("size mismatch for refpoint_embed.weight: [3900, 4]
+  vs [11700, 4]"), so `expand_queries` tiles each training group's slots up to
+  900 and nudges the copies' reference points; the checkpoint records the new
+  count and the loader takes it unchanged. Checked on CPU: trains, resumes
+  from `last.ckpt`, and returns 900 boxes. `--scheduler cosine`: the first
+  run's learning rate never decayed (the default step drops at epoch 100).
+  The notebook trains it for 30 epochs (the first run peaked at 27).
+- **`compare_detectors.py` reports each model's best F1 at its own
+  threshold**, because a single `--conf` can favour one model: RF-DETR's fuel
+  precision was 0.884 against YOLO26's 0.941 at conf 0.25, and DETR-style
+  scores spread differently. `--rfdetr` is repeatable like `--yolo`.
 - **`train/count_einstein.py`: models judged by counting, not mAP.** Both
   detectors are at the labels' ceiling (~0.94), so mAP no longer separates
   them. This runs the shipped hub counter (`count_recording`: colour,
