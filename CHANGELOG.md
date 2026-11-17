@@ -74,6 +74,11 @@ the build rather than publishing an empty release.
   0.927), fuel precision 0.941 vs 0.884, robots 0.91 vs 0.89, 36 vs 34
   ms/image; YOLO26 trained in 1 h, RF-DETR in about 3. A tie on fuel, so
   YOLO26 stays: it is already in the counter, the apps and `run.py`.
+- **Faster experiments:** 25 epochs instead of 40 (YOLO26s peaked at epochs
+  10-25 on this data, and `best.pt` keeps the best one), decoded images
+  cached in RAM with 8 loader workers, and an automatic batch size filling
+  80% of GPU memory. Estimated 4-5 h on an L4 instead of about 8; not yet
+  timed for real.
 - **Tuned RF-DETR in the experiments (`train_rfdetr.py --queries --scheduler`).**
   RF-DETR small answers with at most 300 objects per image, and Einstein
   frames average ~170 fuel with the crowded ones past 300 (82,581 boxes in
