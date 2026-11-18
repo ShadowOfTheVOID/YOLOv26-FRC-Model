@@ -531,7 +531,7 @@ async function deletePreset(){const c=cam(),p=c&&presetOf(c);if(!p||p.builtin)re
   if(!ok)return;try{await api("delete_preset",{preset:p.id});toast("Preset deleted");}catch(e){}refresh();}
 /* On every refresh, not only in fillForm: turning the model on or off left
    the label at "(off)" until another camera was picked. */
-function renderModel(){const c=cam();const m=c&&c.model||null;$("modelstate").textContent=m?"("+m.weights.split(/[\/\\]/).pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
+function renderModel(){const c=cam();const m=c&&c.model||null;$("modelstate").textContent=m?"("+m.weights.split(/[\/\\]/).pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.onnx/.pt)";
   $("modelbuiltin").style.display=S.builtin_model&&!(m&&m.weights==="built-in")?"":"none";$("modeloff").style.display=m?"":"none";$("mwrow").style.display=m?"":"none";}
 function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
   if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an outline around each hub's opening.</div>`;return;}
@@ -804,7 +804,7 @@ async function pickFile(mode,path=""){pickMode=mode;const L=await(await fetch("/
     `<div class="item" data-d="${esc(L.parent)}"><span class="icon"><svg><use href="#i-up"/></svg></span><span class="t">Up one folder</span></div>`+
     L.dirs.map(d=>`<div class="item" data-d="${esc(L.path+"/"+d)}"><span class="icon"><svg><use href="#i-folder"/></svg></span><span class="t">${esc(d)}</span></div>`).join("")+
     files.map(v=>`<div class="item" data-v="${esc(L.path+"/"+v)}"><span class="icon"><svg><use href="#i-${mode==="model"?"tune":"film"}"/></svg></span><span class="t">${esc(v)}</span></div>`).join("")+
-    (files.length||L.dirs.length?"":`<div class="muted">${mode==="model"?"No .pt files here.":"No videos here."}</div>`)+"</div>";
+    (files.length||L.dirs.length?"":`<div class="muted">${mode==="model"?"No .onnx or .pt files here.":"No videos here."}</div>`)+"</div>";
   const p=modal(title,body,[{label:"Cancel",value:null}]);
   document.querySelectorAll("#mBody .item").forEach(e=>e.onclick=()=>{closeModal(null);if(e.dataset.d!==undefined)pickFile(mode,e.dataset.d);else chose(e.dataset.v);});
   await p;}

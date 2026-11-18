@@ -160,20 +160,27 @@ what it needs.
 
 ## The fuel model (colour + model blend)
 
-Every build has PyTorch and the fuel model (`fuel_relabel.pt`) inside, so
-each download is 300-400 MB. Open **Fuel model** on the page and press
-**Use built-in model**; or pick another `.pt` with **Choose model**.
+Every build has the fuel model (`fuel_relabel.onnx`) and ONNX Runtime
+inside; no PyTorch since 2026-11-18, which was most of the old 300-400 MB
+download. The model is the same weights: its boxes matched the `.pt`'s to
+0.0002 px (`train/export_onnx.py` refuses an export that differs). Open
+**Fuel model** on the page and press **Use built-in model**; or pick another
+`.onnx` (any YOLO26 or RF-DETR export) with **Choose model**.
 
-| computer | runs the model on | in practice |
-|---|---|---|
-| Mac, Apple silicon | its GPU (MPS) | fast enough; the one to use for the blend |
-| Windows / Linux PC | the CPU | the builds carry the CPU PyTorch: a CUDA one is ~3 GB, over GitHub's limit. Usually too slow |
-| Raspberry Pi | the CPU | too slow; use colour only |
+Where it runs is chosen at Start: the **CPU** if it keeps up (two crops in
+27 ms), so the GPU stays free for other things; otherwise the computer's
+accelerator, at a few percent of a laptop GPU:
 
-When the model cannot keep up it turns itself off after about 10 s, the
-page says so, and the hub counts by colour alone, so turning it on cannot
-make a slow computer miss balls. For the blend on an NVIDIA PC, use the
-terminal version (`deploy/FRC_FMS.md`, step 1) with CUDA PyTorch.
+| computer | if the CPU is too slow |
+|---|---|
+| Mac, Apple silicon | CoreML (the Neural Engine or GPU, macOS picks) |
+| Windows | DirectML: any DirectX 12 GPU, NVIDIA, AMD or Intel |
+| Linux PC / Raspberry Pi | none in the build: CPU only; usually too slow, use colour only |
+
+On 4 server cores two crops took 131 ms (PyTorch 178 ms), so most laptops
+will use the accelerator. When the model still cannot keep up it turns
+itself off after about 10 s, the page says so, and the hub counts by colour
+alone, so turning it on cannot make a slow computer miss balls.
 
 On the Central Valley broadcast the blend was worse than colour alone
 (34.5% against 6.4%), so compare both on your own camera before choosing.
@@ -181,11 +188,9 @@ On the Central Valley broadcast the blend was worse than colour alone
 ## Build it yourself (on the OS you want it for)
 
 ```bash
-pip install torch torchvision     # Linux (x64 or Pi): add --index-url https://download.pytorch.org/whl/cpu
-pip install pyinstaller opencv-python-headless numpy yt-dlp
-pip install --no-deps ultralytics ultralytics-thop
-pip install matplotlib pillow pyyaml requests psutil polars
-mkdir -p models   # put v0.4.0's fuel_relabel.pt here, or the build has no built-in model
+pip install pyinstaller opencv-python-headless numpy yt-dlp onnxruntime   # Windows: onnxruntime-directml
+mkdir -p models   # put v0.4.0's fuel_relabel.pt here, then export it (another venv, with torch + ultralytics):
+#   python train/export_onnx.py models/fuel_relabel.pt
 pyinstaller apps/hubcounter/HubCounter.spec
 python apps/hubcounter/smoke_test.py "dist/Hub Counter/Hub Counter"   # Mac: dist/Hub Counter.app/Contents/MacOS/Hub Counter
 ```

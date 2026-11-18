@@ -54,28 +54,31 @@ def selftest_model(out: str) -> int:
     load the built-in model and run it once. Exit 0 if it ran. The result
     goes to a file because a windowed Windows build has no stdout.
 
-    What this proves is that the model and its libraries are inside the
-    build. If the GPU device fails -- GitHub's macOS runners are VMs, where
-    Apple's GPU (MPS) may not work as on a real Mac -- it says so and tries
-    the CPU, which exercises the same bundled code."""
+    What this proves is that the model and ONNX Runtime are inside the
+    build (no torch since 2026-11-18). It runs once on the CPU, which every
+    build has, then with the automatic choice (CPU or the accelerator:
+    CoreML on a Mac, DirectML on Windows) and names where that landed.
+    GitHub's macOS runners are VMs, where an accelerator may not work as on
+    a real Mac: that is reported, and the CPU run still passes the test."""
     import time
     msg, code = "", 1
     try:
         import numpy as np
-        from tbavid.hubmodel import BUILTIN, ModelEye, pick_device
+        from tbavid.hubmodel import BUILTIN, ModelEye
         frame = np.zeros((720, 1280, 3), np.uint8)
         poly = {"red": [(100, 100), (300, 100), (300, 200), (100, 200)]}
         notes = []
-        for device in dict.fromkeys([pick_device(), "cpu"]):
+        for device in ("cpu", ""):
             t = time.time()
             try:
-                ModelEye(BUILTIN, poly, device).detect(frame)
-                msg, code = "; ".join(notes + [f"model ran on {device} in {time.time() - t:.1f} s"]), 0
-                break
-            except Exception as e:                  # report it, then the CPU
-                notes.append(f"{device} failed: {type(e).__name__}: {e}")
-        else:
-            msg = "; ".join(notes)
+                eye = ModelEye(BUILTIN, poly, device)
+                eye.detect(frame)
+                notes.append(f"model ran on {eye.device} ({device or 'auto'}) "
+                             f"in {time.time() - t:.1f} s")
+                code = 0 if device == "cpu" else code   # the CPU run must pass
+            except Exception as e:                  # report it, try the other
+                notes.append(f"{device or 'auto'} failed: {type(e).__name__}: {e}")
+        msg = "; ".join(notes)
     except Exception as e:                          # report anything, never hang
         msg = f"{type(e).__name__}: {e}"
     with open(out, "w", encoding="utf-8") as f:

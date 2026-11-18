@@ -9,6 +9,23 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **The apps run the fuel model without PyTorch.** Hub Counter and Watchtower
+  now carry `fuel_relabel.onnx` and ONNX Runtime (`tbavid/onnxdet.py`)
+  instead of torch + Ultralytics, which were most of each 300-400 MB
+  download. The weights are the same: on the same images the export's boxes
+  matched the `.pt`'s, 437 of 437, worst 0.0002 px, scores equal.
+  `train/export_onnx.py` makes the export and refuses (deletes it, exit 1)
+  any whose detections differ; `hub-app.yml` runs it on every build, with
+  torch in a separate venv so it cannot reach the apps. It reads YOLO
+  exports with or without NMS and RF-DETR exports, so whichever model the
+  2026-11 experiments pick drops in as one file. The model now runs on the
+  CPU when two crops fit in 27 ms, leaving the GPU free; otherwise on the
+  accelerator (CoreML on a Mac, DirectML on Windows). On 4 server cores
+  ONNX Runtime took 131 ms for two crops against PyTorch's 178 ms, so
+  most laptops will use the accelerator. Not yet built by CI or run on a
+  real camera; the Einstein 1 counting check with the `.onnx` is still to
+  run in Colab. A `.pt` still works from a checkout with Ultralytics.
+
 - **Experiment: reading team numbers off bumpers** (`experiments/bumper_moondream.py`,
   not wired into run.py). Moondream2 (Apache-2.0) is asked for the number on
   each robot crop, and the answer is only accepted when it names one of the

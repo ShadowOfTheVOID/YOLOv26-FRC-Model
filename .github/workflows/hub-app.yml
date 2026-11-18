@@ -2,10 +2,12 @@ name: hub-app
 
 # Builds the Hub Counter app -- the hub fuel counter's web page as a
 # double-click program (apps/hubcounter/) -- on each OS, since each can only
-# be built on its own. The scraper is not in it. PyTorch, Ultralytics and the
-# fuel model (fuel_relabel.pt from the release in .github/models-release) are,
-# so every build can run the colour+model blend; the smoke test runs the
-# model once inside each build.
+# be built on its own. The scraper is not in it. ONNX Runtime and the fuel
+# model are, so every build can run the colour+model blend: fuel_relabel.pt
+# from the release in .github/models-release, exported to .onnx here by
+# train/export_onnx.py, which refuses an export whose boxes differ from the
+# .pt's. PyTorch is used for that export only, in its own venv, and never
+# reaches the apps. The smoke test runs the model once inside each build.
 #
 #   macOS (Apple silicon)  HubCounter-mac.dmg            drag Hub Counter.app to Applications
 #   Windows                HubCounter-Setup-windows.exe  installer (Start menu, uninstaller)
@@ -33,6 +35,8 @@ on:
       - "tbavid/fmslink.py"
       - "tbavid/count.py"
       - "tbavid/trackvis.py"
+      - "tbavid/onnxdet.py"
+      - "train/export_onnx.py"
       - ".github/workflows/hub-app.yml"
       - ".github/models-release"
   workflow_dispatch:
@@ -78,22 +82,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      # PyPI's Linux torch carries CUDA on both x64 and arm64: the arm64 build
-      # came out at 3049 MB, over GitHub's 2 GB asset limit. PyTorch's CPU
-      # index has the same torch without it. Mac (MPS) and Windows wheels on
-      # PyPI are CPU/MPS already (Windows 288 MB, Linux x64 CPU 398 MB).
-      # Ultralytics --no-deps, or it pulls opencv-python beside the headless
-      # one (116 MB twice) and SciPy, which counting never imports.
-      - name: Install the build tools, OpenCV, PyTorch and Ultralytics
+      # ONNX Runtime runs the model: CPU by default, the accelerator when the
+      # CPU cannot keep up (hubmodel.open_onnx). On Windows the DirectML
+      # build (any DirectX 12 GPU); PyPI's Mac build has CoreML.
+      - name: Install the build tools, OpenCV and ONNX Runtime
         run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            pip install onnxruntime-directml
           else
-            pip install torch torchvision
+            pip install onnxruntime
           fi
           pip install pyinstaller opencv-python-headless numpy yt-dlp
-          pip install --no-deps ultralytics ultralytics-thop
-          pip install matplotlib pillow pyyaml requests psutil polars
           pip install fastapi uvicorn websockets      # Watchtower's server
           pip install pywebview qrcode                # Watchtower's own windows, phone QR code
 
@@ -110,6 +109,16 @@ jobs:
           assert got == want, f"fuel_relabel.pt is {got}, CHANGELOG says {want}"
           print("fuel_relabel.pt", got)
           PY
+
+      # torch + Ultralytics in their own venv, so the build's has neither.
+      # PyTorch's CPU index: PyPI's Linux torch carries CUDA, GBs of it.
+      - name: Export the fuel model to ONNX (checked box for box against the .pt)
+        run: |
+          python -m venv "$RUNNER_TEMP/export"
+          if [ "${{ runner.os }}" = "Windows" ]; then X="$RUNNER_TEMP/export/Scripts/python"; else X="$RUNNER_TEMP/export/bin/python"; fi
+          "$X" -m pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          "$X" -m pip install -q ultralytics onnx onnxslim onnxruntime opencv-python-headless
+          "$X" train/export_onnx.py models/fuel_relabel.pt
 
       - name: Build
         env:

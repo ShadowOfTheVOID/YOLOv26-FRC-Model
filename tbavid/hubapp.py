@@ -128,15 +128,25 @@ def problems(cfg: Dict) -> List[str]:
         m = c.get("model") or {}
         if m.get("weights") == BUILTIN and bundled_model() is None:
             out.append(f"{c['name']}: this copy has no built-in fuel model "
-                       f"-- choose the .pt file, or turn the model off.")
+                       f"-- choose the .onnx or .pt file, or turn the model off.")
         elif m.get("weights") and m["weights"] != BUILTIN and not os.path.exists(m["weights"]):
             out.append(f"{c['name']}: the fuel model {m['weights']} is not there "
                        f"-- pick it again, or turn the model off.")
-    if any((c.get("model") or {}).get("weights") for c in cams) and not _has_ultralytics():
+    for c in cams:
         # Found here, not at Start: the counter would open, run a moment
         # and die in its camera thread, which reads as a camera fault.
-        out.append("The fuel model needs Ultralytics: start this page from "
-                   ".venv-train (run.py hubgui), or turn the model off.")
+        w = (c.get("model") or {}).get("weights") or ""
+        if not w:
+            continue
+        if w == BUILTIN:
+            w = bundled_model() or ""
+        if w.lower().endswith(".onnx") and not _has("onnxruntime"):
+            out.append(f"{c['name']}: a .onnx model needs onnxruntime "
+                       f"(pip install onnxruntime), or turn the model off.")
+        elif w.lower().endswith(".pt") and not _has("ultralytics"):
+            out.append(f"{c['name']}: a .pt model needs Ultralytics: start this page "
+                       f"from .venv-train (run.py hubgui), use the .onnx export, "
+                       f"or turn the model off.")
     return out
 
 
@@ -160,9 +170,9 @@ def double_count_risks(cfg: Dict) -> List[str]:
     return out
 
 
-def _has_ultralytics() -> bool:
+def _has(module: str) -> bool:
     import importlib.util
-    return importlib.util.find_spec("ultralytics") is not None
+    return importlib.util.find_spec(module) is not None
 
 
 def list_dir(path: str) -> Dict:
@@ -179,7 +189,7 @@ def list_dir(path: str) -> Dict:
                 dirs.append(name)
             elif name.lower().endswith(VIDEO_EXT):
                 videos.append(name)
-            elif name.lower().endswith(".pt"):
+            elif name.lower().endswith((".pt", ".onnx")):
                 models.append(name)
     except OSError as e:
         return {"path": path, "parent": os.path.dirname(path), "dirs": [],

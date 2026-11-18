@@ -20,7 +20,8 @@ the ball has been gone `vanish` frames and nothing has reappeared near it for
 the colour half; DEFAULT_MODEL holds the hold to what the tuning measured.
 
 `ModelCounter` is pure state (no torch, no OpenCV) so it is tested without a
-model; `ModelEye` runs the network and needs requirements-detect.txt.
+model; `ModelEye` runs the network: onnxruntime for a .onnx file (what the
+apps ship), requirements-detect.txt for a .pt.
 """
 from __future__ import annotations
 
@@ -84,16 +85,18 @@ DEFAULT_WEIGHT = 0.5
 # and the saved setup would then point at nothing.
 BUILTIN = "built-in"
 BUILTIN_FILE = "fuel_relabel.pt"
+BUILTIN_ONNX = "fuel_relabel.onnx"   # preferred: the app ships this, without torch
 _CHECKOUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def bundled_model() -> Optional[str]:
     """Path of the built-in model, or None in a build or checkout without it."""
     roots = [getattr(sys, "_MEIPASS", None), _CHECKOUT]
-    for r in roots:
-        p = os.path.join(r, "models", BUILTIN_FILE) if r else ""
-        if p and os.path.isfile(p):
-            return p
+    for name in (BUILTIN_ONNX, BUILTIN_FILE):
+        for r in roots:
+            p = os.path.join(r, "models", name) if r else ""
+            if p and os.path.isfile(p):
+                return p
     return None
 
 
@@ -188,22 +191,41 @@ def blend(colour: int, model: int, weight: float) -> int:
 class ModelEye:
     """Runs the model on every model zone of one camera, one batch a frame.
 
-    Loads Ultralytics lazily: the API host and the colour-only counter never
-    import torch. `device` is passed to Ultralytics; "" picks CUDA, then
-    Apple MPS, then CPU (`pick_device`). On a 4-core CPU two 640 px crops
-    took 0.3 s, too slow to keep up live; a laptop GPU or Apple silicon is
-    needed.
+    A .onnx file runs on ONNX Runtime (tbavid/onnxdet.py): no torch, CPU by
+    default, so the GPU stays free; its detections matched the .pt's to
+    0.0002 px on every box (437 of 437, 2026-11-18). A .pt file runs on
+    Ultralytics, loaded lazily so the colour-only counter never imports
+    torch. `device` is "" (ONNX: `open_onnx`'s auto choice; .pt: CUDA, then
+    Apple MPS, then CPU, `pick_device`), "cpu", or "gpu"/"cuda"/"mps". On 4 CPU cores
+    two 640 px crops took 131 ms with ONNX Runtime and 178 ms with torch
+    (0.3 s on an older 4-core box): too slow for 30 fps, so ModelWorker
+    drops the model half there rather than let it drag the count.
     """
 
     def __init__(self, weights: str, polys: Dict[str, Sequence[Point]],
                  device: str = ""):
-        from ultralytics import YOLO
-        self.model = YOLO(resolve_weights(weights))
-        self.device = device or pick_device()
+        path = resolve_weights(weights)
+        self.onnx = path.lower().endswith(".onnx")
+        if self.onnx:
+            self.model, self.device = open_onnx(path, device)
+        else:
+            from ultralytics import YOLO
+            self.model = YOLO(path)
+            self.device = device or pick_device()
         self.polys = dict(polys)
         self.crops: Dict[str, Tuple[int, int, int, int]] = {}
         self.prev = None
         self.ball_px = 18.0
+
+    def _predict(self, imgs) -> List[Tuple[List, List]]:
+        """Per crop: (xyxy boxes, confidences) in crop pixels, fuel only."""
+        if self.onnx:
+            return [(b.tolist(), s.tolist()) for b, s, _ in
+                    self.model.predict(imgs, conf=DET_CONF, max_det=1500, classes=[0])]
+        rs = self.model.predict(imgs, imgsz=MODEL_IMGSZ, conf=DET_CONF,
+                                max_det=1500, classes=[0], verbose=False,
+                                device=self.device)
+        return [(r.boxes.xyxy.tolist(), r.boxes.conf.tolist()) for r in rs]
 
     def detect(self, frame) -> Tuple[List[Tuple[XYXY, float]], List[XYXY]]:
         """Every crop's detections in full-frame pixels, and colour_assist's
@@ -214,13 +236,10 @@ class ModelEye:
             self.crops = {n: crop_box(p, w, h) for n, p in self.polys.items()}
         names = list(self.crops)
         imgs = [frame[y0:y1, x0:x1] for x0, y0, x1, y1 in (self.crops[n] for n in names)]
-        rs = self.model.predict(imgs, imgsz=MODEL_IMGSZ, conf=DET_CONF,
-                                max_det=1500, classes=[0], verbose=False,
-                                device=self.device)
         dets: List[Tuple[XYXY, float]] = []
-        for n, r in zip(names, rs):
+        for n, (boxes, confs) in zip(names, self._predict(imgs)):
             x0, y0 = self.crops[n][:2]
-            for b, c in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist()):
+            for b, c in zip(boxes, confs):
                 dets.append(((b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0), float(c)))
         assist: List[XYXY] = []
         if self.prev is not None:
@@ -232,6 +251,63 @@ class ModelEye:
                                                   self.ball_px)]
         self.prev = frame
         return dets, assist
+
+
+# The CPU must answer two crops in this long to keep up with MODEL_FPS, with
+# a fifth spare for the colour half and the camera on the same cores.
+CPU_BUDGET_S = 0.8 / MODEL_FPS
+
+
+def open_onnx(path: str, device: str = ""):
+    """(detector, where it runs). "" is auto: the CPU when it keeps up --
+    two 640 px crops inside CPU_BUDGET_S, median of 5 after a warm-up --
+    else the computer's accelerator, else the CPU anyway (ModelWorker then
+    drops the model half if it falls behind). On 4 Xeon cores the crops took
+    131 ms against the 27 ms budget, so a laptop like that uses its
+    accelerator: two crops a frame is ~1.2 TFLOP/s at 30 fps, a few percent
+    of a laptop GPU, and on a Mac CoreML may put it on the Neural Engine."""
+    from .onnxdet import OnnxDetector
+    if device:
+        det = OnnxDetector(path, providers=onnx_providers(device))
+        return det, det.session.get_providers()[0]
+    det = OnnxDetector(path, providers=["CPUExecutionProvider"])
+    if cpu_keeps_up(det):
+        return det, "CPUExecutionProvider"
+    fast = onnx_providers("gpu")
+    if fast[0] != "CPUExecutionProvider":
+        try:
+            det = OnnxDetector(path, providers=fast)
+            return det, det.session.get_providers()[0]
+        except Exception:      # a driver that will not load: the CPU still counts
+            pass
+    return det, "CPUExecutionProvider"
+
+
+def cpu_keeps_up(det, runs: int = 5) -> bool:
+    import time
+    import numpy as np
+    crops = [np.full((MODEL_IMGSZ, MODEL_IMGSZ, 3), 90, np.uint8)] * 2
+    det.predict(crops, conf=DET_CONF)
+    took = []
+    for _ in range(runs):
+        t = time.perf_counter()
+        det.predict(crops, conf=DET_CONF)
+        took.append(time.perf_counter() - t)
+    return sorted(took)[runs // 2] <= CPU_BUDGET_S
+
+
+def onnx_providers(device: str) -> List[str]:
+    """ONNX Runtime providers for a device setting. "" and "cpu" are the CPU
+    alone; "gpu"/"cuda"/"mps" take the first accelerator this ONNX Runtime
+    build has (CUDA, DirectML on Windows, CoreML on a Mac), CPU behind it."""
+    if device in ("", "cpu"):
+        return ["CPUExecutionProvider"]
+    import onnxruntime as ort
+    have = ort.get_available_providers()
+    for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider"):
+        if p in have:
+            return [p, "CPUExecutionProvider"]
+    return ["CPUExecutionProvider"]
 
 
 def pick_device() -> str:
@@ -398,7 +474,7 @@ def parse_model(raw: Optional[Dict]) -> Optional[Dict]:
     if not raw:
         return None
     if not raw.get("weights"):
-        raise ValueError("model: needs \"weights\", the .pt file")
+        raise ValueError("model: needs \"weights\", the .onnx or .pt file")
     w = float(raw.get("weight", DEFAULT_WEIGHT))
     if not 0.0 <= w <= 1.0:
         raise ValueError(f"model: weight is the model's share, 0 to 1 (got {w})")

@@ -3479,11 +3479,12 @@ def test_hub_counter_app():
     check("the app bundles the hub pages and the model runtime, and keeps the scraper out",
           "hubweb.html" in spec and "hubboard.html" in spec
           and '"tbavid.tba"' in spec and '"tbavid.pipeline"' in spec
-          and '"torch"' in spec and 'collect_submodules("ultralytics")' in spec)
-    check("it carries torchvision's compiled ops (nms), which nothing imports by name",
-          "binaries=torchvision_ops()" in spec)
+          and '"onnxruntime"' in spec and '"tbavid.onnxdet"' in spec)
+    heavy = spec[spec.index("HEAVY = ["):spec.index("]", spec.index('"tensorrt"'))]
+    check("and keeps torch and Ultralytics out (the model runs on ONNX Runtime)",
+          '"torch"' in heavy and '"ultralytics"' in heavy)
     check("and the built-in model, required in CI so no build ships without it",
-          '"fuel_relabel.pt"' in spec and "HUBCOUNTER_REQUIRE_MODEL" in spec)
+          '"fuel_relabel.onnx"' in spec and "HUBCOUNTER_REQUIRE_MODEL" in spec)
     ctl2 = A.HubController()
     check("the address box starts empty-handed (bioarena's default in the page)",
           ctl2.state()["default_target"] == "")
@@ -4457,7 +4458,7 @@ def test_hub_model_blend():
             check("a share above 1 is refused", True)
         check("the folder listing offers .pt files for the picker",
               A.list_dir(tmp)["models"] == ["fuel_relabel.pt"])
-        if A._has_ultralytics():
+        if A._has("ultralytics"):
             check("a model that is there is ready to start", ctl.state()["problems"] == [])
         else:
             check("without Ultralytics the page says why before Start",
@@ -5496,6 +5497,52 @@ def test_count_einstein_helpers():
           CE.at([(0, 0, 0), (29.5, 90, 80), (31, 99, 99)], 30.0) == {"red": 90, "blue": 80})
 
 
+def test_onnx_decoders():
+    """tbavid/onnxdet.py turns an exported model's raw outputs into boxes the
+    way Ultralytics and RF-DETR do, so the apps can drop torch. Against the
+    real fuel_relabel export all 437 boxes matched the .pt to 0.0002 px
+    (2026-11-18); these hold the decoding rules with hand-made outputs."""
+    from tbavid import onnxdet as OD
+    # YOLO without NMS: (4 + nc, N) as centre-x, centre-y, w, h, class scores
+    cols = [  # cx, cy, w, h, fuel, robot
+        (100, 100, 20, 20, 0.90, 0.10),
+        (102, 101, 20, 20, 0.80, 0.05),   # overlaps the first (IoU ~0.75): suppressed
+        (150, 100, 20, 20, 0.30, 0.20),   # apart: kept
+        (100, 100, 20, 20, 0.02, 0.60),   # a robot on the same spot: other class, kept
+        (300, 300, 10, 10, 0.04, 0.01),   # under conf: dropped
+    ]
+    raw = np.array(cols, dtype=np.float32).T
+    b, s, c = OD.decode_yolo_raw(raw, conf=0.05, max_det=100)
+    check("onnx yolo: NMS keeps the best of an overlapping pair, per class",
+          sorted(zip(c.tolist(), [round(x, 2) for x in s.tolist()])) == [(0, 0.3), (0, 0.9), (1, 0.6)])
+    check("onnx yolo: centre/size becomes corners",
+          np.allclose(b[np.argmax(s)], [90, 90, 110, 110]))
+    b, s, c = OD.decode_yolo_raw(raw, conf=0.05, max_det=100, classes=[0])
+    check("onnx yolo: classes=[0] keeps fuel only", set(c.tolist()) == {0} and len(c) == 2)
+    check("onnx yolo: max_det caps after NMS, best first",
+          OD.decode_yolo_raw(raw, conf=0.05, max_det=1)[1].tolist() == [np.float32(0.9)])
+    # NMS boundary: IoU exactly 0.5 is kept (torchvision suppresses only above)
+    two = np.array([[0, 0, 10, 10], [0, 0, 10, 5]], dtype=np.float32)
+    check("onnx nms: IoU 0.5 is not suppressed", len(OD.nms(two, np.array([0.9, 0.8]), 0.5)) == 2)
+    # YOLO26 end-to-end: (K, 6) rows, no NMS
+    e2e = np.array([[1, 2, 3, 4, 0.9, 0], [5, 6, 7, 8, 0.5, 1], [0, 0, 1, 1, 0.01, 0]], dtype=np.float32)
+    b, s, c = OD.decode_yolo_e2e(e2e, conf=0.05, max_det=10, classes=[0])
+    check("onnx e2e: rows over conf, wanted class", len(b) == 1 and b[0].tolist() == [1, 2, 3, 4])
+    # RF-DETR: normalised cxcywh + logits; the slot past nc is no-object
+    boxes = np.array([[0.5, 0.5, 0.1, 0.1], [0.25, 0.25, 0.1, 0.2]], dtype=np.float32)
+    logits = np.array([[3.0, -9.0, 9.0], [-9.0, 0.0, -9.0]], dtype=np.float32)
+    b, s, c = OD.decode_rfdetr(boxes, logits, size=560, nc=2, conf=0.1, max_det=10)
+    check("onnx rfdetr: the no-object slot is never a detection, but takes a top-Q place",
+          c.tolist() == [0])   # top 2 of 6 pairs: no-object 9.0, fuel 3.0; robot 0.0 is third
+    b2, s2, c2 = OD.decode_rfdetr(boxes, logits, size=560, nc=2, conf=0.1, max_det=10, num_select=6)
+    check("onnx rfdetr: with more selected, the next class comes in", sorted(c2.tolist()) == [0, 1])
+    check("onnx rfdetr: sigmoid scores, best first", round(float(s[0]), 3) == 0.953)
+    check("onnx rfdetr: boxes scaled to the input size",
+          np.allclose(b[0], [252, 252, 308, 308]))
+    check("onnx names: Ultralytics metadata read back",
+          OD.parse_names("{0: 'fuel', 1: 'robot_blue'}") == ["fuel", "robot_blue"])
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5523,7 +5570,8 @@ def main() -> int:
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
                test_detector_comparison_metric, test_sam3_autolabel_rules,
-               test_unpaint_relabel_names_and_cut, test_count_einstein_helpers):
+               test_unpaint_relabel_names_and_cut, test_count_einstein_helpers,
+               test_onnx_decoders):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:
