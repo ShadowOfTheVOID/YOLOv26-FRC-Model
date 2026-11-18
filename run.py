@@ -13,9 +13,12 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Tuple
 
 from tbavid import pipeline
 from tbavid.config import VIDEO_DIR, load_config
+
+REPO_ROOT = Path(__file__).resolve().parent
 
 # Python block-buffers stdout when it is a pipe, so a backgrounded run showed
 # nothing at all for minutes while it was in fact working. Progress output is
@@ -935,6 +938,44 @@ def cmd_track(args, cfg):
     return 0
 
 
+def alias_line(shell: str, root: Path) -> str:
+    """The one line a shell's start-up file needs to have the short commands."""
+    if shell == "powershell":
+        return f'. "{root / "deploy" / "aliases.ps1"}"   # FRC short commands (run.py aliases)'
+    return f'source "{root / "deploy" / "aliases.sh"}"   # FRC short commands (run.py aliases)'
+
+
+def alias_target(shell_env: str, platform: str = sys.platform) -> Tuple[str, Path]:
+    """(shell, its start-up file): PowerShell's $PROFILE on Windows, else
+    ~/.zshrc for zsh (the macOS default), else ~/.bashrc."""
+    home = Path.home()
+    if platform == "win32":
+        return "powershell", home / "Documents" / "PowerShell" / "Microsoft.PowerShell_profile.ps1"
+    if "zsh" in (shell_env or ""):
+        return "zsh", home / ".zshrc"
+    return "bash", home / ".bashrc"
+
+
+def cmd_aliases(args, cfg):
+    """Print, or install, the short commands (deploy/aliases.sh / .ps1)."""
+    root = REPO_ROOT
+    shell, rc = alias_target(os.environ.get("SHELL", ""))
+    line = alias_line(shell, root)
+    if not args.install:
+        print(f"Add this to {rc} (or run: python3 run.py aliases --install):\n\n  {line}\n")
+        print("then open a new terminal and type  frc  for the list.")
+        return 0
+    have = rc.read_text(encoding="utf-8") if rc.exists() else ""
+    if line.split("   #")[0] in have:
+        print(f"already in {rc}: open a new terminal and type  frc")
+        return 0
+    rc.parent.mkdir(parents=True, exist_ok=True)
+    with rc.open("a", encoding="utf-8") as f:
+        f.write(("" if not have or have.endswith("\n") else "\n") + line + "\n")
+    print(f"added to {rc}. Open a new terminal (or `{line.split('   #')[0]}`) and type  frc")
+    return 0
+
+
 def cmd_hubgui(args, cfg):
     """The hub counter as a web page: cameras, outlines, calibration, the feed."""
     from tbavid import hubweb
@@ -1484,6 +1525,12 @@ def main(argv=None):
                         "needs --video or --event")
     p.add_argument("--video", help="manifest video id to measure")
     p.set_defaults(func=cmd_formats)
+
+    p = sub.add_parser("aliases", help="short terminal commands (hc, wt, fuel-...): "
+                                       "print the line for your shell, or --install it")
+    p.add_argument("--install", action="store_true",
+                   help="add it to ~/.zshrc, ~/.bashrc or the PowerShell profile")
+    p.set_defaults(func=cmd_aliases)
 
     p = sub.add_parser("status", help="ledger and dataset summary")
     p.set_defaults(func=cmd_status)

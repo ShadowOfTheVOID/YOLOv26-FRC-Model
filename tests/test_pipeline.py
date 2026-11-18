@@ -5400,6 +5400,34 @@ def test_drop_test_fit():
         check("controller: finishing a drop test never started is refused", True)
 
 
+def test_cli_aliases():
+    """`run.py aliases`: the short commands for people who prefer a terminal.
+    Every function the help lists exists in both the shell and PowerShell
+    files, and each wraps a run.py command or train/ script that exists."""
+    import re
+    import run as R
+    root = Path(__file__).resolve().parent.parent
+    sh = (root / "deploy" / "aliases.sh").read_text()
+    ps = (root / "deploy" / "aliases.ps1").read_text()
+    names = ["hc", "hc-share", "hc-feed", "hc-count", "hc-listen", "hc-board", "wt", "wt-cli",
+             "wt-open", "wt-logs", "wt-pins", "fuel-export", "fuel-compare", "fuel-count",
+             "frc-test", "frc-update", "frc"]
+    check("aliases: every command is a shell function", all(re.search(rf"^{re.escape(n)}\s*\(\)", sh, re.M) for n in names))
+    check("aliases: and a PowerShell function", all(re.search(rf"^function {re.escape(n)} ", ps, re.M) for n in names))
+    for sub in ("hubgui", "hubfeed", "hubcount", "hubfeed-listen"):
+        check(f"aliases: run.py has {sub}", f'add_parser("{sub}"' in (root / "run.py").read_text())
+    for script in ("train/export_onnx.py", "train/compare_detectors.py", "train/count_einstein.py", "apps/watchtower/main.py"):
+        check(f"aliases: {script} exists", (root / script).exists())
+    shell, rc = R.alias_target("/bin/zsh", "darwin")
+    check("aliases: zsh on a Mac goes to ~/.zshrc", shell == "zsh" and rc.name == ".zshrc")
+    check("aliases: bash elsewhere", R.alias_target("/bin/bash", "linux")[1].name == ".bashrc")
+    check("aliases: Windows goes to the PowerShell profile",
+          R.alias_target("", "win32")[1].name.endswith("_profile.ps1"))
+    check("aliases: the line sources this checkout's file",
+          str(root / "deploy" / "aliases.sh") in R.alias_line("zsh", root)
+          and R.alias_line("powershell", root).startswith(". "))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5428,7 +5456,7 @@ def main() -> int:
                test_detector_comparison_metric, test_sam3_autolabel_rules,
                test_unpaint_relabel_names_and_cut, test_count_einstein_helpers,
                test_onnx_decoders, test_watchtower_app,
-               test_drop_test_fit):
+               test_drop_test_fit, test_cli_aliases):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

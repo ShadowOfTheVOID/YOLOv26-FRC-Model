@@ -9,6 +9,17 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Short terminal commands** (`deploy/aliases.sh`, `deploy/aliases.ps1`):
+  `python3 run.py aliases --install` adds one line to `~/.zshrc`,
+  `~/.bashrc` or the PowerShell profile; then `frc` lists them. `hc` (the
+  set-up page), `hc-share`, `hc-feed` (count and send with no page),
+  `hc-count` (a recording), `hc-listen` (stand-in bioarena), `hc-board`;
+  `wt` / `wt-cli` (Watchtower: the installed app, else this checkout),
+  `wt-open PORT PAGE`, `wt-pins`, `wt-logs`; `fuel-export`, `fuel-compare`,
+  `fuel-count`; `frc-test`, `frc-update`. They take the wrapped command's
+  options and use `.venv-train`'s Python when there is one. Checked in bash
+  and zsh; the PowerShell file is not yet run on Windows.
+
 - **Hub Counter page redesigned.** Watchtower's field-control look (wall grey,
   alliance red and blue, fuel-yellow focus; dark mode follows the system),
   and one job per tab: **Set up**, **Run**, **Test**. Set up opens with a
