@@ -5520,6 +5520,24 @@ def test_model_is_primary_on_gpu():
           "z.weight = 0.0" in body and "stop.set()" not in body)
 
 
+def test_youtube_bot_check_is_not_a_dead_video():
+    """2026-11-18: from Colab every download got YouTube's "Sign in to confirm
+    you're not a bot", filed as unavailable -- 23 good matches marked dead in
+    two minutes, and the harvest carried on. Now it is BLOCKED: the fetch
+    stops at once and records nothing."""
+    from tbavid import download as D
+    from tbavid import ledger as Lg
+    check("bot check: its own status", D.classify(
+        "ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies") == D.BLOCKED)
+    check("bot check: a removed video is still unavailable",
+          D.classify("ERROR: [youtube] abc: Video unavailable. This video has been removed") == Lg.UNAVAILABLE)
+    check("bot check: anything else is a plain failure", D.classify("HTTP Error 500") == Lg.FAILED)
+    src = (Path(__file__).resolve().parent.parent / "tbavid" / "pipeline.py").read_text()
+    i = src.index("if fail == download.BLOCKED:")
+    check("bot check: the fetch stops before recording anything",
+          "raise SystemExit" in src[i:i + 600] and src.index("if fail == download.BLOCKED:") < src.index("led.record(yt, fail"))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5549,7 +5567,7 @@ def main() -> int:
                test_unpaint_relabel_names_and_cut, test_count_einstein_helpers,
                test_onnx_decoders, test_watchtower_app,
                test_drop_test_fit, test_cli_aliases,
-               test_model_is_primary_on_gpu):
+               test_model_is_primary_on_gpu, test_youtube_bot_check_is_not_a_dead_video):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

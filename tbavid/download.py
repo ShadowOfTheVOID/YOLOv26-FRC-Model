@@ -11,12 +11,30 @@ from . import ledger as L
 
 YTDLP = shutil.which("yt-dlp") or "yt-dlp"
 
+# YouTube refusing THIS MACHINE, not the video: "Sign in to confirm you're not
+# a bot" on a cloud computer. It used to be filed as unavailable, so a Colab
+# harvest (2026-11-18) marked 23 good matches dead in two minutes and carried
+# on, hiding why nothing downloaded. Now its own status, never put in the
+# ledger: the matches stay unseen and are tried again once downloads work.
+BLOCKED = "blocked"
+BLOCKED_MARKERS = ("sign in to confirm",)
+
 UNAVAILABLE_MARKERS = (
     "video unavailable", "private video", "has been removed",
-    "not available in your country", "sign in to confirm",
+    "not available in your country",
     "members-only", "this live event", "account associated with this video",
     "age-restricted", "video has been terminated",
 )
+
+
+def classify(stderr: str) -> str:
+    """yt-dlp's error -> BLOCKED (this machine), UNAVAILABLE (the video) or FAILED."""
+    err = (stderr or "").lower()
+    if any(m in err for m in BLOCKED_MARKERS):
+        return BLOCKED
+    if any(m in err for m in UNAVAILABLE_MARKERS):
+        return L.UNAVAILABLE
+    return L.FAILED
 
 
 def watch_url(yt_key: str) -> str:
@@ -46,10 +64,7 @@ def probe_remote(yt_key: str, cfg: Optional[dict] = None
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     if proc.returncode != 0:
-        err = (proc.stderr or "").lower()
-        if any(m in err for m in UNAVAILABLE_MARKERS):
-            return None, L.UNAVAILABLE
-        return None, L.FAILED
+        return None, classify(proc.stderr)
     try:
         return json.loads(proc.stdout), None
     except json.JSONDecodeError:
@@ -99,8 +114,6 @@ def download(yt_key: str, dest_dir: Path, cfg: dict) -> Tuple[Optional[Path], Op
     if proc.returncode != 0 or not matches:
         for stray in matches:
             stray.unlink(missing_ok=True)
-        err = (proc.stderr or "").lower()
-        status = L.UNAVAILABLE if any(m in err for m in UNAVAILABLE_MARKERS) else L.FAILED
-        return None, status, meta
+        return None, classify(proc.stderr), meta
 
     return matches[0], None, meta

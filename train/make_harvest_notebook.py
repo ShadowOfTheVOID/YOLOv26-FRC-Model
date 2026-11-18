@@ -44,10 +44,25 @@ Every step saves to `MyDrive/frc-harvest/` and skips what is already done, so af
 **Budget** (L4, ~4–5 units an hour): 40 matches ≈ 1 h harvest + 3–5 h labelling + 6–10 h training.
 **Do the dry run first** (`DRY_RUN = True`: 2 matches, a few frames, 1 epoch; ~20 min).
 
-**If downloads fail** with "Sign in to confirm you're not a bot": YouTube sometimes refuses cloud computers.
-Either run the harvest cells later (it is often temporary), or export a `cookies.txt` from a browser signed in
-to a spare Google account (the "Get cookies.txt LOCALLY" extension), put it in `MyDrive/frc-harvest/` and set
-`YT_COOKIES = "cookies.txt"`. Your choice: cookies expire, and they let the downloader act as that account.
+**If downloads fail** with "Sign in to confirm you're not a bot": YouTube refuses some cloud computers,
+Colab's included. The harvest then stops at once and marks nothing, so the matches are tried again later.
+Three ways round it:
+
+* **Retry later**: it is sometimes temporary.
+* **A cookies file**: export `cookies.txt` from a browser signed in to a *spare* Google account (the "Get
+  cookies.txt LOCALLY" extension), put it in `MyDrive/frc-harvest/` and set `YT_COOKIES = "cookies.txt"`.
+  Your choice: cookies expire, and they let the downloader act as that account.
+* **Harvest on your own computer** (YouTube does not block home connections), then let Colab label and train.
+  In a checkout of this repo with the requirements installed (`pip install -r requirements.txt yt-dlp`, plus
+  ffmpeg), and `TBA_AUTH_KEY` set:
+
+  ```
+  export TBAVID_DATA=~/frc-harvest/hdata
+  python3 run.py fetch -n 40 --per-event-cap 2 --seed 2026
+  ```
+
+  then put that `hdata` folder (and the repo's `state/` folder, as `state`) into `MyDrive/frc-harvest/`
+  and Run all here: the harvest step finds the matches already there and goes straight to labelling.
 ''')
 
 md("## 1. Settings")
@@ -194,17 +209,25 @@ def usable():
                   if e.get("status") == "ok" and not any(x in v for x in EXCLUDE))
 
 target = 2 if DRY_RUN else MATCHES
-rounds = 0
+rounds, code = 0, 0
 while len(usable()) < target and rounds < 12:
     n = min(5, target - len(usable()))
     print(f"--- fetching {n} more ({len(usable())} of {target} so far)", flush=True)
-    sh([sys.executable, "run.py", "--config", CFG, "fetch", "-n", str(n),
-        "--per-event-cap", str(PER_EVENT_CAP), "--seed", str(SEED)])
+    # --retry-failed: matches an older version marked "unavailable" when YouTube's bot check
+    # (not the video) refused them are tried again; a really removed video costs a second.
+    code = sh([sys.executable, "run.py", "--config", CFG, "fetch", "-n", str(n), "--retry-failed",
+               "--per-event-cap", str(PER_EVENT_CAP), "--seed", str(SEED)])
     sync(H, DH); sync(f"{REPO}/state", f"{DRIVE_DIR}/state")      # saved after every round
     rounds += 1
+    if code != 0:      # YouTube refusing this computer: every further try would get the same answer
+        break
 
 have = usable()
 print(f"\n{len(have)} matches ready: {', '.join(have[:8])}{' ...' if len(have) > 8 else ''}")
+if code != 0 and len(have) < target:
+    raise SystemExit("The harvest stopped: the reason is just above. If YouTube refused this computer "
+                     "('not a bot'), see 'If downloads fail' at the top: retry later, use a cookies.txt, "
+                     "or harvest on your own computer (also there). The matches already here are kept.")
 if not have:
     why = {}
     for v, e in manifest()["videos"].items():
