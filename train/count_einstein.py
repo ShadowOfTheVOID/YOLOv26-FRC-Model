@@ -103,7 +103,10 @@ def table(rows: List[Dict]) -> str:
     return "\n".join(out)
 
 
-def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer"][0]) -> List[Dict]:
+def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer"][0],
+        on_rows=None) -> List[Dict]:
+    """`on_rows(rows)` after every model: the caller saves the table so far,
+    so a Colab disconnect keeps the models already counted."""
     from tbavid.hubcount import count_recording, setup_from_dict
     _, truth = E1_TRUTH["buzzer"]
     t_auto, _ = E1_TRUTH["auto"]
@@ -113,6 +116,8 @@ def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer
     rows.append(dict(label="colour counter alone (shipped)", **c, error=error(c, truth),
                      auto=at(r["timeline"], t_auto)))
     print(f"colour: {c} in {r['took_s']}s ({r['speed']} fps)", flush=True)
+    if on_rows:
+        on_rows(rows)
     for name, weights in models:
         r = count_recording(setup_from_dict(e1_setup(video, weights)), video, CAMERA,
                             end=end, every=1.0)
@@ -122,6 +127,8 @@ def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer
         rows.append(dict(label=f"{name}: colour + model (0.5)", **b, error=error(b, truth),
                          auto=at(r["timeline"], t_auto)))
         print(f"{name}: model {m}, blend {b} in {r['took_s']}s", flush=True)
+        if on_rows:
+            on_rows(rows)
     return rows
 
 
@@ -144,12 +151,13 @@ def main(argv=None) -> int:
             print(f"  ! {name}: {w} not found -- skipped", flush=True)
             continue
         models.append((name, w))
-    rows = run(args.video, models, args.end)
-    text = table(rows)
-    print(text)
-    if args.out:
-        args.out.write_text(text + "\n")
-        args.out.with_suffix(".json").write_text(json.dumps(rows, indent=1))
+    def save(rows):
+        if args.out:      # written whole and closed each time: Drive uploads it at once
+            args.out.write_text(table(rows) + "\n")
+            args.out.with_suffix(".json").write_text(json.dumps(rows, indent=1))
+    rows = run(args.video, models, args.end, on_rows=save)
+    save(rows)
+    print(table(rows))
     return 0
 
 

@@ -61,25 +61,47 @@ def match(preds: List[Tuple[Box, float]], truths: List[Box],
           thr: float = 0.5) -> List[Tuple[Box, float, bool, int]]:
     """Greedy by score, as VOC/COCO do: each prediction takes the best
     still-unmatched truth at IoU >= thr. Returns (box, score, true positive,
-    index of the truth it took or -1)."""
-    used = set()
+    index of the truth it took or -1).
+
+    Vectorised (2026-11-18): one IoU matrix per image, then the greedy pass
+    over its rows. The pair-by-pair loop it replaces called iou() up to
+    1000 x 170 times per Einstein frame (conf 0.001, ~170 fuel each), for
+    487 frames and 7 models, and the experiments' score cell had not
+    finished after a night on the L4."""
+    import numpy as np
+    if not preds:
+        return []
+    order = sorted(range(len(preds)), key=lambda i: -preds[i][1])
+    if not truths:
+        return [(preds[i][0], preds[i][1], False, -1) for i in order]
+    P = np.asarray([preds[i][0] for i in order], dtype=np.float64)
+    T = np.asarray(truths, dtype=np.float64)
+    ix = np.clip(np.minimum(P[:, None, 2], T[None, :, 2]) - np.maximum(P[:, None, 0], T[None, :, 0]), 0, None)
+    iy = np.clip(np.minimum(P[:, None, 3], T[None, :, 3]) - np.maximum(P[:, None, 1], T[None, :, 1]), 0, None)
+    inter = ix * iy
+    union = ((P[:, 2] - P[:, 0]) * (P[:, 3] - P[:, 1]))[:, None] + \
+        ((T[:, 2] - T[:, 0]) * (T[:, 3] - T[:, 1]))[None, :] - inter
+    m = np.where(union > 0, inter / np.where(union > 0, union, 1), 0.0)
+    m[m < thr] = -1.0
     out = []
-    for box, score in sorted(preds, key=lambda p: -p[1]):
-        best, bi = thr, -1
-        for i, t in enumerate(truths):
-            if i in used:
-                continue
-            v = iou(box, t)
-            if v >= best:
-                best, bi = v, i
-        if bi >= 0:
-            used.add(bi)
-        out.append((box, score, bi >= 0, bi))
+    for r, i in enumerate(order):
+        row = m[r]
+        # the last truth with the highest IoU, as the loop's `v >= best` kept
+        bi = int(len(row) - 1 - np.argmax(row[::-1]))
+        if row[bi] < thr:
+            bi = -1
+        else:
+            m[:, bi] = -1.0              # taken
+        out.append((preds[i][0], preds[i][1], bi >= 0, bi))
     return out
 
 
 def average_precision(scored: Sequence[Tuple[float, bool]], n_truth: int) -> float:
-    """All-point interpolated AP from (score, is_tp) over every image."""
+    """All-point interpolated AP from (score, is_tp) over every image.
+
+    The interpolated precision is a running maximum from the right, in one
+    pass: the old `max(p for _, p in points[i:])` per point was quadratic,
+    ~10^11 steps at 7 models x 487 frames x up to 1000 boxes."""
     if n_truth == 0:
         return float("nan")
     tp = fp = 0
@@ -88,9 +110,13 @@ def average_precision(scored: Sequence[Tuple[float, bool]], n_truth: int) -> flo
         tp += hit
         fp += not hit
         points.append((tp / n_truth, tp / (tp + fp)))
+    best = [0.0] * len(points)
+    run = 0.0
+    for i in range(len(points) - 1, -1, -1):
+        run = max(run, points[i][1])
+        best[i] = run
     ap, prev_r = 0.0, 0.0
-    for i, (r, _) in enumerate(points):
-        p_interp = max(p for _, p in points[i:])
+    for (r, _), p_interp in zip(points, best):
         ap += (r - prev_r) * p_interp
         prev_r = r
     return ap
@@ -184,7 +210,9 @@ def yolo_predictor(weights: Path, imgsz: int):
 
     def run(path: Path) -> List[Pred]:
         r = m.predict(str(path), imgsz=imgsz, conf=0.001, max_det=1000, verbose=False)[0]
-        return [(tuple(b.xyxy[0].tolist()), float(b.conf), r.names[int(b.cls)]) for b in r.boxes]
+        # whole tensors at once: per-box .tolist() was ~1000 GPU syncs an image
+        xyxy, conf, cls = r.boxes.xyxy.tolist(), r.boxes.conf.tolist(), r.boxes.cls.tolist()
+        return [(tuple(b), float(c), r.names[int(k)]) for b, c, k in zip(xyxy, conf, cls)]
     return run
 
 
@@ -251,6 +279,39 @@ def table(results: Dict[str, Tuple[Dict[str, dict], float]], names: Sequence[str
     return "\n".join(rows)
 
 
+def _cache_file(cache: Path, name: str) -> Path:
+    return cache / f"{name}.json"
+
+
+def cached(cache, name: str, weights: str, n: int, conf: float):
+    """A model's saved scores, if they were made from these weights (same
+    size and time), on as many images, at this conf."""
+    import json
+    if not cache:
+        return None
+    f = _cache_file(cache, name)
+    try:
+        d = json.loads(f.read_text())
+        st = Path(weights).stat()
+        if d["weights"] == [str(weights), st.st_size, int(st.st_mtime)] and d["n"] == n and d["conf"] == conf:
+            return d["stats"], d["ms"]
+    except (OSError, ValueError, KeyError):
+        pass
+    return None
+
+
+def save_cached(cache, name: str, weights: str, n: int, conf: float, got) -> None:
+    import json
+    if not cache:
+        return
+    cache.mkdir(parents=True, exist_ok=True)
+    st = Path(weights).stat()
+    tmp = _cache_file(cache, name).with_suffix(".tmp")
+    tmp.write_text(json.dumps({"weights": [str(weights), st.st_size, int(st.st_mtime)], "n": n,
+                               "conf": conf, "stats": got[0], "ms": got[1]}))
+    tmp.replace(_cache_file(cache, name))     # closed at once, so Drive uploads it now
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -267,27 +328,37 @@ def main() -> None:
     ap.add_argument("--conf", type=float, default=0.25,
                     help="working threshold for recall/precision")
     ap.add_argument("--limit", type=int, default=0, help="first N val images only")
+    ap.add_argument("--cache", type=Path,
+                    help="a folder: each model's scores are saved there as it finishes and "
+                         "reused on the next run, so a Colab disconnect loses one model at most")
     args = ap.parse_args()
     images, label_dir, names = val_set(args.data)
     if args.limit:
         images = images[:args.limit]
     results = {}
+    jobs = []
     for spec in args.yolo:
         name, path, imgsz = yolo_spec(spec, args.imgsz)
-        if not Path(path).exists():
-            print(f"  ! {name}: {path} not found -- skipped")
-            continue
-        per, ms = run_model(yolo_predictor(Path(path), imgsz), images, label_dir, names)
-        results[name] = (evaluate(per, names, args.conf), ms)
+        jobs.append((name, path, lambda p=path, z=imgsz: yolo_predictor(Path(p), z)))
     for spec in args.rfdetr:
         name, sep, path = spec.partition("=")
         if not sep:
             name, path = "rfdetr", spec
+        jobs.append((name, path, lambda p=path: rfdetr_predictor(Path(p), args.rfdetr_size)))
+    for name, path, make in jobs:
         if not Path(path).exists():
-            print(f"  ! {name}: {path} not found -- skipped")
+            print(f"  ! {name}: {path} not found -- skipped", flush=True)
             continue
-        per, ms = run_model(rfdetr_predictor(Path(path), args.rfdetr_size), images, label_dir, names)
-        results[name] = (evaluate(per, names, args.conf), ms)
+        got = cached(args.cache, name, path, len(images), args.conf)
+        if got is None:
+            t0 = time.perf_counter()
+            per, ms = run_model(make(), images, label_dir, names)
+            got = (evaluate(per, names, args.conf), ms)
+            save_cached(args.cache, name, path, len(images), args.conf, got)
+            print(f"  {name}: scored in {time.perf_counter() - t0:.0f} s", flush=True)
+        else:
+            print(f"  {name}: from {args.cache}", flush=True)
+        results[name] = got
     if not results:
         ap.error("give --yolo and/or --rfdetr")
     print(f"{len(images)} val images, conf {args.conf}, small = shorter side < {SMALL_PX} px")
