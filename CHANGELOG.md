@@ -9,6 +9,23 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **`train/colab_harvest_1280.ipynb`: harvest matches and train YOLO26s at
+  1280.** The bake-off's 1280 model was the best detector but had seen four
+  Einstein matches only. This notebook harvests 2026 competition matches
+  with `run.py fetch` (default 40, at most 2 per event, the Championship /
+  Einstein events left out so Einstein 1 stays the test), labels them with
+  the bake-off's recipe (`relabel_video.py --from-scraper` with the v0.3.0
+  models, then SAM 3 for fuel) in batches of 5 saved to Drive as each
+  finishes, trains on the harvest plus Einstein 4/5/8, then judges it on
+  Einstein 1 (score table and counting test) against the bake-off's 1280
+  model and fuel_relabel.pt, and exports the `.onnx`. Every step resumes after
+  a disconnect: the never-twice ledger and the harvest are copied to Drive
+  after every round of downloads. TBA and Hugging Face keys come from Colab
+  Secrets or a hidden prompt. An optional cookies.txt is offered for when
+  YouTube refuses cloud machines. The dataset assembly was checked here with
+  Ultralytics' own reader; the harvest, SAM 3 and training run only in Colab
+  and have not been run yet.
+
 - **Exit lines are counted by the model.** At the scrimmage balls went
   uncounted through exit lines, which were colour only (the model counted
   outlines alone). `hubmodel.ModelExitCounter` tracks each ball near the
