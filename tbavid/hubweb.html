@@ -582,7 +582,7 @@ input[type=range]{accent-color:var(--ink)}
         <label class="switch"><span>Ignore yellow that stays still</span><input type="checkbox" id="f_remove_static"><i></i></label>
       </details>
       <details class="adv" id="modelbox"><summary>Fuel model <span class="muted" id="modelstate">(off)</span></summary>
-        <p class="muted" style="margin:10px 0 8px">Blends a trained model's count with the colour count. On four Einstein matches: 6.8% error against 10.1% for colour alone; on the Central Valley broadcast it was worse (34.5%), so check it on your camera. Fast enough on Apple silicon or an NVIDIA GPU; on a slower computer it turns itself off after about 10 s and counts by colour.</p>
+        <p class="muted" style="margin:10px 0 8px">Off by default: colour alone is the safer choice. Blending a trained model's count with the colour count has gone both ways: 6.8% error against 10.1% for colour alone over four Einstein matches (October), but 10.3% against 9.6% on Einstein 1 rebuilt from scratch (November), and 34.5% on the Central Valley broadcast. Turn it on only if <b>Check a recording</b> (Test tab) shows it closer on your own camera. It runs on the CPU when that keeps up, else on the computer's accelerator; if neither keeps up it turns itself off after about 10 s and counts by colour.</p>
         <div class="row"><button class="btn sm" id="modelbuiltin" onclick="setModel('built-in')"><svg><use href="#i-tune"/></svg>Use built-in model</button>
           <button class="btn sm" onclick="pickFile('model')"><svg><use href="#i-open"/></svg><span id="modelpick">Choose model (.pt)</span></button>
           <button class="btn sm" id="modeloff" onclick="setModel('')">Turn off</button></div>
