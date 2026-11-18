@@ -9,6 +9,20 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **2026-11 model experiments: no new counting model.** Seven models scored
+  on 487 Einstein 1 frames (SAM 3 labels): YOLO26s at 1280 best (fuel AP50
+  0.963, F1 0.948), then YOLO26m 0.954, tuned RF-DETR (900 queries) 0.949 at
+  precision 0.837, P2 0.943, base YOLO26s 0.940, RF-DETR 0.935, YOLO26n 0.904.
+  Counting Einstein 1 against the scoreboard (621 / 415) with the shipped hub
+  counter, mean error at the buzzer: colour alone 9.6%; blended with colour,
+  fuel_relabel.pt 10.3%, base 10.6%, 1280 10.6%, n 11.1%, m 11.3%, P2 11.6%;
+  models alone 11.0% (fuel_relabel) to 13.5% (P2). Every model under-counts
+  blue by ~18% (~510 of 621): the tracker losing balls fired in streams,
+  which a better detector does not fix. fuel_relabel.pt stays; one match, so
+  differences of about a point are within noise. Setup rebuilt from the
+  recorded E4 outlines + E1 shift (count_einstein.py), not the scratch setup
+  behind HUB_FEED.md's 9.1% / 7.8%.
+
 - **Short terminal commands** (`deploy/aliases.sh`, `deploy/aliases.ps1`):
   `python3 run.py aliases --install` adds one line to `~/.zshrc`,
   `~/.bashrc` or the PowerShell profile; then `frc` lists them. `hc` (the
