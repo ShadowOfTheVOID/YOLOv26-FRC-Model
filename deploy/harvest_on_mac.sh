@@ -13,8 +13,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/ShadowOfTheVOID/YOLOv26-FRC-Model/main/deploy/harvest_on_mac.sh | bash
 #   ... | bash -s -- 20                    # another number
 #
-# Needs: Google Drive for desktop signed in to the Drive that holds
-# frc-harvest/, and a TBA Read API key (it asks; or set TBA_AUTH_KEY). No
+# Needs: a TBA Read API key (it asks; or set TBA_AUTH_KEY). With Google Drive
+# for desktop signed in, the results go straight into frc-harvest/ in Drive;
+# without it they are packed into ~/frc-harvest/harvest.zip, which you drag
+# into the frc-harvest folder at drive.google.com (the notebook unpacks it). No
 # Homebrew: ffmpeg and ffprobe are static builds fetched into
 # ~/frc-harvest/bin when they are not already installed (osxexperts.net for
 # Apple silicon, evermeet.cx for Intel), yt-dlp goes into the script's own
@@ -43,9 +45,12 @@ fi
 command -v python3 >/dev/null && python3 -c "import venv" 2>/dev/null \
   || { echo "Python 3 is needed: run  xcode-select --install  (Apple's developer tools), then this again."; exit 1; }
 DRIVE="$(ls -d "$HOME"/Library/CloudStorage/GoogleDrive-*/"My Drive" 2>/dev/null | head -1 || true)"
-[ -n "$DRIVE" ] || { echo "Google Drive for desktop is not set up on this Mac (no ~/Library/CloudStorage/GoogleDrive-*). Install it from google.com/drive/download and sign in."; exit 1; }
-DEST="$DRIVE/frc-harvest"
-mkdir -p "$DEST/hdata" "$DEST/state" "$LOCAL/hdata"
+DEST=""
+if [ -n "$DRIVE" ]; then
+  DEST="$DRIVE/frc-harvest"
+  mkdir -p "$DEST/hdata" "$DEST/state"
+fi
+mkdir -p "$LOCAL/hdata" "$LOCAL/state"
 
 say "Tools (ffmpeg, and a Python environment with yt-dlp)"
 BIN="$LOCAL/bin"
@@ -79,10 +84,14 @@ if [ -z "${TBA_AUTH_KEY:-}" ]; then
 fi
 export TBA_AUTH_KEY
 
-say "Picking up where Colab or an earlier run left off"
-rsync -a "$DEST/hdata/" "$LOCAL/hdata/"
-rsync -a "$DEST/state/" "$REPO/state/"                 # the never-twice ledger and saved TBA lists
-[ -f "$DEST/tba_cache.zip" ] && unzip -q -n "$DEST/tba_cache.zip" -d "$REPO/state/tba_cache" || true
+mkdir -p "$REPO/state"
+rsync -a "$LOCAL/state/" "$REPO/state/"                # the never-twice ledger from earlier runs here
+if [ -n "$DEST" ]; then
+  say "Picking up where Colab or an earlier run left off"
+  rsync -a "$DEST/hdata/" "$LOCAL/hdata/"
+  rsync -a "$DEST/state/" "$REPO/state/"               # the never-twice ledger and saved TBA lists
+  [ -f "$DEST/tba_cache.zip" ] && unzip -q -n "$DEST/tba_cache.zip" -d "$REPO/state/tba_cache" || true
+fi
 
 # The notebook's settings: clean main-camera clips only, no scoreboard OCR
 CFG="$REPO/harvest-config.json"
@@ -101,10 +110,24 @@ set +e
 code=$?
 set -e
 
-say "Copying to Google Drive ($DEST)"
-rsync -a "$LOCAL/hdata/" "$DEST/hdata/"
-rsync -a "$REPO/state/" "$DEST/state/"
+rsync -a "$REPO/state/" "$LOCAL/state/"                # kept here too, so a re-run never repeats a match
 ok=$("$REPO/.venv-harvest/bin/python" -c "import json,sys; m=json.load(open(sys.argv[1])); print(sum(e.get('status')=='ok' for e in m.get('videos',{}).values()))" "$LOCAL/hdata/review/manifest.json" 2>/dev/null || echo 0)
-say "$ok matches ready in Drive."
-echo "Wait for Google Drive to finish uploading (its menu-bar icon), then in Colab: L4 runtime, Run all."
+if [ -n "$DEST" ]; then
+  say "Copying to Google Drive ($DEST)"
+  rsync -a "$LOCAL/hdata/" "$DEST/hdata/"
+  rsync -a "$REPO/state/" "$DEST/state/"
+  say "$ok matches ready in Drive."
+  echo "Wait for Google Drive to finish uploading (its menu-bar icon), then in Colab: L4 runtime, Run all."
+else
+  # No Drive app: one file to drag into Drive in the browser. Stored, not
+  # compressed (the clips are already compressed video).
+  say "Packing $ok matches into $LOCAL/harvest.zip"
+  rm -f "$LOCAL/harvest.zip"
+  (cd "$LOCAL" && zip -r -0 -q harvest.zip hdata state -x "*/.DS_Store")
+  ls -lh "$LOCAL/harvest.zip" | awk '{print "  " $5}'
+  echo "Upload it: open drive.google.com, go into the frc-harvest folder, and drag harvest.zip in"
+  echo "(replace the old one if Drive asks). Then in Colab: L4 runtime, Run all."
+  open "$LOCAL" 2>/dev/null || true
+  open "https://drive.google.com/drive/search?q=frc-harvest" 2>/dev/null || true
+fi
 exit $code

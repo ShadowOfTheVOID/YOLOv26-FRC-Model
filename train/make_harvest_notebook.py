@@ -185,6 +185,12 @@ def sync(src, dst):
 # bring back what earlier sessions harvested, and the never-twice ledger
 sync(DH, H)
 sync(f"{DRIVE_DIR}/state", f"{REPO}/state")
+# matches downloaded on a Mac without the Drive app arrive as one zip (deploy/harvest_on_mac.sh);
+# its ledger and clips are newer than anything here, so they replace older copies
+if os.path.exists(f"{DRIVE_DIR}/harvest.zip"):
+    print("unpacking harvest.zip from the Mac ...")
+    subprocess.run(["unzip", "-q", "-o", f"{DRIVE_DIR}/harvest.zip", "hdata/*", "-d", "/content"], check=False)
+    subprocess.run(["unzip", "-q", "-o", f"{DRIVE_DIR}/harvest.zip", "state/*", "-d", REPO], check=False)
 # TBA's event and match lists saved on a machine TBA answers: used when it refuses Colab (403)
 if os.path.exists(f"{DRIVE_DIR}/tba_cache.zip"):
     os.makedirs(f"{REPO}/state/tba_cache", exist_ok=True)
