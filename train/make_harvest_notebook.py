@@ -126,16 +126,23 @@ def sh(args, cwd=REPO):
         print(line, end="", flush=True)
     return p.wait()
 
-# The key, checked now: a wrong one used to surface only as "nothing downloaded"
+# The key, checked now: a wrong one used to surface only as "nothing downloaded". With the
+# User-Agent the harvester itself sends: without one TBA's firewall answers 403 to ANY key
+# (measured 2026-11-18: no User-Agent -> 403, this one -> 401 for a fake key), which this check
+# first misreported as a refused key.
 import urllib.request, urllib.error
+problem = ""
 try:
     req = urllib.request.Request("https://www.thebluealliance.com/api/v3/events/2026/simple",
-                                 headers={"X-TBA-Auth-Key": os.environ["TBA_AUTH_KEY"]})
-    n_events = len(json.load(urllib.request.urlopen(req, timeout=30)))
-    print(f"TBA key works: {n_events} events in 2026")
+                                 headers={"X-TBA-Auth-Key": os.environ["TBA_AUTH_KEY"],
+                                          "User-Agent": "TBACroppedOutVid/1.0"})
+    print(f"TBA key works: {len(json.load(urllib.request.urlopen(req, timeout=30)))} events in 2026")
 except urllib.error.HTTPError as e:
-    raise SystemExit(f"TBA refused the key ({e.code}). Use the Read API key from "
-                     f"thebluealliance.com -> Account -> Read API Keys (not a Write key).")
+    problem = (f"TBA refused the key (401): use the Read API key from thebluealliance.com -> Account "
+               f"-> Read API Keys (not a Write key)." if e.code == 401 else
+               f"TBA answered {e.code}: not the key; TBA or this connection. Try again in a few minutes.")
+if problem:                     # raised outside the except, which Colab's error display trips over
+    raise SystemExit(problem)
 ''')
 
 md(r'''
