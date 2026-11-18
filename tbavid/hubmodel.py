@@ -92,8 +92,8 @@ _CHECKOUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def bundled_model() -> Optional[str]:
     """Path of the built-in model, or None in a build or checkout without it."""
     roots = [getattr(sys, "_MEIPASS", None), _CHECKOUT]
-    for name in (BUILTIN_ONNX, BUILTIN_FILE):
-        for r in roots:
+    for r in roots:                       # the app's own bundle first, then a checkout
+        for name in (BUILTIN_ONNX, BUILTIN_FILE):
             p = os.path.join(r, "models", name) if r else ""
             if p and os.path.isfile(p):
                 return p

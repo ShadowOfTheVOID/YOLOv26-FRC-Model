@@ -307,7 +307,7 @@ def _at(body) -> Optional[float]:
 # (HubController.locked), from this computer and from a shared phone alike.
 EDITS = {"add_camera", "remove_camera", "apply_preset", "delete_preset",
          "update_camera", "add_zone", "delete_zone", "combine", "confirm",
-         "apply_calibration", "load",
+         "apply_calibration", "load", "drop_start", "drop_finish", "zone_colour",
          # camcheck: moving the outlines, or taking a new reference picture
          "shift_zones", "reference"}
 
@@ -337,6 +337,10 @@ ACTIONS = {
     "shift_zones": lambda c, b: c.shift_zones(b["camera"], b["dx"], b["dy"]),
     "grab": lambda c, b: _job(c, "picture", lambda: (c.grab(b["camera"], _at(b)), None)[1]),
     "measure": lambda c, b: _job(c, "measure", lambda: c.measure(b["camera"])),
+    "drop_start": lambda c, b: c.drop_test_start(b["camera"]),
+    "drop_finish": lambda c, b: c.drop_test_finish(b.get("hand") or {}),
+    "drop_cancel": lambda c, b: c.drop_test_cancel(),
+    "zone_colour": lambda c, b: c.set_zone_colour(b["camera"], b["zone"], b.get("colour")),
     "find_cameras": lambda c, b: _job(c, "find cameras", probe_cameras),
     "calibrate": lambda c, b: _job(c, "calibrate", lambda: c.calibrate(
         b["camera"], b["video"], b.get("hand") or {})),

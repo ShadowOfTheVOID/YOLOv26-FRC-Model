@@ -731,12 +731,11 @@ def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
         cv2.imwrite(still_path, still)
         out(f"wrote {still_path}: draw each hub's funnel-mouth outline on it "
             f"(x,y pairs, bottom edge on the solid front rim)")
-    if not polys:
-        out("no outlines given, so no ball area measured")
-        return None
     # A generous region while measuring: the area is not known yet, so size
-    # the margin as if balls were large.
-    boxes = [region_of(p, 4000.0, w, h) for p in polys.values()]
+    # the margin as if balls were large. No outline yet: the whole picture,
+    # so the ruler can help draw the first one (Watchtower v2.5's Measure).
+    boxes = ([region_of(p, 4000.0, w, h) for p in polys.values()] if polys
+             else [(0, 0, w, h)])
     areas: List[float] = []
     frames = 0
     end = time.monotonic() + seconds
@@ -749,8 +748,8 @@ def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
             areas += isolated_ball_areas(frame, box, lo, hi)
     cap.release()
     if not areas:
-        out(f"no isolated ball near either hub in {frames} frames. Put a few "
-            f"balls, apart from each other, near each hub and run it again.")
+        out(f"no lone ball {'near the outlines ' if polys else ''}in {frames} frames. "
+            f"Put a few balls in view, apart from each other, and run it again.")
         return None
     area = statistics.median(areas)
     out(f"one ball = {area:.0f} px under the counting gate "
@@ -853,9 +852,13 @@ class Zone:
     def __init__(self, name: str, hub: str, outline: Sequence[Point],
                  ball_area: float, blur: float = DEFAULT_BLUR,
                  line: Optional[Sequence[Point]] = None,
-                 out: Optional[Point] = None):
+                 out: Optional[Point] = None, colour: Optional[Dict] = None):
         self.name = name
         self.hub = hub
+        # This hub's own fuel colour (camprofile), or None for the camera's:
+        # one camera watching both hubs can see them under different light.
+        from .camprofile import check_colour
+        self.colour = check_colour(colour) if colour else None
         self.line = [tuple(map(float, p)) for p in line] if line else None
         self.out = tuple(map(float, out)) if out else None
         self.outline = [tuple(map(float, p)) for p in outline] if outline else None
@@ -916,6 +919,11 @@ class Camera:
         self.model = model
         for z in zones:
             z.weight = model["weight"] if model and z.outline else 0.0
+
+    def zone_gate(self, z: "Zone"):
+        """The (lo, hi) colour gate a zone counts with: its own, else the camera's."""
+        from .camprofile import gate
+        return gate(z.colour or self.colour)
 
     def model_zones(self) -> List["Zone"]:
         return [z for z in self.zones if z.outline] if self.model else []
@@ -1060,12 +1068,12 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
                     zones.append(Zone(zname, str(z.get("hub")), [],
                                       area if area > 0 else 1.0,
                                       min(max(blur, 0.0), 1.0),
-                                      line=line[:2], out=line[2]))
+                                      line=line[:2], out=line[2], colour=z.get("colour")))
                 else:
                     zones.append(Zone(zname, str(z.get("hub")),
                                       _outline(z.get("outline") or []),
                                       area if area > 0 else 1.0,
-                                      min(max(blur, 0.0), 1.0)))
+                                      min(max(blur, 0.0), 1.0), colour=z.get("colour")))
             except ValueError as e:
                 raise ValueError(f"zone {zname!r}: {e}")
         try:
@@ -1087,11 +1095,12 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
 
 def _zone_dict(z: Zone) -> Dict:
     pt = lambda p: [round(p[0], 1), round(p[1], 1)]
+    extra = {"colour": dict(z.colour)} if z.colour else {}
     if z.line:
         return {"name": z.name, "hub": z.hub, "line": [pt(p) for p in z.line],
-                "out": pt(z.out)}
+                "out": pt(z.out), **extra}
     return {"name": z.name, "hub": z.hub,
-            "outline": [pt(p) for p in z.counter.poly]}
+            "outline": [pt(p) for p in z.counter.poly], **extra}
 
 
 def setup_to_dict(setup: "Setup") -> Dict:
@@ -1497,10 +1506,9 @@ def run(sender, setup: Setup, realtime: bool = False,
             n += 1
             if not eyes:
                 h, w = frame.shape[:2]
-                lo, hi = gate(cam.colour)
                 eyes = {z.name: ZoneEye(region_of(z.counter.poly,
                                                   cam.ball_area, w, h),
-                                        cam.remove_static, file_fps, lo, hi)
+                                        cam.remove_static, file_fps, *cam.zone_gate(z))
                         for z in cam.zones}
             rose = [z for z in cam.zones if z.counter.update(eyes[z.name].blobs(frame))]
             tally.tick(captured)
@@ -1680,7 +1688,7 @@ def record_blobs(camera: Camera, video: str, remove_static: bool,
             h, w = frame.shape[:2]
             eyes = {z.name: ZoneEye(region_of(z.counter.poly,
                                               camera.ball_area, w, h),
-                                    remove_static, fps, *gate(camera.colour))
+                                    remove_static, fps, *camera.zone_gate(z))
                     for z in camera.zones}
         frames.append({name: eye.blobs(frame) for name, eye in eyes.items()})
         fi += 1
@@ -1754,7 +1762,7 @@ def count_recording(setup: Setup, video: str, camera: str = "",
         if eyes is None:
             h, w = frame.shape[:2]
             eyes = [(z, ZoneEye(region_of(z.counter.poly, cam.ball_area, w, h),
-                                cam.remove_static, fps, *gate(cam.colour))) for z in cam.zones]
+                                cam.remove_static, fps, *cam.zone_gate(z))) for z in cam.zones]
         for z, eye in eyes:
             z.counter.update(eye.blobs(frame))
         t = fi / fps

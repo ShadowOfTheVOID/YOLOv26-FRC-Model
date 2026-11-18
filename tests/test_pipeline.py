@@ -5315,6 +5315,91 @@ def test_watchtower_app():
           "error" in queue_tba.tba_matches("not a key", "x"))
 
 
+def test_drop_test_fit():
+    """The ball size comes from a drop test (Watchtower v2's rule, after a
+    ~9x overcount from a measured size): blobs recorded near the outlines,
+    the counter replayed at many areas, the area nearest the hand counts kept.
+    Synthetic balls of a known area falling through an outline stand in for
+    a camera."""
+    import os
+    from tbavid import dropfit as DF
+    from tbavid import hubapp as HA
+    from tbavid import hubcount as HC
+    true_area = 600.0
+    var = true_area / (4 * 3.14159)          # a filled disc's pixel variance per axis
+    red = {"name": "cam-red", "hub": "red", "outline": [[100, 200], [300, 200], [300, 260], [100, 260]]}
+    blue = {"name": "cam-blue", "hub": "blue", "outline": [[500, 200], [700, 200], [700, 260], [500, 260]]}
+    frames = []
+    def drop(x, n_frames=14):
+        for k in range(n_frames):          # from well above the outline to inside it
+            yield (x, 100 + 12 * k, true_area, var, var, 0.0)
+    plan = [(150, "cam-red", 0), (220, "cam-red", 30), (260, "cam-red", 60),
+            (560, "cam-blue", 10), (640, "cam-blue", 50)]
+    for start in range(0, 110):
+        f = {"cam-red": [], "cam-blue": []}
+        for x, zone, t0 in plan:
+            k = start - t0
+            if 0 <= k < 14:
+                f[zone].append((x, 100 + 12 * k, true_area, var, var, 0.0))
+        frames.append(f)
+    r = DF.fit([red, blue], frames, {"red": 3, "blue": 2}, 800, 600, blur=0.3)
+    check("drop test: the fit replays to the hand counts on both hubs",
+          r["got"] == {"red": 3, "blue": 2})
+    check("drop test: the fitted area is near the true one (within 0.5x-2x)",
+          0.5 * true_area <= r["area"] <= 2 * true_area)
+    check("drop test: the whole range counting right brackets the fit",
+          r["lo"] <= r["area"] <= r["hi"])
+    check("drop test: only hubs counted by hand are scored",
+          DF.fit([red, blue], frames, {"red": 3}, 800, 600)["got"] == {"red": 3})
+    try:
+        DF.fit([red], [{"cam-red": []}] * 20, {"red": 2}, 800, 600)
+        check("drop test: nothing crossed is an error, not a size", False)
+    except ValueError as e:
+        check("drop test: nothing crossed is an error, not a size", "crossed" in str(e))
+    try:
+        DF.fit([red], frames, {"red": 0}, 800, 600)
+        check("drop test: no balls typed is refused", False)
+    except ValueError:
+        check("drop test: no balls typed is refused", True)
+    check("measure: estimate is the median of lone balls, refused on too few",
+          DF.estimate([500, 600, 700, 610, 590, 605, 595, 620], 30)["area"] == 602.5)
+    check("measure vs drop test: 2x apart is still agreement, more is not",
+          DF.agrees(300, 600) and not DF.agrees(150, 693))
+    # per-hub colour: a zone's own range survives the setup round trip
+    own = {"hue_lo": 15, "hue_hi": 40, "sat_min": 90, "val_min": 80}
+    cfg = {"cameras": [{"name": "cam", "source": "0", "ball_area": 600,
+                        "zones": [dict(red, colour=own), blue]}]}
+    st = HC.setup_from_dict(cfg)
+    cam = st.cameras[0]
+    check("per-hub colour: a zone counts with its own range, the other with the camera's",
+          cam.zone_gate(cam.zones[0]) == ((15, 90, 80), (40, 255, 255))
+          and cam.zone_gate(cam.zones[1]) == HC.gate(None))
+    back = HC.setup_to_dict(st)["cameras"][0]["zones"]
+    check("per-hub colour: saved with the zone, and only there",
+          back[0]["colour"]["hue_lo"] == 15 and "colour" not in back[1])
+    # the controller: a ball size is a drop test or typed, never Measure's
+    ctl = HA.HubController()
+    with tempfile.TemporaryDirectory() as t:
+        v = os.path.join(t, "x.mp4")
+        open(v, "wb").close()
+        name = ctl.add_camera(v)["name"]
+    ctl.add_zone(name, "red", red["outline"])
+    check("controller: no ball size yet -> the drop test is what the page asks for",
+          any("drop test" in p for p in ctl.state()["problems"]))
+    c = ctl.update_camera(name, {"ball_area": 650})
+    check("controller: a typed size counts, marked as typed", c["ball_from"] == {"typed": True})
+    z = ctl.set_zone_colour(name, ctl.camera(name)["zones"][0]["name"], {"hue_lo": 18})
+    check("controller: a hub's own colour starts from the camera's and takes the change",
+          z["colour"]["hue_lo"] == 18 and "hue_hi" in z["colour"])
+    z = ctl.set_zone_colour(name, z["name"], None)
+    check("controller: and goes back to the camera's", "colour" not in z)
+    try:
+        ctl.drop_test_finish({"red": 3})
+        check("controller: finishing a drop test never started is refused", False)
+    except ValueError:
+        check("controller: finishing a drop test never started is refused", True)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5342,7 +5427,8 @@ def main() -> int:
                test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
                test_detector_comparison_metric, test_sam3_autolabel_rules,
                test_unpaint_relabel_names_and_cut, test_count_einstein_helpers,
-               test_onnx_decoders, test_watchtower_app):
+               test_onnx_decoders, test_watchtower_app,
+               test_drop_test_fit):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

@@ -123,8 +123,8 @@ def problems(cfg: Dict) -> List[str]:
         if not c.get("zones"):
             out.append(f"{c['name']}: draw at least one hub outline.")
         if not float(c.get("ball_area") or 0) > 0:
-            out.append(f"{c['name']}: measure the ball size "
-                       f"(put a few balls near the hub, then Measure).")
+            out.append(f"{c['name']}: run the drop test for the ball size "
+                       f"(step 3: drop a few balls into the hub, type how many).")
         m = c.get("model") or {}
         if m.get("weights") == BUILTIN and bundled_model() is None:
             out.append(f"{c['name']}: this copy has no built-in fuel model "
@@ -426,6 +426,9 @@ class HubController:
         self.presets_file: Optional[str] = None
         # The spec's acceptance test, live: counts when it was started.
         self.ball_test: Optional[Dict] = None
+        # The drop test (dropfit): the camera being recorded, its blobs per
+        # frame, and the event that ends the recording.
+        self.drop: Optional[Dict] = None
         # Recording the cameras while counting (Recorder per camera).
         self.recorders: Dict[str, "Recorder"] = {}
         # camcheck: each camera's picture against the one its outlines were
@@ -623,6 +626,10 @@ class HubController:
                         c[k] = float(fields[k] or 0)
                     except (TypeError, ValueError):
                         raise ValueError(f"{k} must be a number")
+            if "ball_area" in fields:      # typed: a size someone knows, not a fit
+                c["ball_from"] = {"typed": True} if c["ball_area"] else {}
+                if not c["ball_from"]:
+                    c.pop("ball_from")
             if "size" in fields:
                 c["size"] = str(fields["size"] or "").strip()
             if (float(c.get("fps") or 0), str(c.get("size") or "")) != before:
@@ -834,26 +841,162 @@ class HubController:
                 frame = self.live_frames[cam_name]
             else:
                 frame = self.frames.get(cam_name)
-            colour = next((c.get("colour") for c in self.cfg["cameras"]
-                           if c["name"] == cam_name), None)
+            cam = next((c for c in self.cfg["cameras"] if c["name"] == cam_name), None)
+            colour = cam.get("colour") if cam else None
+            own = [(z, z["colour"]) for z in (cam or {}).get("zones", []) if z.get("colour")]
         if fuel and frame is not None:
-            frame = fuel_overlay(frame, colour)
+            base = fuel_overlay(frame, colour)
+            if own:
+                # A hub with its own colour shows it around its outline: the
+                # box it searches, painted with its own range.
+                from . import dropfit
+                from .hubcount import region_of
+                h, w = frame.shape[:2]
+                area = float(cam.get("ball_area") or cam.get("measured") or 272)
+                for z, col in own:
+                    x0, y0, x1, y1 = region_of(dropfit.zone_poly(z), area, w, h)
+                    base[y0:y1, x0:x1] = fuel_overlay(frame[y0:y1, x0:x1], col)
+            frame = base
         return frame
 
     def measure(self, cam_name: str, seconds: float = 5.0) -> Optional[float]:
+        """Measure: still balls for a few seconds, the median lone-ball area.
+        Near the outlines when there are some, else anywhere in the picture,
+        so the ruler is there for drawing the first outline. It is only an
+        estimate (dropfit's docstring: lone balls measured 150-230 px against
+        the right 693 at Watchtower's first event) -- it draws the ruler and is
+        checked against the drop test, and never becomes the counted size."""
         from .hubcount import measure
         c = self.camera(cam_name)
-        if not c.get("zones"):
-            raise ValueError("draw the hub outline first: the ball is measured "
-                             "near it")
         polys = {z["name"]: [tuple(p) for p in zone_points(z)] for z in c["zones"]}
         area = measure(c["source"], polys, seconds, None,
                        float(c.get("fps") or 0), c.get("size", ""), out=self.say,
                        image=c.get("image"), colour=c.get("colour"))
         if area:
             with self.lock:
-                c["ball_area"] = round(area)
+                c["measured"] = round(area)
+            fitted = float(c.get("ball_area") or 0)
+            if fitted:
+                from .dropfit import agrees
+                if not agrees(area, fitted):
+                    self.say(f"{cam_name}: Measure says {area:.0f} px, the drop test {fitted:.0f}: "
+                             f"more than 2x apart. The drop test is what counts; check the fuel "
+                             f"colour (magenta) if the picture has changed.")
         return area
+
+    # -- the drop test (dropfit) -----------------------------------------------
+    def drop_test_start(self, cam_name: str) -> Dict:
+        """Start recording the blobs near every outline of one camera. Drop
+        balls into the hubs (any number, a few at a time), then
+        drop_test_finish with how many went into each. A recording source is
+        read to its end (or 3 minutes): count what goes in by hand."""
+        from . import dropfit
+        from .camprofile import gate
+        from .hubcount import ZoneEye, open_source
+        if self.running:
+            raise ValueError("stop counting first: the drop test needs the camera")
+        with self.lock:
+            c = json.loads(json.dumps(self.camera(cam_name)))
+        if not c["zones"]:
+            raise ValueError("draw the hub outline first: the drop test counts balls through it")
+        stop = threading.Event()
+        rec = {"camera": cam_name, "frames": [], "w": 0, "h": 0, "stop": stop,
+               "zones": c["zones"],
+               "blur": float(c["blur"]) if c.get("blur") not in (None, "") else DEFAULT_BLUR,
+               "started": time.monotonic(), "recording": True}
+
+        def record():
+            cap = open_source(c["source"], float(c.get("fps") or 0), c.get("size", ""),
+                              c.get("image"), self.say)
+            eyes, shown = None, 0.0
+            try:
+                while not stop.is_set() and len(rec["frames"]) < dropfit.MAX_FRAMES:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    if eyes is None:
+                        h, w = frame.shape[:2]
+                        rec["w"], rec["h"] = w, h
+                        eyes = {z["name"]: ZoneEye(dropfit.record_box(dropfit.zone_poly(z), w, h),
+                                                   False, 30.0, *gate(z.get("colour") or c.get("colour")))
+                                for z in c["zones"]}
+                    rec["frames"].append({n: e.blobs(frame) for n, e in eyes.items()})
+                    if time.monotonic() - shown > 0.5:      # the page's picture stays live
+                        shown = time.monotonic()
+                        with self.lock:
+                            self.frames[cam_name] = frame
+            finally:
+                cap.release()
+                rec["recording"] = False
+            self.say(f"{cam_name}: drop test recorded {len(rec['frames'])} frames")
+
+        with self.lock:
+            if self.drop and self.drop.get("recording"):
+                raise ValueError("a drop test is already recording")
+            self.drop = rec
+        if not self.job("drop test", record):
+            self.drop = None
+            raise ValueError("Busy with another job -- try again when it finishes.")
+        self.say(f"{cam_name}: drop test recording -- drop balls into the hub, then type how many")
+        return {"camera": cam_name}
+
+    def drop_test_finish(self, hand: Dict[str, int]) -> Dict:
+        """End the recording and fit the ball size to the hand counts; the
+        camera's ball_area becomes the fit. Blocks for the fit (a few seconds)."""
+        from . import dropfit
+        rec = self.drop
+        if not rec:
+            raise ValueError("start the drop test first")
+        rec["stop"].set()
+        end = time.monotonic() + 10
+        while rec.get("recording") and time.monotonic() < end:
+            time.sleep(0.05)
+        if not rec["frames"]:
+            self.drop = None
+            raise ValueError("the camera gave no frames: check it in step 1")
+        hand = clean_hand(hand)
+        with self.lock:
+            combine = dict(self.cfg.get("combine") or {})
+        r = dropfit.fit(rec["zones"], rec["frames"], hand, rec["w"], rec["h"], rec["blur"], combine)
+        with self.lock:
+            c = self.camera(rec["camera"])
+            c["ball_area"] = r["area"]
+            c["ball_from"] = {"drop": r["hand"], "got": r["got"], "lo": r["lo"], "hi": r["hi"],
+                              "frames": len(rec["frames"])}
+            measured = c.get("measured")
+            self.drop = None
+        r["camera"] = rec["camera"]
+        r["frames"] = len(rec["frames"])
+        if measured:
+            r["measured"] = measured
+            r["agrees"] = dropfit.agrees(float(measured), r["area"])
+        got = ", ".join(f"{h} {r['got'][h]} of {r['hand'][h]}" for h in r["hand"])
+        self.say(f"{rec['camera']}: one ball = {r['area']:.0f} px from the drop test "
+                 f"(replayed: {got}; {r['lo']:.0f}-{r['hi']:.0f} px count the same)")
+        return r
+
+    def drop_test_cancel(self) -> None:
+        rec = self.drop
+        if rec:
+            rec["stop"].set()
+        self.drop = None
+
+    def set_zone_colour(self, cam_name: str, zone_name: str, colour: Optional[Dict]) -> Dict:
+        """One outline's own fuel colour (None: back to the camera's)."""
+        from .camprofile import check_colour
+        with self.lock:
+            c = self.camera(cam_name)
+            z = next((z for z in c["zones"] if z["name"] == zone_name), None)
+            if z is None:
+                raise KeyError(f"no zone {zone_name}")
+            if colour:
+                z["colour"] = check_colour(dict(z.get("colour") or c.get("colour") or {}, **colour))
+            else:
+                z.pop("colour", None)
+            if "ball_from" in c:
+                self.say(f"{c['name']}: fuel colour changed -- run the drop test again, "
+                         f"the ball size was fitted under the old colour")
+            return z
 
     def calibrate(self, cam_name: str, video: str, hand: Dict[str, int],
                   progress: Optional[Callable[[float], None]] = None,
@@ -1235,6 +1378,7 @@ class HubController:
                "standard_colour": dict(STANDARD_COLOUR),
                "alignment": alignment,
                "default_blur": DEFAULT_BLUR,
+               "drop": self._drop_state(),
                "log": self.messages_since(last_log)}
         s = self.sender
         live = {"counts": {"red": 0, "blue": 0}, "linked": False, "reply": None,
@@ -1283,6 +1427,15 @@ class HubController:
             live["restarts"], live["restarting"] = self.restarts, self.restarting
         out["live"] = live
         return out
+
+    def _drop_state(self) -> Optional[Dict]:
+        rec = self.drop
+        if not rec:
+            return None
+        return {"camera": rec["camera"], "frames": len(rec["frames"]),
+                "seconds": round(time.monotonic() - rec["started"], 1),
+                "recording": bool(rec.get("recording")),
+                "hubs": sorted({z["hub"] for z in rec["zones"]})}
 
     def board(self) -> Dict:
         """The scoreboard's data: small, since the page asks ten times a second."""
