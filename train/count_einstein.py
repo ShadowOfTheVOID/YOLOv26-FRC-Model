@@ -49,6 +49,7 @@ E1_BALL = 229.0
 E1_TRUTH = {"buzzer": (172.0, {"blue": 621, "red": 415}),
             "auto": (30.0, {"blue": 95, "red": 96})}
 CAMERA = "broadcast"
+LOCAL_DIR = "/content" if Path("/content").is_dir() else "."   # Colab's own disk
 
 
 def shifted(poly: Sequence[Tuple[float, float]], dx: float, dy: float) -> List[List[float]]:
@@ -152,9 +153,20 @@ def main(argv=None) -> int:
             continue
         models.append((name, w))
     def save(rows):
-        if args.out:      # written whole and closed each time: Drive uploads it at once
-            args.out.write_text(table(rows) + "\n")
-            args.out.with_suffix(".json").write_text(json.dumps(rows, indent=1))
+        """Locally first, then to --out: Colab's Drive mount can drop mid-run
+        ("[Errno 107] Transport endpoint is not connected", 2026-11-18, after
+        the fourth model), and that must not end the counting."""
+        if not args.out:
+            return
+        local = Path(LOCAL_DIR) / args.out.name
+        local.write_text(table(rows) + "\n")
+        local.with_suffix(".json").write_text(json.dumps(rows, indent=1))
+        try:
+            args.out.write_text(local.read_text())
+            args.out.with_suffix(".json").write_text(local.with_suffix(".json").read_text())
+        except OSError as e:
+            print(f"  ! could not write {args.out} ({e}); kept in {local} -- remount Drive "
+                  f"and copy it, or re-run this cell", flush=True)
     rows = run(args.video, models, args.end, on_rows=save)
     save(rows)
     print(table(rows))
