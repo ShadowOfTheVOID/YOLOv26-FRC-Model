@@ -222,103 +222,181 @@ input[type=range]{flex:1;accent-color:var(--ink2)}
 .toast .dot{margin-top:5px}
 
 /* ======================================================================
-   2026-11 redesign. Watchtower's field-control palette; one job per tab
-   (Set up / Run / Test); the setup as steps that open one at a time, with
-   a "Next" card on top that always says what to do now. Later rules here
-   override the older ones above.
+   Studio layout (2026-11). One screen, no page scroll on a laptop: the
+   camera on a dark canvas with its drawing tools floating over it, an
+   inspector on the right (Set up / Run / Test), the live score and the
+   Start button always in the top bar. Fuel yellow is the one action colour;
+   red and blue only ever mean the alliances. Overrides the rules above.
    ====================================================================== */
-:root{--line-strong:#c3c8bf;--r-sm:10px}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--line-strong:#3a424e}}
-body{font-size:14px;letter-spacing:-.003em}
-.top{background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:saturate(1.4) blur(14px);
-  -webkit-backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--line);padding:10px 20px;gap:12px;min-height:60px}
-.brand{font-size:15.5px;letter-spacing:-.01em}
-.logo{background:var(--ink);box-shadow:none}
-.file{flex:0 1 auto;min-width:0;font-size:12.5px}
-.pill{font-size:11.5px;padding:2px 9px;background:transparent}
-.pill.dirty{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))}
-.pill.saved{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,var(--line))}
-.tabs{display:flex;gap:2px;padding:3px;margin:0 auto;border-radius:12px;background:var(--panel2);border:1px solid var(--line)}
-.tabs button{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 16px;border:0;border-radius:9px;background:transparent;
-  font-weight:650;font-size:13.5px;color:var(--muted);cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
+:root{
+  --panel:#ffffff; --panel2:#f4f5f7; --panel3:#eceef1; --line:#e6e8eb; --line-strong:#d3d7dc;
+  --ink:#0f1216; --ink2:#3a414b; --muted:#6b7480; --canvas:#0d0f12;
+  --red:#d8173a; --blue:#1463d6; --ok:#118a50; --warn:#b45309; --bad:#c2410c;
+  --fuel:#f5c400; --fuel-ink:#1a1500; --fuel-soft:#fff7d1;
+  --shadow-s:0 1px 2px rgba(15,18,22,.06); --shadow-m:0 4px 16px rgba(15,18,22,.08),0 1px 3px rgba(15,18,22,.06);
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --panel:#16191d; --panel2:#1d2126; --panel3:#252a30; --line:#272c33; --line-strong:#353b44;
+  --ink:#eceef1; --ink2:#c0c6ce; --muted:#8a939e; --canvas:#08090b;
+  --red:#ff4762; --blue:#4c8dff; --ok:#3ccf87; --warn:#f0a43a; --bad:#ff7a59; --fuel-soft:#2e2808;
+  --shadow-s:0 1px 2px rgba(0,0,0,.4); --shadow-m:0 8px 24px rgba(0,0,0,.45);
+}}
+html,body{height:100%}
+body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--panel);font-size:13.5px;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI Variable","Segoe UI",Roboto,sans-serif}
+/* ---- top bar */
+.top{position:relative;display:flex;align-items:center;gap:14px;
+  height:56px;padding:0 14px 0 16px;background:var(--panel);border-bottom:1px solid var(--line);backdrop-filter:none}
+.brand{gap:9px;font-size:14px;font-weight:720;letter-spacing:-.01em}
+.logo{width:28px;height:28px;border-radius:8px;background:var(--fuel);box-shadow:none}
+.logo svg{width:17px;height:17px;filter:invert(1) brightness(.15)}
+.file{flex:1 1 0;gap:8px;color:var(--muted);font-size:12.5px;min-width:0}
+.file .name{max-width:28vw}
+.pill{height:20px;padding:0 8px;font-size:11px;font-weight:650;border:0;background:var(--panel2)}
+.pill.dirty{color:var(--warn)} .pill.saved{color:var(--ok)}
+.scorecap{display:flex;align-items:stretch;height:38px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+.sc{display:flex;align-items:center;gap:9px;padding:0 14px;font-weight:700}
+.sc b{font-size:10.5px;letter-spacing:.14em;opacity:.8}
+.sc .num{font-size:21px;font-weight:800;letter-spacing:-.02em;min-width:2ch;text-align:center}
+.sc.red{color:var(--red)} .sc.blue{color:var(--blue)}
+.sc.mid{padding:0 14px;font-size:12.5px;font-weight:650;color:var(--ink2);border-left:1px solid var(--line);border-right:1px solid var(--line);background:var(--panel);min-width:120px;justify-content:center}
+.scorecap{flex:none}
+.acts a.btn{text-decoration:none}
+.acts{flex:1 1 0;min-width:max-content;display:flex;align-items:center;justify-content:flex-end;gap:4px}
+.btn{height:34px;padding:0 12px;border-radius:10px;font-size:13px;font-weight:620;border:1px solid var(--line-strong);background:var(--panel);color:var(--ink);box-shadow:var(--shadow-s)}
+.btn:hover{background:var(--panel2);border-color:var(--line-strong)}
+.btn.ghost{border-color:transparent;background:transparent;box-shadow:none;color:var(--ink2)}
+.btn.ghost:hover{background:var(--panel2);color:var(--ink)}
+.btn.sm{height:30px;padding:0 11px;font-size:12.5px;border-radius:9px}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:var(--panel);box-shadow:none}
+.btn.primary:hover{background:var(--ink2);border-color:var(--ink2)}
+.btn.red{color:var(--red);background:color-mix(in srgb,var(--red) 7%,var(--panel));border-color:color-mix(in srgb,var(--red) 35%,var(--line))}
+.btn.blue{color:var(--blue);background:color-mix(in srgb,var(--blue) 7%,var(--panel));border-color:color-mix(in srgb,var(--blue) 35%,var(--line))}
+.btn svg{width:15px;height:15px}
+.gobtn{height:36px;min-width:92px;margin-left:8px;padding:0 18px;border:0;border-radius:10px;cursor:pointer;font-weight:780;font-size:13.5px;
+  letter-spacing:.02em;background:var(--fuel);color:var(--fuel-ink);box-shadow:0 1px 0 rgba(0,0,0,.08),0 4px 14px color-mix(in srgb,var(--fuel) 35%,transparent);transition:transform .08s,filter .15s}
+.gobtn:hover{filter:brightness(1.04)} .gobtn:active{transform:translateY(1px)}
+.gobtn.stop{background:var(--red);color:#fff;box-shadow:0 4px 14px color-mix(in srgb,var(--red) 35%,transparent)}
+.gobtn.wait{background:var(--panel2);color:var(--muted);box-shadow:none;border:1px solid var(--line)}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--fuel) 80%,transparent);outline-offset:2px}
+/* ---- studio */
+.studio{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 392px}
+.canvas{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--canvas);
+  background-image:radial-gradient(rgba(255,255,255,.045) 1px,transparent 1px);background-size:22px 22px}
+.stage{flex:1;min-height:0;display:grid;place-items:center;padding:20px 20px 84px;background:transparent;border:0;border-radius:0;box-shadow:none;overflow:hidden}
+.pic{border-radius:10px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.06),0 20px 60px rgba(0,0,0,.55)}
+.pic img{max-width:100%;max-height:calc(100vh - 56px - 104px)}
+.badges{left:20px;top:18px}
+.badge{background:rgba(22,25,29,.78);color:#e9ecef;border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(10px)}
+.banner{top:18px;background:rgba(22,25,29,.86);color:#f1f3f5;border:1px solid rgba(255,255,255,.1);border-radius:12px;backdrop-filter:blur(12px)}
+.empty{color:#8b939d;padding:0}.empty h3{color:#eef0f2;font-size:17px}
+.empty svg{opacity:.35}
+.toolbar{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:2px;padding:5px;
+  border-radius:14px;background:rgba(24,27,32,.82);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(16px) saturate(1.3);
+  -webkit-backdrop-filter:blur(16px) saturate(1.3);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.tb{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:#e7eaee;
+  font-weight:620;font-size:13px;cursor:pointer}
+.tb:hover{background:rgba(255,255,255,.08)} .tb svg{width:15px;height:15px}
+.tb.red svg{color:#ff5a72} .tb.blue svg{color:#5c97ff}
+.tb.on{background:rgba(255,255,255,.14)}
+.tb .sw{width:12px;height:12px;border-radius:4px;background:#ff2bd6;box-shadow:0 0 0 2px rgba(255,43,214,.25)}
+.toolbar .sep{width:1px;height:20px;background:rgba(255,255,255,.12);margin:0 4px}
+.hint{position:absolute;left:50%;bottom:74px;transform:translateX(-50%);z-index:4;margin:0;padding:8px 14px;border-radius:10px;max-width:min(640px,90%);
+  background:rgba(24,27,32,.86);color:#dfe3e8;font-size:12.5px;border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(12px)}
+.hint b{color:#fff}
+.hint:has(#hint:empty):has(.progress:not([style*="block"])){display:none}
+.updbar{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:5;margin:0;border-radius:12px;box-shadow:var(--shadow-m);
+  background:var(--panel);border:1px solid color-mix(in srgb,var(--fuel) 60%,var(--line))}
+/* ---- inspector */
+.inspector{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-left:1px solid var(--line)}
+.inspector .tabs{display:flex;gap:2px;margin:12px 14px 4px;padding:3px;border-radius:11px;background:var(--panel2);border:1px solid var(--line)}
+.tabs button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;height:32px;border:0;border-radius:8px;background:transparent;
+  font-weight:650;font-size:13px;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
 .tabs button:hover{color:var(--ink)}
-.tabs button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08),0 2px 6px rgba(0,0,0,.06)}
-.tn{min-width:18px;height:18px;padding:0 5px;border-radius:99px;display:inline-grid;place-items:center;font-size:11px;font-weight:800;
-  background:var(--fuel);color:#161a1f}
-.tn.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
-.tdot{width:8px;height:8px;border-radius:50%;background:var(--line-strong)}
+.tabs button.on{background:var(--panel);color:var(--ink);box-shadow:var(--shadow-s),0 0 0 1px var(--line)}
+.tn{min-width:18px;height:18px;padding:0 5px;border-radius:99px;display:inline-grid;place-items:center;font-size:10.5px;font-weight:800;background:var(--fuel);color:var(--fuel-ink)}
+.tn.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.tdot{width:7px;height:7px;border-radius:50%;background:var(--line-strong)}
 .tdot.on{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
-.btn{height:36px;border-radius:var(--r-sm);border-color:var(--line-strong);background:var(--panel);font-weight:620}
-.btn:hover{border-color:var(--ink2);background:var(--panel)}
-.btn.ghost{border-color:transparent;background:transparent}
-.btn.ghost:hover{background:var(--panel2);border-color:var(--line)}
-.btn.sm{height:30px;padding:0 11px;font-size:12.5px;border-radius:8px}
-.btn.red{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,var(--line));background:color-mix(in srgb,var(--red) 6%,var(--panel))}
-.btn.blue{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 45%,var(--line));background:color-mix(in srgb,var(--blue) 6%,var(--panel))}
-.btn.red:hover{background:color-mix(in srgb,var(--red) 12%,var(--panel))}.btn.blue:hover{background:color-mix(in srgb,var(--blue) 12%,var(--panel))}
-.wrap{grid-template-columns:minmax(0,1fr) 420px;gap:20px;padding:20px 24px 32px}
-.main{top:80px}
-.card{border-radius:16px;box-shadow:var(--shadow)}
-/* score strip */
-.board{grid-template-columns:1fr 1fr 1.3fr;gap:12px;margin-bottom:12px}
-.score{min-height:0;padding:12px 18px 10px;border-radius:16px;box-shadow:var(--shadow)}
-.score::after{opacity:.5}
-.score .lbl{font-size:11px;letter-spacing:.16em}
-.score .num{font-size:46px;line-height:1}
-.status{padding:12px 16px}
-/* the picture */
-.stage{border-radius:16px;background:#0d1014;border:0;box-shadow:0 1px 2px rgba(0,0,0,.1),0 8px 28px rgba(0,0,0,.14)}
-.empty{color:#9aa3ad}.empty h3{color:#e6e9ed}
-.banner{background:rgba(13,16,20,.86);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.12);border-radius:12px}
-.hint{font-size:13px}
-.log summary{font-size:11px;letter-spacing:.08em;color:var(--muted)}
-/* right column: one tab at a time */
-.steps{gap:12px}
-.steps>[data-tab]{display:none}
-.steps>[data-tab].show{display:block}
+.inspector .steps{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:10px 14px 18px;scrollbar-gutter:stable}
+.steps>[data-tab]{display:none} .steps>[data-tab].show{display:block}
+.card{border-radius:var(--r);border:1px solid var(--line);background:var(--panel);box-shadow:none}
 .step{padding:0;overflow:hidden}
-.step h2{margin:0;padding:15px 18px;font-size:15px;font-weight:720;letter-spacing:-.01em;gap:11px}
-.step.acc h2{cursor:pointer;user-select:none}
+.step h2{margin:0;padding:13px 14px;font-size:13.5px;font-weight:700;gap:10px;letter-spacing:-.005em}
+.step.acc h2{cursor:pointer;user-select:none;border-radius:var(--r)}
 .step.acc h2:hover{background:var(--panel2)}
-.step h2 .n{width:26px;height:26px;font-size:12.5px;background:var(--panel2);border:1px solid var(--line-strong);color:var(--ink2)}
-.step.done h2 .n{background:color-mix(in srgb,var(--ok) 16%,transparent);border-color:transparent;color:var(--ok)}
+.step h2 .n{width:22px;height:22px;font-size:11px;font-weight:800;background:var(--panel2);border:1px solid var(--line-strong);color:var(--ink2)}
+.step.done h2 .n{background:color-mix(in srgb,var(--ok) 14%,transparent);border-color:transparent;color:var(--ok)}
 .step:not(.acc) h2 .n{display:none}
-.step .sum{margin-left:auto;font-size:12.5px;font-weight:550;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
-.step .chev{width:16px;height:16px;flex:none;color:var(--muted);transition:transform .2s}
+.step .sum{margin-left:auto;font-size:12px;font-weight:550;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%}
+.step .chev{width:15px;height:15px;flex:none;color:var(--muted);transition:transform .2s}
 .step.acc.open .chev{transform:rotate(180deg)}
-.step .sbody{padding:2px 18px 18px}
+.step .sbody{padding:0 14px 14px}
 .step.acc:not(.open) .sbody{display:none}
-.step.acc.open{box-shadow:0 0 0 2px color-mix(in srgb,var(--ink) 9%,transparent),var(--shadow)}
+.step.acc.open{border-color:var(--line-strong);box-shadow:var(--shadow-m)}
+.runstat{padding:12px 14px;border-radius:var(--r);background:var(--panel2)}
+.runstat .sub{font-size:12.5px;color:var(--ink2)}
 /* the Next card */
-.next{padding:16px 18px;border:1px solid color-mix(in srgb,var(--fuel) 55%,var(--line));background:linear-gradient(180deg,var(--fuel-soft),var(--panel) 70%)}
-.nexthead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-.nexthead .bar{flex:1;height:6px;border-radius:99px;background:color-mix(in srgb,var(--ink) 8%,transparent);overflow:hidden}
-.nexthead .bar i{display:block;height:100%;background:var(--fuel);border-radius:99px;transition:width .4s}
-.next .camsteps>li.cur{background:none;margin:0;padding:0}
-.next .camsteps .stt{gap:8px}.next .camsteps .stt::before{display:none}
-.next .camsteps .stt b{font-size:17px;letter-spacing:-.015em}
-.next .camsteps .sx{margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--ink2)}
-.next .camsteps .sx .row{margin-top:10px}
-.next .trail{display:flex;gap:6px;padding:14px 0 0;margin-top:14px;border-top:1px solid color-mix(in srgb,var(--ink) 8%,transparent)}
-.pip{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;
-  background:var(--panel);border:1px solid var(--line-strong);color:var(--muted)}
-.pip.done{background:color-mix(in srgb,var(--ok) 15%,var(--panel));border-color:transparent;color:var(--ok)}
-.pip.opt{border-style:dashed}
-.pip.cur{background:var(--ink);border-color:var(--ink);color:var(--panel)}
+.next{position:relative;padding:14px;border-color:color-mix(in srgb,var(--fuel) 50%,var(--line));
+  background:linear-gradient(180deg,color-mix(in srgb,var(--fuel-soft) 85%,var(--panel)),var(--panel));box-shadow:var(--shadow-s)}
+.nexthead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.nexthead .bar{flex:1;height:5px;border-radius:99px;background:color-mix(in srgb,var(--ink) 9%,transparent);overflow:hidden}
+.nexthead .bar i{display:block;height:100%;background:var(--fuel);border-radius:99px;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.camsteps{margin:0;padding:0;list-style:none}
+.next .camsteps>li{border:0;padding:0;margin:0;background:none}
+.next .camsteps .stt{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.next .camsteps .stt::before{display:none}
+.next .camsteps .stt b{font-size:16.5px;font-weight:760;letter-spacing:-.02em;color:var(--ink)}
+.next .camsteps .gt{font-size:11px;font-weight:650;color:var(--muted);border:1px solid var(--line-strong);border-radius:99px;padding:1px 8px;background:var(--panel)}
+.next .camsteps .sx{margin:7px 0 0;font-size:13px;line-height:1.55;color:var(--ink2)}
+.next .camsteps .sx .row{margin-top:12px;gap:6px}
 .next .ready .stt b{color:var(--ok)}
-/* lists, fields */
-.item{border-radius:12px;padding:10px 12px;background:var(--panel)}
-.item.sel{border-color:var(--ink2);background:var(--panel2)}
-.input{height:38px;border-radius:var(--r-sm);border-color:var(--line-strong);background:var(--panel)}
-.field span{font-size:12px}
+.next .camsteps>li.trail{display:flex;align-items:center;gap:0;margin-top:14px;padding-top:12px;border-top:1px solid color-mix(in srgb,var(--ink) 8%,transparent)}
+.pip{position:relative;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:800;flex:none;
+  background:var(--panel);border:1.5px solid var(--line-strong);color:var(--muted)}
+.pip+.pip{margin-left:14px}
+.pip+.pip::before{content:"";position:absolute;right:100%;top:50%;width:14px;height:1.5px;background:var(--line-strong)}
+.pip.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.pip.done+.pip::before{background:var(--ok)}
+.pip.opt:not(.done){border-style:dashed}
+.pip.cur{background:var(--ink);border-color:var(--ink);color:var(--panel);box-shadow:0 0 0 4px color-mix(in srgb,var(--fuel) 45%,transparent)}
+.dropn{display:flex;align-items:center;gap:6px}.dropn input{width:78px}
+/* fields, lists, switches */
+.item{border-radius:10px;padding:9px 11px;background:var(--panel);border-color:var(--line)}
+.item:hover{border-color:var(--line-strong)}
+.item.sel{border-color:var(--ink);background:var(--panel2);box-shadow:inset 0 0 0 1px var(--ink)}
+.input{height:36px;border-radius:9px;border:1px solid var(--line-strong);background:var(--panel);font-size:13.5px}
+.input:focus{border-color:var(--ink2);box-shadow:0 0 0 3px color-mix(in srgb,var(--fuel) 35%,transparent)}
+.field span{font-size:11.5px;font-weight:650;color:var(--muted)}
 .adv{border-top:1px solid var(--line);padding-top:10px;margin-top:12px}
-.adv summary{font-weight:650;font-size:13px}
-.go{height:58px;border-radius:14px;font-size:18px;letter-spacing:.08em}
-@media (max-width:1100px){.wrap{grid-template-columns:1fr}.main{position:static}.tabs{order:5;flex-basis:100%;margin:0}
-  .tabs button{flex:1;justify-content:center}}
-@media (max-width:760px){.wrap{padding:12px}.board{grid-template-columns:1fr 1fr}.score .num{font-size:38px}.step .sum{max-width:38%}
-  .top .file{order:6}}
+.adv summary{font-weight:650;font-size:12.5px;color:var(--ink2)}
+.switch input:checked+i{background:var(--ink)}
+input[type=range]{accent-color:var(--ink)}
+.go{height:52px;border-radius:12px;font-size:15px;letter-spacing:.1em;background:var(--fuel);color:var(--fuel-ink);box-shadow:0 6px 18px color-mix(in srgb,var(--fuel) 35%,transparent)}
+.go.stop{background:var(--red);color:#fff}
+.score{display:none}
+.log{margin:0;padding:8px 14px 10px;border-top:1px solid var(--line)}
+.log summary{font-size:10.5px;letter-spacing:.1em;color:var(--muted)}
+.log #log{max-height:160px}
+.toasts{bottom:18px;right:410px}
+/* ---- narrow screens: the page scrolls, the canvas on top */
+@media (max-width:980px){
+  body{height:auto;overflow:auto}
+  .top{flex-wrap:wrap;height:auto;padding:10px 12px;row-gap:8px}
+  .acts{flex:1 1 auto}
+  .top .file{display:none}
+  .scorecap{order:5;flex:1 1 100%}.sc.mid{flex:1}
+  .acts .btn span,.acts .btn.ghost:not(#quitbtn){display:none}
+  .studio{display:block}
+  .canvas{min-height:58vw}
+  .stage{padding:14px 14px 72px}
+  .pic img{max-height:none}
+  .inspector{border-left:0;border-top:1px solid var(--line)}
+  .inspector .steps{overflow:visible}
+  .toasts{right:12px}
+}
 </style>
 </head>
 <body>
@@ -340,42 +418,41 @@ body{font-size:14px;letter-spacing:-.003em}
   <symbol id="i-hub" viewBox="0 0 24 24"><path d="M5 20l2.6-9h8.8L19 20z" fill="rgba(255,255,255,.18)" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M7.6 11h8.8" stroke="#fff" stroke-width="1.8"/><circle cx="12" cy="6" r="3.2" fill="#facc15"/></symbol>
 </svg>
 
-<div class="top">
-  <div class="brand"><span class="logo"><svg><use href="#i-hub"/></svg></span>Hub Counter</div>
+<header class="top">
+  <div class="brand"><span class="logo"><svg><use href="#i-hub"/></svg></span><span class="bname">Hub Counter</span></div>
   <div class="file"><span class="name" id="path">New setup</span><span class="pill dirty" id="savestate">Not saved</span></div>
-  <nav class="tabs" id="tabs" role="tablist">
-    <button data-tab="setup" role="tab" onclick="setTab('setup')"><span class="tn" id="tabsetupn"></span>Set up</button>
-    <button data-tab="run" role="tab" onclick="setTab('run')"><span class="tdot" id="tabrundot"></span>Run</button>
-    <button data-tab="test" role="tab" onclick="setTab('test')">Test</button>
-  </nav>
-  <a class="btn ghost" href="/board" target="_blank" rel="noopener" style="text-decoration:none" title="Full-screen live scoreboard for a TV or projector">Scoreboard ↗</a>
-  <button class="btn ghost" id="sharebtn" onclick="shareDialog()" title="Open this page on other devices on the Wi-Fi, behind a PIN"><svg><use href="#i-wifi"/></svg><span id="sharetxt">Share</span></button>
-  <button class="btn ghost" onclick="openSetup()"><svg><use href="#i-open"/></svg>Open</button>
-  <button class="btn" onclick="save()"><svg><use href="#i-save"/></svg>Save</button>
-  <button class="btn ghost" id="quitbtn" onclick="quitApp()" title="Stop the counter and close it">Quit</button>
-</div>
+  <div class="scorecap" title="What the field has been sent">
+    <span class="sc red"><b>RED</b><span class="num tnum" id="red">0</span></span>
+    <span class="sc mid"><span class="dot" id="sdot"></span><span id="stext">Stopped</span></span>
+    <span class="sc blue"><span class="num tnum" id="blue">0</span><b>BLUE</b></span>
+  </div>
+  <div class="acts">
+    <a class="btn ghost" href="/board" target="_blank" rel="noopener" title="Full-screen live scoreboard for a TV or projector">Scoreboard ↗</a>
+    <button class="btn ghost" id="sharebtn" onclick="shareDialog()" title="Open this page on other devices on the Wi-Fi, behind a PIN"><svg><use href="#i-wifi"/></svg><span id="sharetxt">Share</span></button>
+    <button class="btn ghost" onclick="openSetup()" title="Open a setup file"><svg><use href="#i-open"/></svg><span>Open</span></button>
+    <button class="btn" onclick="save()"><svg><use href="#i-save"/></svg><span>Save</span></button>
+    <button class="btn ghost" id="quitbtn" onclick="quitApp()" title="Stop the counter and close it">Quit</button>
+    <button class="gobtn" id="topgo" onclick="S&&S.running?stop():start()">Start</button>
+  </div>
+</header>
 
-<div class="wrap">
-  <div class="main">
+<div class="studio">
+  <section class="canvas">
     <div class="updbar" id="updbar" style="display:none"><span>Update available: <b id="updver"></b>
       <span class="muted" id="updnote"></span></span><span class="grow"></span>
       <a id="updnotes" target="_blank" rel="noopener">What's new</a>
       <button class="btn sm primary" id="updbtn" onclick="installUpdate()">Update</button></div>
-    <div class="board">
-      <div class="score red"><div class="lbl">RED HUB</div><div class="num tnum" id="red">0</div></div>
-      <div class="score blue"><div class="lbl">BLUE HUB</div><div class="num tnum" id="blue">0</div></div>
-      <div class="card status">
-        <div class="state"><span class="dot" id="sdot"></span><span id="stext">Stopped</span></div>
-        <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
-        <div class="chips" id="schips"></div>
-        <div class="chips" id="xcheck"></div>
-        <div class="chips" id="pchip"></div>
-      </div>
-    </div>
-
     <div class="stage" id="stage">
       <div class="badges" id="badges"></div>
       <div class="banner" id="banner"></div>
+      <div class="toolbar" id="toolbar">
+        <button class="tb red" onclick="draw('red')" title="Draw the red hub's outline"><svg><use href="#i-pen"/></svg>Red</button>
+        <button class="tb blue" onclick="draw('blue')" title="Draw the blue hub's outline"><svg><use href="#i-pen"/></svg>Blue</button>
+        <span class="sep"></span>
+        <button class="tb" onclick="measure()" title="Measure a ball (still balls, 5 s): the ruler while drawing"><svg><use href="#i-ruler"/></svg>Measure</button>
+        <button class="tb" id="tbfuel" onclick="$('showfuel').checked=!$('showfuel').checked;$('showfuel').dispatchEvent(new Event('change'))" title="Paint what counts as fuel magenta"><span class="sw"></span>Fuel</button>
+        <button class="tb" onclick="grab()" title="Take a new picture"><svg><use href="#i-image"/></svg></button>
+      </div>
       <div class="empty" id="empty">
         <svg><use href="#i-cam"/></svg>
         <h3>No picture yet</h3>
@@ -384,10 +461,19 @@ body{font-size:14px;letter-spacing:-.003em}
       <div class="pic" id="pic" style="display:none"><img id="img" alt=""><canvas id="cv"></canvas></div>
     </div>
     <div class="hint"><span id="hint"></span><div class="progress" id="prog"><i></i></div></div>
-    <details class="log"><summary>Activity</summary><div id="log"></div></details>
-  </div>
+  </section>
+  <aside class="inspector">
+    <nav class="tabs" id="tabs" role="tablist">
+      <button data-tab="setup" role="tab" onclick="setTab('setup')"><span class="tn" id="tabsetupn"></span>Set up</button>
+      <button data-tab="run" role="tab" onclick="setTab('run')"><span class="tdot" id="tabrundot"></span>Run</button>
+      <button data-tab="test" role="tab" onclick="setTab('test')">Test</button>
+    </nav>
+    <div class="steps">
+    <section class="runstat" data-tab="run">
+      <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
+      <div class="chips" id="schips"></div><div class="chips" id="xcheck"></div><div class="chips" id="pchip"></div>
+    </section>
 
-  <div class="steps">
     <section class="card next" id="guide" data-tab="setup">
       <div class="nexthead"><span class="eyebrow" id="guidecam">Setup</span><span class="bar"><i id="guidebar"></i></span><span class="muted tnum" id="guidecount"></span></div>
       <ol class="camsteps" id="guidesteps"></ol>
@@ -506,7 +592,7 @@ body{font-size:14px;letter-spacing:-.003em}
     </section>
 
     <section class="card step" id="st4" data-tab="run">
-      <h2><span class="n">4</span>Send counts</h2>
+      <h2><span class="n">4</span>Field link</h2>
       <div class="sbody">
       <label class="field"><span>Send counts to</span><input class="input tnum" id="target" value="10.0.100.5:8411" title="bioarena host:port, Watchtower http://KEY@host:8000, or both separated by a comma" oninput="this.dataset.edited=1"></label>
       <p class="muted" style="margin:6px 0 10px">bioarena as <b>host:port</b>, Watchtower as <b>http://KEY@host:8000</b>, or both with a comma between.</p>
@@ -542,7 +628,9 @@ body{font-size:14px;letter-spacing:-.003em}
         <div class="row" style="margin-top:6px"><button class="btn" onclick="pickFile('test')"><svg><use href="#i-film"/></svg>Check a recording against a hand count</button></div></div>
       </div>
     </section>
-  </div>
+    </div>
+    <details class="log"><summary>Activity</summary><div id="log"></div></details>
+  </aside>
 </div>
 
 <div class="scrim" id="scrim"><div class="modal"><header id="mTitle"></header><div class="body" id="mBody"></div><footer id="mFoot"></footer></div></div>
@@ -550,7 +638,7 @@ body{font-size:14px;letter-spacing:-.003em}
 
 <script>
 const $=id=>document.getElementById(id);
-const COL={red:"#cf1430",blue:"#0a5fbd"};
+const COL={red:"#e11d48",blue:"#2563eb"};
 let S=null,cur=null,drawing=null,logId=0,lastPic="",jobSeen=0,pickMode=null,lastCounts={red:0,blue:0},savedCfg=null;
 
 /* ---------- plumbing ---------- */
@@ -618,6 +706,8 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   for(const h of["red","blue"]){const e=$("confirm_"+h);if(e&&document.activeElement!==e)e.value=(S.cfg.confirm||{})[h]||"";}
   document.querySelectorAll(".seg").forEach(g=>{const v=S.cfg.combine[g.dataset.hub]||"sum";g.querySelectorAll("button").forEach(b=>b.className=b.textContent===v?"on":"");});
   $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";
+  {const g=$("topgo"),ready=!S.problems.length;g.textContent=S.running?"Stop":"Start";g.className="gobtn"+(S.running?" stop":ready?"":" wait");
+   g.title=S.running?"Stop counting":ready?"Start counting and sending to the field":"Not ready: "+S.problems.join(" ");}
   $("lockbtn").style.display=$("lockhint").style.display=S.running?"":"none";
   $("lockbtn").textContent=S.locked?"Unlock the setup":"Lock the setup";
   $("lockhint").textContent=S.locked?"Setup locked while counting: outlines, cameras and settings cannot be changed by a stray click.":"Setup unlocked: changes apply at the next Start.";}
@@ -662,7 +752,7 @@ for(const k of IMG_NUM)$("i_"+k).addEventListener("change",e=>setImage({[k]:e.ta
 $("i_fourcc").addEventListener("change",e=>setImage({fourcc:e.target.value||null}));
 for(const k of GATE){$("c_"+k).addEventListener("input",e=>$("c_"+k+"v").textContent=e.target.value);
   $("c_"+k).addEventListener("change",()=>{if(!$("showfuel").checked)$("showfuel").checked=true;const o={};for(const j of GATE)o[j]=+$("c_"+j).value;setColour({colour:o});});}
-$("showfuel").addEventListener("change",()=>{lastPic="";if(S.pictures[cur])loadImg();});
+$("showfuel").addEventListener("change",()=>{lastPic="";$("tbfuel").classList.toggle("on",$("showfuel").checked);if(S.pictures[cur])loadImg();});
 function resetColour(){setColour({colour_reset:true});}
 async function applyPreset(id){if(!cur)return;if(!id){refresh();return;}
   try{await api("apply_preset",{camera:cur,preset:id});toast("Preset applied");}catch(e){}
