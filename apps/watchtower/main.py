@@ -239,6 +239,37 @@ def add_pages(app, cfg: dict = None) -> None:
                 cache.pop(min(cache, key=lambda k: cache[k][0]))
             return {**r, "event": key, "age": 0}
     app.add_api_route("/queue/tba.json", tba_json, methods=["GET"])
+    add_theme(app)
+
+
+# Watchtower's pages our theme restyles (theme.css). Not /display (a TV
+# across the gym) or /overlay (a transparent layer in OBS): those keep his look.
+THEMED = ("/control", "/ref", "/emcee", "/score", "/")
+THEME_LINK = b'<link rel="stylesheet" href="/wt/theme.css">'
+
+
+def themed(html: bytes) -> bytes:
+    """His page with our stylesheet after his: last link wins the cascade."""
+    i = html.find(b"</head>")
+    return html if i < 0 or THEME_LINK in html else html[:i] + THEME_LINK + html[i:]
+
+
+def add_theme(app) -> None:
+    from fastapi.responses import FileResponse, Response
+    css = Path(getattr(sys, "_MEIPASS", HERE)) / "theme.css"
+    app.add_api_route("/wt/theme.css", lambda: FileResponse(css, media_type="text/css",
+                                                            headers={"Cache-Control": "no-cache"}),
+                      methods=["GET"])
+
+    @app.middleware("http")
+    async def theme_pages(request, call_next):
+        resp = await call_next(request)
+        if (request.url.path not in THEMED or resp.status_code != 200
+                or not resp.headers.get("content-type", "").startswith("text/html")):
+            return resp
+        body = b"".join([chunk async for chunk in resp.body_iterator])
+        headers = {k: v for k, v in resp.headers.items() if k.lower() != "content-length"}
+        return Response(themed(body), status_code=200, headers=headers, media_type="text/html")
 
 
 class FmsServer:

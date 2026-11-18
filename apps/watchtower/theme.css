@@ -1,0 +1,93 @@
+/* Our Watchtower app's theme over Watchtower's own pages (Control, Ref, MC,
+   Scorer, the station list). Layered after /static/style.css by main.py's
+   page middleware: his markup and scripts are untouched, so his updates keep
+   working and this only restyles. The look is the Hub Counter's: ink and
+   panel neutrals, fuel yellow for the one thing that matters, red and blue
+   only for alliances, and a real dark mode (refs and the MC stand in dim
+   gyms; his pages were light only). The field display and the OBS overlay
+   are not themed: one is built for a TV across the gym, the other is a
+   transparent layer over the stream. */
+:root {
+  --wall: #f3f4f6; --panel: #ffffff; --panel-2: #f4f5f7; --ink: #0f1216; --ink-2: #3a414b;
+  --muted: #6b7480; --line: #e6e8eb; --line-strong: #d3d7dc;
+  --red: #d8173a; --red-soft: #fdecef; --red-line: #f5c2cc;
+  --blue: #1463d6; --blue-soft: #e9f1fd; --blue-line: #bcd3f6;
+  --fuel: #f5c400; --fuel-soft: #fff6cc; --ok: #118a50; --ok-soft: #def5e9; --warn: #b45309; --warn-soft: #fdf0de;
+  --shadow: 0 1px 2px rgba(15, 18, 22, .05), 0 1px 1px rgba(15, 18, 22, .03);
+  --on-ink: #ffffff; --barbg: #0f1216;
+  --r-lg: 14px; --r-md: 11px; --r-sm: 9px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI Variable", "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --wall: #0b0d10; --panel: #15181c; --panel-2: #1c2025; --ink: #eceef1; --ink-2: #c0c6ce;
+    --muted: #8a939e; --line: #262b31; --line-strong: #363c45;
+    --red: #ff4b65; --red-soft: rgba(255, 75, 101, .11); --red-line: rgba(255, 75, 101, .38);
+    --blue: #4f8fff; --blue-soft: rgba(79, 143, 255, .11); --blue-line: rgba(79, 143, 255, .38);
+    --ok: #3ccf87; --ok-soft: rgba(60, 207, 135, .13); --warn: #f0a43a; --warn-soft: rgba(240, 164, 58, .13);
+    --fuel-soft: rgba(245, 196, 0, .16);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35);
+    --on-ink: #0b0d10; --barbg: #111418;
+  }
+}
+body { background: var(--wall); letter-spacing: -.003em; -webkit-font-smoothing: antialiased; }
+
+/* the status bar on every page */
+.bar { background: var(--barbg); border-bottom: 1px solid rgba(255, 255, 255, .06); min-height: 54px; }
+.bar b { font-weight: 720; letter-spacing: -.01em; }
+.bar .conn.on { background: #3ccf87; box-shadow: 0 0 0 3px rgba(60, 207, 135, .22); }
+
+/* surfaces */
+.panel { border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 1.15rem 1.2rem; }
+h2 { font-size: 1rem; font-weight: 720; letter-spacing: -.012em; }
+th { background: var(--panel-2); }
+.warnbox { border-color: color-mix(in srgb, var(--warn) 35%, transparent); color: var(--warn); }
+
+/* controls: the ink button reads in both modes */
+button { border-radius: var(--r-sm); font-weight: 640; box-shadow: var(--shadow); }
+button.primary, .tabs button.sel, button.flip.sel { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+button.primary:hover:not(:disabled) { background: var(--ink-2); border-color: var(--ink-2); }
+button.ghost { box-shadow: none; }
+button.red { background: var(--red); border-color: var(--red); }
+button.blue { background: var(--blue); border-color: var(--blue); }
+input, select, textarea { background: var(--panel); border-color: var(--line-strong); }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--fuel) 38%, transparent); }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--fuel) 80%, transparent); }
+.tabs { border-radius: 12px; padding: 4px; box-shadow: var(--shadow); }
+.tabs button { min-height: 36px; border-radius: 8px; font-weight: 640; }
+.pill { font-weight: 650; }
+.toast { background: var(--ink); color: var(--on-ink); border-radius: 12px; }
+.toast.err { background: var(--warn); color: #fff; }
+
+/* the login gate */
+.gate { margin-top: 14vh; padding: 1.8rem 1.6rem 1.6rem; border-radius: 18px; box-shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 12px 40px rgba(15, 18, 22, .08); }
+.gate::before { width: 48px; height: 48px; border-radius: 13px; background: url(/static/icon.svg) center / 70% no-repeat, var(--barbg); }
+.gate h2 { font-size: 1.35rem; font-weight: 760; letter-spacing: -.02em; }
+.gate input { min-height: 52px; font-size: 1.15rem; }
+.gate button { width: 100%; min-height: 52px; font-size: 1.05rem; }
+
+/* hub lights: the signature element */
+.hub { border-width: 1.5px; border-radius: 16px; padding: 1.2rem .8rem; }
+.hub .name { font-size: .78rem; letter-spacing: .12em; }
+.hub .state { font-weight: 860; }
+.hub.on { background: var(--fuel); color: #1a1500;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--fuel) 30%, transparent), 0 10px 40px color-mix(in srgb, var(--fuel) 55%, transparent); }
+.hub.on .name, .hub.on .state { color: #1a1500; }
+.clock { font-weight: 860; letter-spacing: -.04em; }
+
+/* Ref: the foul buttons are what a ref hits without looking */
+.side { border-radius: 16px; border-width: 1.5px; }
+.fbtn { border-radius: 14px; min-height: 7rem; font-size: 1.45rem; letter-spacing: -.01em; border: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 2px 0 rgba(0, 0, 0, .22), 0 6px 18px rgba(0, 0, 0, .12);
+  transition: transform .06s, box-shadow .06s; }
+.fbtn:active:not(:disabled) { transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 0 0 rgba(0, 0, 0, .2); }
+.fbtn.red { background: linear-gradient(180deg, color-mix(in srgb, var(--red) 92%, #fff), var(--red)); }
+.fbtn.blue { background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 92%, #fff), var(--blue)); }
+.fbtn small { opacity: .9; font-weight: 650; }
+
+/* MC: the clock and the next cue */
+.big .clock { font-size: 4.6rem; }
+.next { border-radius: 12px; font-weight: 720; }
+.next.soon { background: var(--fuel); border-color: var(--fuel); color: #1a1500; }
+.scoreline .score { font-size: 2.6rem; }

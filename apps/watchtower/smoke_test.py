@@ -84,6 +84,10 @@ def main(program: str) -> int:
         ev = open(os.path.join(d, "config", "event.yaml")).read()
         assert re.search(r'control: "\d{6}"', ev), "event.yaml has no Control PIN"
         assert "Match Queue" in get(FMS + "/queue"), "the match queue page is not served"
+        assert "/wt/theme.css" in get(FMS + "/ref") and "/wt/theme.css" in get(FMS + "/control"), \
+            "our theme is not on Watchtower's pages"
+        assert "/wt/theme.css" not in get(FMS + "/display"), "the field display must keep its own look"
+        assert "--fuel" in get(FMS + "/wt/theme.css"), "theme.css is not bundled"
         # Watchtower's own camera runner, a second copy of the program, reports
         # each hub ("no camera" until Setup picks one).
         for _ in range(60):
