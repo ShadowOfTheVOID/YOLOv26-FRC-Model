@@ -4195,9 +4195,34 @@ def test_hub_model_blend():
     check("a camera's model entry is read, defaults filled in",
           cam.model["weight"] == 0.4 and cam.model["counter"]["reacquire"] == 3
           and cam.model["counter"]["vanish"] == HM.DEFAULT_MODEL["vanish"])
-    check("exit lines stay colour only: the model needs an outline's box",
-          [z.name for z in cam.model_zones()] == ["a/red0"]
-          and cam.zones[1].weight == 0.0)
+    check("exit lines have a model half too (2026-11-18: exits went uncounted at the scrimmage)",
+          [z.name for z in cam.model_zones()] == ["a/red0", "a/blue1"]
+          and cam.zones[1].weight == 0.4
+          and type(cam.model_counter(cam.zones[1], 30.0)).__name__ == "ModelExitCounter"
+          and type(cam.model_counter(cam.zones[0], 30.0)).__name__ == "ModelCounter")
+    # the model exit line, from detections: balls falling through a line at y=100, out below
+    ex = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    def ball(x, y):
+        return ((x - 8, y - 8, x + 8, y + 8), 0.9)
+    total = 0
+    for k in range(12):                       # two balls, side by side, falling 10 px a frame
+        total += ex.update(k / 30, [ball(60, 50 + 10 * k), ball(140, 45 + 10 * k)])
+    check("model exit line: two balls through the line, two counted", total == 2 and ex.reported == 2)
+    up = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    for k in range(12):                       # one ball rising out of the exit: never counted
+        up.update(k / 30, [ball(100, 160 - 10 * k)])
+    check("model exit line: a ball crossing back the wrong way counts nothing", up.reported == 0)
+    far = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    for k in range(12):                       # a ball beyond the line's end: not through the exit
+        far.update(k / 30, [ball(330, 50 + 10 * k)])
+    check("model exit line: a ball past the end of the line is not counted", far.reported == 0)
+    relink = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    for k in range(6):                        # a ball falls through the line and out of view...
+        relink.update(k / 30, [ball(100, 70 + 10 * k)])
+    for k in range(6, 12):                    # ...and the next one appears above it, near enough to be linked
+        relink.update(k / 30, [ball(110, 40 + 10 * (k - 6))])
+    check("model exit line: the tracker joining a gone ball to a new one is not a bounce back",
+          relink.reported == 1 and relink.net == 1)   # the first ball stays counted
     back = HC.setup_from_dict(HC.setup_to_dict(setup)).cameras[0].model
     check("and saved back unchanged", back == cam.model)
     zr = cam.zones[0]

@@ -79,6 +79,7 @@ if APP == "watchtower":
                         "tbavid.keepawake", "tbavid.cvload",
                         # the fuel model, the primary counter (main.use_our_model_runtime)
                         "tbavid.hubmodel", "tbavid.onnxdet", "tbavid.count", "tbavid.trackvis",
+                        "tbavid.fms_counter", "tbavid.hubcount", "tbavid.camprofile",
                         "onnxruntime"] + VISION + WEBVIEW)
     EXTRA_DATAS += collect_data_files("webview")
     HUB_IMPORTS = ["cv2", "numpy"]

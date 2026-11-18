@@ -913,12 +913,13 @@ class Camera:
         # camcheck: the small grey picture the outlines were drawn on, kept
         # so the page can tell when the camera has moved. Not used to count.
         self.reference = reference if isinstance(reference, dict) else None
-        # hubmodel.parse_model's dict, or None for colour only. Exit lines
-        # stay colour only: the model counter scores a ball that vanishes in
-        # the outline's box, and an exit line has no box.
+        # hubmodel.parse_model's dict, or None for colour only. Outlines and
+        # exit lines both have a model half (an exit line's is
+        # hubmodel.ModelExitCounter, since 2026-11-18: at the scrimmage
+        # balls were not counted through exit lines, which were colour only).
         self.model = model
         for z in zones:
-            z.weight = model["weight"] if model and z.outline else 0.0
+            z.weight = model["weight"] if model else 0.0
 
     def zone_gate(self, z: "Zone"):
         """The (lo, hi) colour gate a zone counts with: its own, else the camera's."""
@@ -926,7 +927,20 @@ class Camera:
         return gate(z.colour or self.colour)
 
     def model_zones(self) -> List["Zone"]:
-        return [z for z in self.zones if z.outline] if self.model else []
+        return list(self.zones) if self.model else []
+
+    def model_eye(self):
+        """The model over every model zone, exit lines' crops not raised."""
+        from .hubmodel import ModelEye
+        zs = self.model_zones()
+        return ModelEye(self.model["weights"], {z.name: z.counter.poly for z in zs},
+                        self.model["device"], exits=[z.name for z in zs if z.line])
+
+    def model_counter(self, z: "Zone", fps: float):
+        from .hubmodel import counter_for
+        if z.line:
+            return counter_for("exit", list(z.line), z.out, fps, self.model["counter"])
+        return counter_for("outline", z.counter.poly, None, fps, self.model["counter"])
 
 
 class Setup:
@@ -1389,8 +1403,7 @@ def run(sender, setup: Setup, realtime: bool = False,
         stride = model_stride(file_fps)
         zones = {z.name: z for z in cam.model_zones()}
         for z in zones.values():
-            z.model = ModelCounter(z.counter.poly, file_fps / stride,
-                                   **cam.model["counter"])
+            z.model = cam.model_counter(z, file_fps / stride)
 
         def off(offered, skipped, captured):
             # Colour only from here. The zone's count jumps from the blend
@@ -1438,11 +1451,8 @@ def run(sender, setup: Setup, realtime: bool = False,
         if cam.model:
             # Before the camera opens, so seconds of loading do not become
             # seconds of buffered frames.
-            from .hubmodel import ModelEye
             try:
-                eye = ModelEye(cam.model["weights"],
-                               {z.name: z.counter.poly for z in cam.model_zones()},
-                               cam.model["device"])
+                eye = cam.model_eye()
             except Exception as e:
                 errors.append(f"{cam.name}: could not load the model "
                               f"{cam.model['weights']!r}: {e}")
@@ -1753,14 +1763,11 @@ def count_recording(setup: Setup, video: str, camera: str = "",
     if cam.model:
         # In step with the frames here, not on a thread: offline there is no
         # deadline, and a skipped frame would make the count depend on speed.
-        from .hubmodel import ModelCounter, ModelEye, model_stride
-        model_eye = ModelEye(cam.model["weights"],
-                             {z.name: z.counter.poly for z in cam.model_zones()},
-                             cam.model["device"])
+        from .hubmodel import model_stride
+        model_eye = cam.model_eye()
         stride = model_stride(fps)
         for z in cam.model_zones():
-            z.model = ModelCounter(z.counter.poly, fps / stride,
-                                   **cam.model["counter"])
+            z.model = cam.model_counter(z, fps / stride)
     timeline: List[Tuple[float, int, int]] = []
     # Per cross-checked hub, (t, outline, exit) whenever either changed:
     # what confirm_report replays at any exit delay.

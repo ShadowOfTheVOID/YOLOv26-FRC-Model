@@ -9,6 +9,18 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Exit lines are counted by the model.** At the scrimmage balls went
+  uncounted through exit lines, which were colour only (the model counted
+  outlines alone). `hubmodel.ModelExitCounter` tracks each ball near the
+  line and counts it when its track crosses towards `out` (back across takes
+  it off, as the colour exit line does). A step longer than three of the
+  ball's own widths is the tracker joining two balls, not one ball moving,
+  and is not a crossing: without that rule a test video of 12 balls out of a
+  chute counted 5; with it, 12 (the outline test still 10 of 10). Used by the
+  Hub Counter, by `fms_counter` (frc-fms / Watchtower plugin), and in the
+  Watchtower app, whose runner now uses our current plugin rather than its
+  October copy. The model's crop for an exit is centred on it, not raised.
+
 - **The fuel model is the primary counter, on the GPU first.** The colour
   counter broke at the scrimmage, so a new camera in the Hub Counter now
   counts with the built-in model (fuel_relabel, share 1.0 = the model alone),

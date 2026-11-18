@@ -119,14 +119,17 @@ def resolve_weights(weights: str) -> str:
 REF_OUTLINE_PX = 194.0  # the broadcast outline width REACQUIRE_PX was set on
 
 
-def crop_box(poly: Sequence[Point], width: int, height: int) -> Tuple[int, int, int, int]:
-    """The square the model is run on for one outline, inside the frame."""
+def crop_box(poly: Sequence[Point], width: int, height: int,
+             up: float = CROP_UP_WIDTHS) -> Tuple[int, int, int, int]:
+    """The square the model is run on for one zone, inside the frame. An
+    outline's is raised (`up` outline widths: shots arc in from above); an
+    exit line's is centred on it (`up` 0: balls leave going down)."""
     xs = [p[0] for p in poly]
     ys = [p[1] for p in poly]
     w = max(max(xs) - min(xs), 1.0)
     side = int(min(max(CROP_MIN_PX, CROP_WIDTHS * w), width, height))
     cx = (min(xs) + max(xs)) / 2
-    cy = (min(ys) + max(ys)) / 2 - CROP_UP_WIDTHS * w
+    cy = (min(ys) + max(ys)) / 2 - up * w
     x0 = int(min(max(cx - side / 2, 0), width - side))
     y0 = int(min(max(cy - side / 2, 0), height - side))
     return x0, y0, x0 + side, y0 + side
@@ -189,6 +192,79 @@ class ModelCounter:
         return rise
 
 
+# The longest step, in the ball's own widths, one track may take between two
+# model frames and still be one ball. A ball fired at ~10 m/s on a broadcast
+# moves about 2 widths a frame at 30 fps.
+EXIT_STEP_BALLS = 3.0
+
+
+class ModelExitCounter:
+    """An exit line from model detections: the model's twin of
+    hubcount.ExitLineCounter (2026-11-18: at the scrimmage balls were not
+    counted through exit lines, which were colour only, and the model became
+    the primary counter -- so exits need a model half too).
+
+    BallTracker follows each ball near the line; a ball counts when its
+    track's centre crosses the segment towards `out`, and comes off again if
+    it crosses back (a bounce), as the colour exit line does. `reported` is
+    the high-water mark, so it never goes down. Same interface as
+    ModelCounter (`update`, `tracker`, `reported`) so ModelWorker drives
+    either. Pure state, no model or OpenCV."""
+
+    def __init__(self, line: Sequence[Point], out: Point, fps: float = MODEL_FPS,
+                 assist: bool = DEFAULT_MODEL["assist"], **_tuned_for_outlines):
+        a, b = (tuple(map(float, line[0])), tuple(map(float, line[1])))
+        self.line, self.out = (a, b), tuple(map(float, out))
+        from .hubcount import _side
+        self.out_sign = 1 if _side(a, b, self.out) > 0 else -1
+        pts = [a, b, self.out]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        self.box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+        self.margin = NEAR_WIDTHS * max(math.hypot(b[0] - a[0], b[1] - a[1]), 1.0)
+        self.assist = assist
+        self.tracker = BallTracker()
+        self.last: Dict[int, Point] = {}
+        self.net = 0
+        self.reported = 0
+
+    near = ModelCounter.near
+
+    def update(self, t: float, dets: Sequence[Tuple[XYXY, float]],
+               assist: Sequence[XYXY] = ()) -> int:
+        from .hubcount import _side, segments_cross
+        keep = [(b, c) for b, c in dets if c >= KEEP_CONF and self.near(b)]
+        if self.assist:
+            keep += [(tuple(b), ASSIST_CONF) for b in assist if self.near(b)]
+        a0, a1 = self.line
+        for tid, b in self.tracker.update(keep).items():
+            c = ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+            p = self.last.get(tid)
+            # A step longer than a few of the ball's own widths is the tracker
+            # joining two balls (one gone below the line, the next arriving
+            # above it), not one ball moving: crossed back, it took a real
+            # exit off again. Test video, 12 balls out of a chute: 5 counted
+            # with the jumps, 12 without.
+            size = max(b[2] - b[0], b[3] - b[1], 1.0)
+            jump = p is not None and math.hypot(c[0] - p[0], c[1] - p[1]) > EXIT_STEP_BALLS * size
+            if p is not None and not jump and segments_cross(p, c, a0, a1):
+                after = _side(a0, a1, c)
+                self.net += 1 if (after > 0) == (self.out_sign > 0) else -1
+            self.last[tid] = c
+        if len(self.last) > 4000:          # ids only grow; keep the recent ones
+            self.last = dict(list(self.last.items())[-2000:])
+        rise = max(0, self.net - self.reported)
+        self.reported += rise
+        return rise
+
+
+def counter_for(kind: str, pts: Sequence[Point], out: Optional[Point], fps: float, cfg: Dict):
+    """The model counter for a zone: ModelCounter for an outline,
+    ModelExitCounter for an exit line (two points plus `out`)."""
+    if kind == "exit":
+        return ModelExitCounter(pts[:2], out, fps, **cfg)
+    return ModelCounter(pts, fps, **cfg)
+
+
 def blend(colour: int, model: int, weight: float) -> int:
     """The zone's count: round(weight * model + (1 - weight) * colour).
     Monotone in both, so it never goes down while they do not."""
@@ -210,7 +286,7 @@ class ModelEye:
     """
 
     def __init__(self, weights: str, polys: Dict[str, Sequence[Point]],
-                 device: str = ""):
+                 device: str = "", exits: Sequence[str] = ()):
         path = resolve_weights(weights)
         self.onnx = path.lower().endswith(".onnx")
         if self.onnx:
@@ -220,6 +296,7 @@ class ModelEye:
             self.model = YOLO(path)
             self.device = device or pick_device()
         self.polys = dict(polys)
+        self.exits = set(exits)          # zones that are exit lines: crops not raised
         self.crops: Dict[str, Tuple[int, int, int, int]] = {}
         self.prev = None
         self.ball_px = 18.0
@@ -240,7 +317,8 @@ class ModelEye:
         from .trackvis import colour_assist
         if not self.crops:
             h, w = frame.shape[:2]
-            self.crops = {n: crop_box(p, w, h) for n, p in self.polys.items()}
+            self.crops = {n: crop_box(p, w, h, 0.0 if n in self.exits else CROP_UP_WIDTHS)
+                          for n, p in self.polys.items()}
         names = list(self.crops)
         imgs = [frame[y0:y1, x0:x1] for x0, y0, x1, y1 in (self.crops[n] for n in names)]
         dets: List[Tuple[XYXY, float]] = []

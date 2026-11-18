@@ -160,9 +160,15 @@ def use_our_model_runtime() -> None:
     Ultralytics, i.e. torch, which this app does not carry. Its hubmodel is
     replaced by ours, which runs .onnx on ONNX Runtime, GPU first: the same
     names (ModelEye, ModelWorker, ModelCounter, parse_model, blend), so his
-    counter code is unchanged."""
-    from tbavid import hubmodel
+    counter code is unchanged. His plugin (vision/hubcounter/fms_counter.py,
+    a copy of ours from 2026-10-10) is replaced by ours too, so exit lines
+    count by model (2026-11-18: balls went uncounted through exits at the
+    scrimmage)."""
+    from tbavid import fms_counter, hubmodel
     sys.modules["hubcounter.hubmodel"] = hubmodel
+    # and his copy of our plugin (October's) gives exit lines no model half;
+    # ours does (hubmodel.ModelExitCounter). Same class, same interface.
+    sys.modules["hubcounter.fms_counter"] = fms_counter
 
 
 class Vision:
