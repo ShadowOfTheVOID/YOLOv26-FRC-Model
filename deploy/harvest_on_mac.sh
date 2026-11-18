@@ -6,8 +6,12 @@
 # here and copies them into Google Drive (frc-harvest/), where
 # train/colab_harvest_1280.ipynb finds them and goes straight to labelling.
 #
-#   bash deploy/harvest_on_mac.sh          # 40 matches
+#   bash deploy/harvest_on_mac.sh          # 40 matches, from a checkout
 #   bash deploy/harvest_on_mac.sh 20       # or another number
+#
+# or with nothing checked out (it fetches the code into ~/frc-harvest/repo):
+#   curl -fsSL https://raw.githubusercontent.com/ShadowOfTheVOID/YOLOv26-FRC-Model/main/deploy/harvest_on_mac.sh | bash
+#   ... | bash -s -- 20                    # another number
 #
 # Needs: Homebrew (brew.sh), Google Drive for desktop signed in to the
 # Drive that holds frc-harvest/, and a TBA Read API key (it asks; or set
@@ -15,10 +19,23 @@
 # never downloaded twice.
 set -euo pipefail
 N="${1:-40}"
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LOCAL="$HOME/frc-harvest"                  # downloads land here first, then go to Drive
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+
+# Inside a checkout, use it. Piped from curl there is none (and $0 is just
+# "bash"): fetch the code into ~/frc-harvest/repo, keeping its state/ (the
+# never-twice ledger) across runs.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -n "$HERE" ] && [ -f "$HERE/../run.py" ]; then
+  REPO="$(cd "$HERE/.." && pwd)"
+else
+  REPO="$LOCAL/repo"
+  say "Getting the code (${FRC_REF:-main}) into $REPO"
+  mkdir -p "$REPO"
+  curl -fsSL "https://codeload.github.com/ShadowOfTheVOID/YOLOv26-FRC-Model/tar.gz/refs/heads/${FRC_REF:-main}" \
+    | tar -xz -C "$REPO" --strip-components 1
+fi
 
 command -v brew >/dev/null || { echo "Install Homebrew first: https://brew.sh"; exit 1; }
 DRIVE="$(ls -d "$HOME"/Library/CloudStorage/GoogleDrive-*/"My Drive" 2>/dev/null | head -1 || true)"
@@ -33,7 +50,8 @@ command -v ffmpeg >/dev/null || brew install ffmpeg
 export PATH="$REPO/.venv-harvest/bin:$PATH"            # the yt-dlp just installed
 
 if [ -z "${TBA_AUTH_KEY:-}" ]; then
-  read -rsp "TBA Read API key (thebluealliance.com -> Account): " TBA_AUTH_KEY; echo
+  # from the keyboard: when piped from curl, stdin is this script itself
+  read -rsp "TBA Read API key (thebluealliance.com -> Account): " TBA_AUTH_KEY < /dev/tty; echo
 fi
 export TBA_AUTH_KEY
 
