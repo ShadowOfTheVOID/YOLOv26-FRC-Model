@@ -3492,12 +3492,12 @@ def test_hub_counter_app():
     check("an app can preset it, e.g. Watchtower to its own FMS",
           ctl2.state()["default_target"] == "http://KEY@127.0.0.1:8000")
     wt = (root / "apps" / "watchtower" / "main.py").read_text()
-    check("the Watchtower app makes its config, starts the FMS and presets the counter",
-          "init.init(" in wt and "uvicorn.Server" in wt and "ctl.default_target" in wt
-          and '"0.0.0.0"' in wt)
-    check("and one spec builds it, with the FMS pages and example configs",
+    check("the Watchtower app makes its config, starts the FMS and its own hub cameras",
+          "init.init(" in wt and "uvicorn.Server" in wt and '"--vision"' in wt
+          and '"0.0.0.0"' in wt and 'app.base + "/control"' in wt)
+    check("and one spec builds it, with the FMS pages, vision and example configs",
           'APP == "watchtower"' in spec and '"fms", "static"' in spec
-          and "event.example.yaml" in spec)
+          and "event.example.yaml" in spec and '(VSRC, "vision")' in spec)
     queue = (root / "apps" / "watchtower" / "queue.html").read_text()
     check("the match queue is a page on the FMS itself, bundled, no PIN",
           'add_api_route("/queue"' in wt and '"queue.html"' in spec
@@ -3588,222 +3588,6 @@ def test_hub_builtin_model():
             del sys._MEIPASS
         else:
             sys._MEIPASS = old
-
-
-def test_watchtower_settings():
-    """The Watchtower app edits event.yaml for the user, never the other way.
-
-    Only the changed lines are rewritten, so fms.init's comments (the only
-    documentation of the other settings) survive; anything the file holds as
-    a block, not one line, is reported so the caller rewrites it whole.
-    Watchtower's own rule -- the scorekeeper PIN differs from the others --
-    is checked before anything is written.
-    """
-    import importlib.util
-    root = Path(__file__).resolve().parent.parent
-    spec = importlib.util.spec_from_file_location("wt_settings", root / "apps" / "watchtower" / "settings.py")
-    St = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(St)
-
-    check("a missing optional field reads back as empty, as it loads (Save refused every change "
-          "on an event.yaml without public_url / read_key, 2026-10-10)",
-          St._norm("url", None) == "" and St._norm("secret", None) == ""
-          and St._norm("teams", None) == [] and St._norm("int", 5) == 5)
-    check("teams parse from any separators, in order, without repeats",
-          St.parse_teams("254, 1678 971\n604;254") == [254, 1678, 971, 604])
-    clean, err = St.check({"event.name": " X ", "event.date": "2026-10-10", "event.qual_start": "09:00",
-                           "event.utc_offset_hours": "-7", "event.teams": "1 2",
-                           "event.tba_event_key": "2026CATSTD", "game.tower": "0 10 20 30",
-                           "game.fouls": "5,15", "server.pins.control": "123456",
-                           "server.pins.ref": "222222", "server.pins.emcee": "333333"})
-    check("good values come out clean and typed",
-          not err and clean["event.name"] == "X" and clean["event.utc_offset_hours"] == -7
-          and clean["event.tba_event_key"] == "2026catstd"
-          and clean["game.tower"] == {"L0": 0, "L1": 10, "L2": 20, "L3": 30}
-          and clean["game.fouls"] == {"minor": 5, "major": 15})
-    _, err = St.check({"event.date": "10/10/2026", "event.lunch": "25:00", "game.n_shifts": "-1",
-                       "server.pins.control": "111111", "server.pins.ref": "111111",
-                       "server.pins.emcee": "12", "tba.enabled": True})
-    check("bad values are refused, each with its own reason",
-          set(err) == {"event.date", "event.lunch", "game.n_shifts", "server.pins.emcee",
-                       "server.pins.control", "tba.enabled"})
-    check("the public address is an optional setting, nothing built in",
-          St.KEY["server.public_url"][1] == "url" and St.clean_url("") == "")
-    check("a public address is tidied: https added to a bare name, trailing / dropped, a path kept",
-          St.clean_url(" watchtower.systemoverload.org/ ") == "https://watchtower.systemoverload.org"
-          and St.clean_url("http://10.0.0.5:8000/fms/") == "http://10.0.0.5:8000/fms"
-          and St.clean_url("") == "")
-    _, err = St.check({"server.public_url": "https://KEY@watchtower.systemoverload.org"})
-    _, err2 = St.check({"server.public_url": "ftp://x.org"})
-    _, err3 = St.check({"server.public_url": "https://x.org/?a=1"})
-    check("but a key, another scheme or a query is refused (the link goes to phones)",
-          set(err) == set(err2) == set(err3) == {"server.public_url"})
-    check("both halves of the TBA write key, and the read key, are masked fields",
-          all(St.KEY[k][1] == "secret" for k in ("tba.auth_id", "tba.auth_secret", "tba.read_key")))
-    pins = St.new_pins()
-    check("new PINs are three different 6-digit numbers",
-          len(set(pins.values())) == 3 and all(len(p) == 6 and p.isdigit() for p in pins.values()))
-
-    text = ['# top\n', 'event:\n', '  name: "Old"          # the name\n', '  teams: []   # list\n',
-            'server:\n', '  pins:\n', '    control: "1"\n', 'game:\n', '  tower: {L0: 0}\n',
-            '  rp:\n', '    win: 3\n']
-    lines = list(text)
-    ok = (St._set_line(lines, ("event", "name"), St._render("New \"x\""))
-          and St._set_line(lines, ("event", "teams"), St._render([254, 1678]))
-          and St._set_line(lines, ("server", "pins", "control"), St._render("999999"))
-          and St._set_line(lines, ("game", "tower"), St._render({"L0": 0, "L1": 10}))
-          and St._set_line(lines, ("game", "rp", "win"), St._render(2)))
-    check("one-line fields are rewritten in place, comments kept",
-          ok and lines[2] == '  name: "New \\"x\\""          # the name\n'
-          and lines[3] == "  teams: [254, 1678]   # list\n" and lines[6] == '    control: "999999"\n'
-          and lines[8] == "  tower: {L0: 0, L1: 10}\n" and lines[10] == "    win: 2\n")
-    block = ['event:\n', '  teams:\n', '    - 1\n']
-    check("a field held as a block is reported, not mangled",
-          not St._set_line(block, ("event", "teams"), "[1]") and block[1] == "  teams:\n")
-    check("a missing field is reported",
-          not St._set_line(['event:\n', '  name: "x"\n'], ("event", "date"), '""'))
-    lines = ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '\n', '# next\n', 'game:\n', '  auto_s: 20\n']
-    check("a field the file never had is added at the end of its section",
-          St._add_line(lines, ("tba", "read_key"), '"k"')
-          and lines[:4] == ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '  read_key: "k"\n']
-          and lines[5:] == ['# next\n', 'game:\n', '  auto_s: 20\n'])
-    check("but not into a section that is not there",
-          not St._add_line(['event:\n', '  name: "x"\n'], ("tba", "read_key"), '"k"'))
-
-    # Import teams from TBA, against a stand-in for TBA's read API.
-    import json as _json
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    class TBA(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            if self.path == "/event/2026catstd":        # the public page's Scouting tab
-                body = ('<h2>Scouting</h2><textarea id="team-list-csv" readonly>'
-                        "team_number,team_name,city,state_prov,country,robot_image_url\n"
-                        "8033,Highlander Robotics,Piedmont,California,USA,https://i.imgur.com/1FI8W7pm.jpg\n"
-                        "114,Eaglestrike,Los Altos,California,USA,\n"
-                        "2035,The Rockin&#39; Bots,Carmel,California,USA,</textarea>").encode()
-                self.send_response(200); self.end_headers(); self.wfile.write(body); return
-            if self.path.startswith("/event/"):              # a page with no team list yet
-                self.send_response(200); self.end_headers(); self.wfile.write(b"<html></html>"); return
-            if self.headers.get("X-TBA-Auth-Key") != "goodkey":
-                self.send_response(401); self.end_headers(); return
-            if self.path == "/api/v3/event/2026later/matches/simple":
-                def m(level, s_, n, red, blue):
-                    return {"key": f"2026later_{level}{s_}m{n}" if level != "qm" else f"2026later_qm{n}",
-                            "comp_level": level, "set_number": s_, "match_number": n, "time": 1000 + n,
-                            "alliances": {"red": {"team_keys": [f"frc{t}" for t in (254, 1678, 971)], "score": red,
-                                                  "surrogate_team_keys": ["frc971"] if n == 2 else []},
-                                          "blue": {"team_keys": ["frc604", "frc649", "frc8033"], "score": blue}}}
-                # TBA's own order is not playing order.
-                body = _json.dumps([m("qf", 1, 2, -1, -1), m("qm", 1, 2, -1, -1), m("qf", 2, 1, -1, -1),
-                                    m("qm", 1, 1, 50, 40), m("qf", 1, 1, -1, -1)]).encode()
-                self.send_response(200); self.end_headers(); self.wfile.write(body); return
-            if self.path == "/api/v3/event/2026later/simple":
-                self.send_response(200); self.end_headers(); self.wfile.write(b'{"name": "Later Event"}'); return
-            if self.path != "/api/v3/event/2026later/teams/simple":
-                self.send_response(404); self.end_headers(); return
-            body = _json.dumps([{"team_number": 1678, "nickname": "Citrus Circuits"},
-                                {"team_number": 254, "nickname": "The Cheesy Poofs"}]).encode()
-            self.send_response(200); self.end_headers(); self.wfile.write(body)
-
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), TBA)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{srv.server_address[1]}"
-    St.TBA_API, St.TBA_WEB = base + "/api/v3", base
-    try:
-        r = St.tba_teams("2026CATSTD", "")
-        check("the event page's Scouting list is read with no key: only team_number, names kept",
-              r.get("teams") == [114, 2035, 8033] and r["names"]["2035"] == "The Rockin' Bots")
-        r = St.tba_teams("2026later", "goodkey")
-        check("a page with no list yet falls back to the Read API",
-              r.get("teams") == [254, 1678] and r["names"]["254"] == "The Cheesy Poofs")
-        check("a wrong key and a missing event key each say what to fix",
-              "refused" in St.tba_teams("2026later", "bad")["error"]
-              and "event key first" in St.tba_teams("", "goodkey")["error"])
-        r = St.tba_matches("2026LATER", "goodkey")
-        ms = r.get("matches") or []
-        check("TBA's schedule for the match queue comes in playing order, qf1m1 qf2m1 qf1m2",
-              r.get("name") == "Later Event"
-              and [x["key"] for x in ms] == ["qm1", "qm2", "qf1m1", "qf2m1", "qf1m2"])
-        check("in the shape Watchtower's state has: team numbers, surrogates, played = has a score",
-              ms[0]["red"] == [254, 1678, 971] and ms[0]["status"] == "committed" and ms[0]["red_score"] == 50
-              and ms[1]["status"] == "scheduled" and ms[1]["surrogates"] == [971] and ms[1]["time"] == 1002)
-        import os
-        saved_key = os.environ.pop("TBA_AUTH_KEY", None)     # a maintainer's own key would answer
-        no_key = St.tba_matches("2026later", "")
-        if saved_key is not None:
-            os.environ["TBA_AUTH_KEY"] = saved_key
-        check("no Read key, a wrong one, and no event key each say what to fix",
-              "Read API key" in no_key["error"]
-              and "refused" in St.tba_matches("2026later", "bad")["error"]
-              and "event key" in St.tba_matches("", "goodkey")["error"])
-    finally:
-        srv.shutdown()
-    pasted = St.parse_team_text("team_number,team_name,city,state_prov,country,robot_image_url\n"
-                                "114,Eaglestrike,Los Altos,California,USA,https://i.imgur.com/Xt75qTWm.jpg\n")
-    check("pasted TBA CSV gives the team, not the 75 in its photo URL", pasted["teams"] == [114])
-    check("JSON from TBA's API pastes too",
-          St.parse_team_text('[{"key":"frc254","team_number":254,"nickname":"Poofs"},"frc971"]')["teams"] == [254, 971])
-    St.TBA_API = St.TBA_WEB = "http://127.0.0.1:1"
-    check("no internet says so", "online" in St.tba_teams("2026catstd", "goodkey")["error"])
-
-
-def test_watchtower_home_api():
-    """The Home window's API object holds methods and nothing pywebview could walk into.
-
-    pywebview exposes a js_api object by walking every public attribute,
-    recursively. Given the app object, it walked into the window and, on
-    Windows, read WebView2's controller off the UI thread: the window never
-    loaded. HomeApi has only methods, and every call home.html makes must be
-    one of them (and of the browser-mode list, HOME_API).
-    """
-    import ast
-    import re
-    root = Path(__file__).resolve().parent.parent
-    src = (root / "apps" / "watchtower" / "main.py").read_text()
-    tree = ast.parse(src)
-    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HomeApi")
-    methods = {f.name for f in cls.body if isinstance(f, ast.FunctionDef) and not f.name.startswith("_")}
-    stores = [t.attr for f in cls.body if isinstance(f, ast.FunctionDef) for n in ast.walk(f)
-              if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Attribute)]
-    check("HomeApi keeps only private attributes (pywebview skips '_' names)",
-          stores and all(a.startswith("_") for a in stores))
-    page = (root / "apps" / "watchtower" / "home.html").read_text()
-    calls = set(re.findall(r"api\(\)\.(\w+)\(", page))
-    check("every call home.html makes is on HomeApi", calls and calls <= methods)
-    i = src.index("HOME_API = (")
-    listed = set(re.findall(r'"(\w+)"', src[i:src.index(")", i)]))
-    check("and the browser-mode list allows exactly the same calls", listed == methods)
-    check("the window is given HomeApi, not the app", "js_api=HomeApi(app)" in src)
-    check("Watchtower's Home holds our camera setup page as its Hub cameras tab",
-          'id="tab_hub"' in page and 'id="hubframe"' in page
-          and 'HUB_URL="http://127.0.0.1:8790/"' in page and "show('hub')" in page)
-    check("with a public address set, phones get it (and its QR) instead of the .local name",
-          'qrUrl=pub||s.phone_url' in page and '$("phoneurl").textContent=pub||' in page
-          and '$("phoneurl2").textContent=pub?("if the website is down, on the Wi-Fi: "+s.phone_url)' in page
-          and '"public_url": self.ev.get("public_url", "")' in src)
-    hc = (root / "apps" / "hubcounter" / "main.py").read_text()
-    check("the Hub Counter app opens in its own window, closing it quits, the browser only without a toolkit",
-          "def run_window(" in hc and "win.events.closed += ctl.quit" in hc
-          and "webbrowser.open(URL)" in hc and "--selftest-window" in hc)
-    spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
-    icons = root / "apps" / "icons"
-    # The .github read is guarded: release archives carry no .github/, and
-    # these tests run inside the unpacked archive at release time.
-    wf = root / ".github" / "workflows" / "hub-app.yml"
-    check("both apps carry their own icon (not PyInstaller's Python snake) on Mac, Windows and the installer",
-          all((icons / f"{n}.{e}").stat().st_size > 1000
-              for n in ("HubCounter", "Watchtower") for e in ("icns", "ico", "png"))
-          and "icon=ICONS +" in spec and 'icon=ICONS + ".icns"' in spec
-          and "SetupIconFile" in (root / "apps" / "installer" / "windows.iss").read_text()
-          and (not wf.exists() or "-DIconFile=" in wf.read_text()))
-    check("and both apps bundle the window toolkit",
-          spec.index("WEBVIEW = collect_submodules") < spec.index('if APP == "watchtower":')
-          and "EXTRA_IMPORTS = WEBVIEW" in spec)
 
 
 def test_app_update():
@@ -4002,9 +3786,6 @@ def test_camera_presets():
     check("an app pointed at another app's presets file offers its presets",
           any(p["label"] == "Shared" for p in wt.presets()))
     ctl.delete_preset("shared")
-    src = (Path(__file__).resolve().parent.parent / "apps" / "watchtower" / "main.py").read_text()
-    check("Watchtower shares the Hub Counter app's presets file",
-          '"Hub Counter" / "camera-presets.json"' in src and "ctl.presets_file" in src)
 
     try:
         import cv2  # noqa: F401  (CI has no cv2; the rest is checked there)
@@ -5069,54 +4850,6 @@ def test_fanout_watchtower_and_bioarena():
     finally:
         HCo.run, HF.listen, HA.problems = real_run, real_listen, real_problems
 
-    # The Watchtower app: bioarena's address is never typed. vision.yaml's
-    # first feeds: entry, else the spec's; Phones & PINs only shows it.
-    root = Path(__file__).resolve().parent.parent
-    page = (root / "apps" / "watchtower" / "home.html").read_text()
-    check("Phones & PINs shows bioarena read-only, with no input box",
-          'id="fieldurl"' in page and "server.field_feed" not in page
-          and "field_feed" not in (root / "apps" / "watchtower" / "settings.py").read_text())
-    src = (root / "apps" / "watchtower" / "main.py").read_text()
-    tree = ast.parse(src)
-    ns = {"Path": Path}
-    for n in tree.body:
-        if isinstance(n, ast.FunctionDef) and n.name in ("vision_feed", "counter_target"):
-            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
-        if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "FIELD_FEED":
-            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
-    ev = {"key": "K", "port": 8000, "field_feed": ""}
-    check("nothing found: Watchtower and the spec's bioarena address",
-          ns["FIELD_FEED"] == "10.0.100.5:8411"
-          and ns["counter_target"](ev) == "http://K@127.0.0.1:8000, 10.0.100.5:8411")
-    check("vision.yaml's address when it has one",
-          ns["counter_target"](dict(ev, field_feed="192.168.1.50:8411"))
-          == "http://K@127.0.0.1:8000, 192.168.1.50:8411")
-    check("main() uses it", "ctl.default_target = counter_target(ev)" in src
-          and '"field_feed": vf or FIELD_FEED' in src)
-    try:
-        import yaml  # noqa: F401  (CI has no PyYAML; the app bundles it)
-    except ImportError:
-        return
-    with tempfile.TemporaryDirectory() as d:
-        (Path(d) / "config").mkdir()
-        check("no vision.yaml: no feed", ns["vision_feed"](Path(d)) == "")
-        (Path(d) / "config" / "vision.yaml").write_text(
-            "fms_url: x\n# feeds:\n#   - {host: 1.2.3.4}\n")
-        check("fms.init's commented-out feeds: none", ns["vision_feed"](Path(d)) == "")
-        (Path(d) / "config" / "vision.yaml").write_text(
-            "feeds:\n  - name: bioarena\n    host: 192.168.1.50\n")
-        check("vision.yaml's first feed, default port 8411",
-              ns["vision_feed"](Path(d)) == "192.168.1.50:8411")
-        for text, want in (("feeds: 10.0.100.5\n", "10.0.100.5:8411"),
-                           ("feeds: {host: 10.0.100.6, port: 9000}\n", "10.0.100.6:9000"),
-                           ("feeds: ['10.0.100.7:8411']\n", "10.0.100.7:8411"),
-                           ("feeds: [{host: a, port: 8411/udp}, {host: 10.0.100.8}]\n", "10.0.100.8:8411"),
-                           ("feeds: [{host: 'udp://x'}]\n", ""), ("feeds: 7\n", ""),
-                           ("feeds: [\n", "")):
-            (Path(d) / "config" / "vision.yaml").write_text(text)
-            check(f"vision.yaml {text.strip()!r} -> {want!r}, never a crash at launch",
-                  ns["vision_feed"](Path(d)) == want)
-
 
 def test_plugin_combines_like_hubtally():
     """Watchtower's plugin (fms_counter) and the page's counter (hubcount.run)
@@ -5543,6 +5276,45 @@ def test_onnx_decoders():
           OD.parse_names("{0: 'fuel', 1: 'robot_blue'}") == ["fuel", "robot_blue"])
 
 
+def test_watchtower_app():
+    """Our Watchtower app wraps watchtower-fms v2 (2026-11-18): Control in one
+    window, Watchtower's own camera runner beside it, nothing of the v0.1
+    Home window left. What can be checked without fastapi or a window."""
+    import ast
+    import os
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "apps" / "watchtower" / "main.py").read_text()
+    ns = {"Path": Path, "threading": __import__("threading"), "time": __import__("time"),
+          "os": os, "socket": __import__("socket")}
+    for n in ast.parse(src).body:
+        if (isinstance(n, ast.FunctionDef) and n.name in ("vision_config", "port_open")) or (
+                isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in ("CAMERAS", "ORPHAN_S")):
+            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
+    with tempfile.TemporaryDirectory() as t:
+        (Path(t) / "config").mkdir()
+        text = ns["vision_config"](Path(t), 8123).read_text()
+    check("watchtower app: cameras reported to this FMS, colour counter, hubs from Setup",
+          "fms_url: http://127.0.0.1:8123" in text and "counter: colour" in text
+          and "hubs: {red: {}, blue: {}}" in text)
+    check("watchtower app: a killed app's camera runner stops by itself", ns["ORPHAN_S"] <= 30
+          and "_exit_with_fms" in src and "os._exit(0)" in src)
+    check("watchtower app: the runner is restarted if it stops, never mid-quit",
+          "self.stopping.is_set()" in src and "VISION_RESTART_S" in src)
+    check("watchtower app: no camera runner for a REEFSCAPE event (scored by hand)",
+          'cfg["event"]["game"] == "rebuilt"' in src)
+    check("watchtower app: the old Home window is gone",
+          not (root / "apps" / "watchtower" / "home.html").exists()
+          and not (root / "apps" / "watchtower" / "settings.py").exists())
+    check("watchtower app: updates are asked for, and refused mid-match",
+          "self.fms.match_running()" in src and "check_update" in src)
+    sys.path.insert(0, str(root / "apps" / "watchtower"))
+    import queue_tba
+    check("watchtower queue: no key, no TBA call", "error" in queue_tba.tba_matches("2026abcd", "")
+          if not os.environ.get("TBA_AUTH_KEY") else True)
+    check("watchtower queue: a bad event key is refused before any call",
+          "error" in queue_tba.tba_matches("not a key", "x"))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5564,14 +5336,13 @@ def main() -> int:
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
-               test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
+               test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined,                test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
                test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
                test_detector_comparison_metric, test_sam3_autolabel_rules,
                test_unpaint_relabel_names_and_cut, test_count_einstein_helpers,
-               test_onnx_decoders):
+               test_onnx_decoders, test_watchtower_app):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

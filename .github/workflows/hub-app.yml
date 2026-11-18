@@ -14,10 +14,10 @@ name: hub-app
 #   Linux x64              HubCounter-linux-x64.tar.gz   Hub Counter/Hub Counter
 #   Linux arm64 (Pi 4/5)   HubCounter-linux-arm64.tar.gz Hub Counter/Hub Counter
 #
-# Each job also builds the Watchtower app (apps/watchtower/, Watchtower-*.zip /
-# .tar.gz): the same hub counter plus the Watchtower FMS (arnan-bajaj/
-# watchtower-fms at the tag in .github/watchtower-release), set up and
-# started together on a double-click.
+# Each job also builds the Watchtower app (apps/watchtower/): the Watchtower
+# FMS v2 and its own hub-camera runner (arnan-bajaj/watchtower-fms at the
+# commit in .github/watchtower-release), started together on a double-click
+# in one window on Control.
 #
 #   pull request touching the app or the hub code: build + smoke test each,
 #     kept as workflow artifacts (Actions tab -> the run -> Artifacts)
@@ -92,9 +92,9 @@ jobs:
           else
             pip install onnxruntime
           fi
-          pip install pyinstaller opencv-python-headless numpy yt-dlp
+          pip install pyinstaller opencv-python-headless numpy yt-dlp pyyaml requests
           pip install fastapi uvicorn websockets      # Watchtower's server
-          pip install pywebview qrcode                # Watchtower's own windows, phone QR code
+          pip install pywebview                       # the apps' own windows
 
       - name: The built-in fuel model, checked against CHANGELOG's checksum
         env:
@@ -136,7 +136,10 @@ jobs:
         run: python apps/hubcounter/smoke_test.py --window "${{ matrix.program }}"
 
       - name: Get Watchtower
-        run: git clone --depth 1 --branch "$(cat .github/watchtower-release)" https://github.com/arnan-bajaj/watchtower-fms.git watchtower-src
+        # A commit, not a tag: v2.7 (Match13) was on main, untagged, when pinned.
+        run: |
+          git clone --filter=blob:none https://github.com/arnan-bajaj/watchtower-fms.git watchtower-src
+          git -C watchtower-src checkout -q "$(cat .github/watchtower-release)"
 
       - name: Build Watchtower
         env:
@@ -145,12 +148,12 @@ jobs:
           HUBCOUNTER_REQUIRE_MODEL: "1"
         run: pyinstaller --noconfirm --workpath build/watchtower apps/hubcounter/HubCounter.spec
 
-      - name: Smoke test Watchtower (setup, FMS, counter preset to it, vision key, Quit)
+      - name: Smoke test Watchtower (setup, FMS, Control, hub cameras reporting, vision key, quit)
         run: python apps/watchtower/smoke_test.py "${{ matrix.wprogram }}"
 
       # Linux builds fall back to the browser (no WebKit GTK bundled), so the
       # window test runs where the app opens its own windows.
-      - name: Watchtower's app windows (Home, Scorekeeper, Hub cameras, Field display)
+      - name: Watchtower's app windows (Control, Field display)
         if: runner.os != 'Linux'
         run: python apps/watchtower/smoke_test.py --window "${{ matrix.wprogram }}"
 

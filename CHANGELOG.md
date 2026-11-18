@@ -9,6 +9,22 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Watchtower app rebuilt on Watchtower v2** (arnan-bajaj/watchtower-fms at
+  its v2.7 commit; it was v0.1.0). It now opens one window on Watchtower's
+  own Control page, whose Setup holds the event, teams, PINs, TBA, the field
+  link and Field control, Match13 and the hub cameras (picture, fuel colour
+  with magenta preview, Measure, outline, drop test, step-by-step hub cards,
+  Run and Test). Watchtower's own camera runner runs beside it as a second
+  copy of the app (`--vision`), restarted 3 s after it stops, and stops by
+  itself 20 s after the FMS is gone, so a killed app leaves no camera open.
+  A menu opens the field display, the stream overlay, the match queue and
+  the event folder, checks for updates (refused mid-match) and quits. Our
+  Home window, its settings editor and the bundled Hub Counter page are
+  gone: v2 moved all of it into Control -> Setup. The match queue (`/queue`)
+  stays. Checked from a checkout with `apps/watchtower/smoke_test.py`
+  (Control, queue, both hubs reporting, vision key, quit) and the kill test;
+  not yet built by CI.
+
 - **The apps run the fuel model without PyTorch.** Hub Counter and Watchtower
   now carry `fuel_relabel.onnx` and ONNX Runtime (`tbavid/onnxdet.py`)
   instead of torch + Ultralytics, which were most of each 300-400 MB

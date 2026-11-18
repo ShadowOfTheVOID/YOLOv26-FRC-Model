@@ -19,10 +19,10 @@
 # shipping one whose "Use built-in model" button is missing.
 #
 # The same spec builds the Watchtower app (apps/watchtower/) with
-# HUBAPP=watchtower: the hub counter plus the Watchtower FMS from a clone of
-# arnan-bajaj/watchtower-fms at WATCHTOWER_SRC (hub-app.yml clones the tag
-# in .github/watchtower-release). One spec, so the model and page fixes
-# above apply to both.
+# HUBAPP=watchtower: the Watchtower FMS and its own hub-camera runner from a
+# clone of arnan-bajaj/watchtower-fms at WATCHTOWER_SRC (hub-app.yml checks
+# out the commit in .github/watchtower-release). It carries neither our hub
+# page nor the model: Watchtower v2's cameras are in its own Control -> Setup.
 import os
 import sys
 
@@ -55,25 +55,40 @@ if APP == "watchtower":
     WSRC = os.path.abspath(os.environ.get("WATCHTOWER_SRC") or os.path.join(ROOT, "watchtower-src"))
     if not os.path.isfile(os.path.join(WSRC, "fms", "server.py")):
         raise SystemExit(f"no Watchtower at {WSRC}: clone arnan-bajaj/watchtower-fms there")
-    sys.path.insert(0, WSRC)
+    VSRC = os.path.join(WSRC, "vision")
+    sys.path[:0] = [WSRC, VSRC]
     NAME, ENTRY, BUNDLE_ID = "Watchtower", os.path.join(ROOT, "apps", "watchtower", "main.py"), "org.tbavid.watchtower"
     WAPP = os.path.join(ROOT, "apps", "watchtower")
-    EXTRA_PATH = [WSRC, WAPP]
-    EXTRA_DATAS = [(os.path.join(WAPP, "home.html"), "."),
-                   (os.path.join(WAPP, "queue.html"), "."),
+    EXTRA_PATH = [WSRC, VSRC, WAPP]
+    EXTRA_DATAS = [(os.path.join(WAPP, "queue.html"), "."),
                    (os.path.join(WSRC, "fms", "static"), "fms/static"),
                    (os.path.join(WSRC, "config", "event.example.yaml"), "config"),
-                   (os.path.join(WSRC, "config", "vision.example.yaml"), "config")]
-    # uvicorn picks its loop, protocols and lifespan by name at start.
+                   (os.path.join(WSRC, "config", "vision.example.yaml"), "config"),
+                   # run_vision.py is run from its folder (Watchtower --vision);
+                   # the counter plugins folder is read at start.
+                   (VSRC, "vision")]
+    # uvicorn picks its loop, protocols and lifespan by name at start; vision's
+    # modules import each other by bare name from vision/.
+    VISION = ["run_vision", "dropfit", "hubsetup", "vconfig", "count_feed", "scaler",
+              "pick_roi", "rescore"]
     EXTRA_IMPORTS = (collect_submodules("fms") + collect_submodules("uvicorn")
-                     + ["fastapi", "starlette", "websockets", "yaml", "requests", "settings"]
-                     + collect_submodules("qrcode") + WEBVIEW)
+                     + collect_submodules("counters") + collect_submodules("hubcounter")
+                     + ["fastapi", "starlette", "websockets", "yaml", "requests", "queue_tba",
+                        "tbavid.keepawake", "tbavid.cvload"] + VISION + WEBVIEW)
     EXTRA_DATAS += collect_data_files("webview")
+    # Only the hub counter app runs our model: none of this in Watchtower,
+    # whose colour counter needs OpenCV and numpy alone.
+    HUB_IMPORTS = ["cv2", "numpy"]
 else:
     NAME, ENTRY, BUNDLE_ID = "Hub Counter", os.path.join(SPECPATH, "main.py"), "org.tbavid.hubcounter"
     EXTRA_PATH = []
     EXTRA_DATAS = collect_data_files("webview")
     EXTRA_IMPORTS = WEBVIEW
+    HUB_IMPORTS = ["tbavid.hubweb", "tbavid.hubapp", "tbavid.hubcount",
+                   "tbavid.hubfeed", "tbavid.fmslink", "tbavid.hubmodel",
+                   "tbavid.count", "tbavid.trackvis", "tbavid.camcheck",
+                   "tbavid.camprofile", "tbavid.onnxdet", "cv2", "numpy", "yt_dlp",
+                   "onnxruntime"]
 
 # The build's version, read at run time by tbavid/appupdate.py to offer
 # one-click updates (0.0.0 for pull-request builds, which offer none).
@@ -85,7 +100,8 @@ EXTRA_DATAS = EXTRA_DATAS + [(os.path.join(_VDIR, "app_version.txt"), ".")]
 EXTRA_IMPORTS = EXTRA_IMPORTS + ["tbavid.appupdate"]
 
 MODEL = os.path.join(ROOT, "models", "fuel_relabel.onnx")
-if not os.path.isfile(MODEL) and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
+if (APP != "watchtower" and not os.path.isfile(MODEL)
+        and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1"):
     raise SystemExit(f"{MODEL} is missing (hub-app.yml downloads it from the release)")
 MODELS = [(MODEL, "models")] if os.path.isfile(MODEL) else []
 
@@ -94,14 +110,10 @@ a = Analysis(
     [ENTRY],
     pathex=[ROOT] + EXTRA_PATH,
     binaries=[],
-    datas=[(os.path.join(TB, "hubweb.html"), "tbavid"),
-           (os.path.join(TB, "hubboard.html"), "tbavid")] + MODELS
-          + EXTRA_DATAS,
-    hiddenimports=["tbavid.hubweb", "tbavid.hubapp", "tbavid.hubcount",
-                   "tbavid.hubfeed", "tbavid.fmslink", "tbavid.hubmodel",
-                   "tbavid.count", "tbavid.trackvis", "tbavid.camcheck",
-                   "tbavid.camprofile", "tbavid.onnxdet", "cv2", "numpy", "yt_dlp",
-                   "onnxruntime"] + EXTRA_IMPORTS,
+    datas=([(os.path.join(TB, "hubweb.html"), "tbavid"),
+            (os.path.join(TB, "hubboard.html"), "tbavid")] + MODELS
+           if APP != "watchtower" else []) + EXTRA_DATAS,
+    hiddenimports=HUB_IMPORTS + EXTRA_IMPORTS,
     excludes=SCRAPER + HEAVY,
     noarchive=False,
 )
