@@ -117,29 +117,43 @@ def table(rows: List[Dict]) -> str:
     return "\n".join(out)
 
 
+COLOUR = "colour counter alone (shipped)"
+
+
 def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer"][0],
-        on_rows=None) -> List[Dict]:
-    """`on_rows(rows)` after every model: the caller saves the table so far,
-    so a Colab disconnect keeps the models already counted."""
+        on_rows=None, done: List[Dict] = ()) -> List[Dict]:
+    """`on_rows(rows)` after every model, so the caller can save progress.
+    `done`: rows from an earlier, interrupted run; their models are not
+    counted again (rows cut short by a dropped video are counted again)."""
     from tbavid.hubcount import count_recording, setup_from_dict
     _, truth = E1_TRUTH["buzzer"]
     t_auto, _ = E1_TRUTH["auto"]
+    have = {r["label"]: r for r in done if not r.get("short")}
     rows = []
-    r = count_recording(setup_from_dict(e1_setup(video)), video, CAMERA, end=end, every=1.0)
-    c = {"blue": r["blue"], "red": r["red"]}
-    rows.append(dict(label="colour counter alone (shipped)", **c, error=error(c, truth),
-                     auto=at(r["timeline"], t_auto), short=cut_short(r, end)))
-    print(f"colour: {c} in {r['took_s']}s ({r['speed']} fps)", flush=True)
+    if COLOUR in have:
+        rows.append(have[COLOUR])
+        print("colour: from the earlier run", flush=True)
+    else:
+        r = count_recording(setup_from_dict(e1_setup(video)), video, CAMERA, end=end, every=1.0)
+        c = {"blue": r["blue"], "red": r["red"]}
+        rows.append(dict(label=COLOUR, **c, error=error(c, truth),
+                         auto=at(r["timeline"], t_auto), short=cut_short(r, end)))
+        print(f"colour: {c} in {r['took_s']}s ({r['speed']} fps)", flush=True)
     if on_rows:
         on_rows(rows)
     for name, weights in models:
+        alone, blend = f"{name}: model alone", f"{name}: colour + model (0.5)"
+        if alone in have and blend in have:
+            rows += [have[alone], have[blend]]
+            print(f"{name}: from the earlier run", flush=True)
+            continue
         r = count_recording(setup_from_dict(e1_setup(video, weights)), video, CAMERA,
                             end=end, every=1.0)
         m = hub_values(r["model"])
         b = {"blue": r["blue"], "red": r["red"]}
         short = cut_short(r, end)
-        rows.append(dict(label=f"{name}: model alone", **m, error=error(m, truth), short=short))
-        rows.append(dict(label=f"{name}: colour + model (0.5)", **b, error=error(b, truth),
+        rows.append(dict(label=alone, **m, error=error(m, truth), short=short))
+        rows.append(dict(label=blend, **b, error=error(b, truth),
                          auto=at(r["timeline"], t_auto), short=short))
         if short:
             print(f"  ! {name}: {short} -- not a count (was the video read from a Drive "
@@ -150,7 +164,25 @@ def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer
     return rows
 
 
+def _write(path: Path, text: str) -> bool:
+    """Locally first (Colab's disk), then `path`: the Drive mount can drop
+    mid-run ("[Errno 107] Transport endpoint is not connected", 2026-11-18)
+    and that must not end the counting."""
+    local = Path(LOCAL_DIR) / path.name
+    local.write_text(text)
+    try:
+        path.write_text(text)
+        return True
+    except OSError as e:
+        print(f"  ! could not write {path} ({e}); kept in {local}", flush=True)
+        return False
+
+
 def main(argv=None) -> int:
+    """Progress goes to OUT.partial.json; OUT (.txt and .json) is written only
+    when every model is counted. The notebook skips the cell when OUT exists,
+    so a half-finished OUT -- what an interrupted run left on 2026-11-18 --
+    made the re-run print three models and stop."""
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--video", required=True, help="the Einstein 1 broadcast (1080p)")
@@ -169,24 +201,27 @@ def main(argv=None) -> int:
             print(f"  ! {name}: {w} not found -- skipped", flush=True)
             continue
         models.append((name, w))
-    def save(rows):
-        """Locally first, then to --out: Colab's Drive mount can drop mid-run
-        ("[Errno 107] Transport endpoint is not connected", 2026-11-18, after
-        the fourth model), and that must not end the counting."""
-        if not args.out:
-            return
-        local = Path(LOCAL_DIR) / args.out.name
-        local.write_text(table(rows) + "\n")
-        local.with_suffix(".json").write_text(json.dumps(rows, indent=1))
+    partial = args.out.with_name(args.out.stem + ".partial.json") if args.out else None
+    done: List[Dict] = []
+    for p in ([partial, Path(LOCAL_DIR) / partial.name] if partial else []):
         try:
-            args.out.write_text(local.read_text())
-            args.out.with_suffix(".json").write_text(local.with_suffix(".json").read_text())
-        except OSError as e:
-            print(f"  ! could not write {args.out} ({e}); kept in {local} -- remount Drive "
-                  f"and copy it, or re-run this cell", flush=True)
-    rows = run(args.video, models, args.end, on_rows=save)
-    save(rows)
+            done = json.loads(p.read_text())
+            print(f"resuming: {len(done)} rows from {p}", flush=True)
+            break
+        except (OSError, ValueError):
+            continue
+    rows = run(args.video, models, args.end, done=done,
+               on_rows=(lambda r: _write(partial, json.dumps(r, indent=1))) if partial else None)
     print(table(rows))
+    if args.out:
+        ok = _write(args.out, table(rows) + "\n")
+        ok = _write(args.out.with_suffix(".json"), json.dumps(rows, indent=1)) and ok
+        if ok:
+            for p in (partial, Path(LOCAL_DIR) / partial.name):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
     return 0
 
 
