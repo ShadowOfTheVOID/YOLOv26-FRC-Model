@@ -9,6 +9,18 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+## v0.6.0 — 2026-11-18
+
+**Highlights.** Watchtower app rebuilt on Watchtower v2 (one window on Control, its own hub cameras,
+match queue, themed Ref / MC / Control with a dark mode). The apps run the fuel model on ONNX Runtime
+with no PyTorch, and the model is now the primary counter -- on the GPU first, with exit lines counted
+by the model too and the colour counter as the automatic backup. Hub Counter page redesigned (Set up /
+Run / Test, a Next card, drop-test ball size, per-hub fuel colour). Terminal shortcuts (`run.py aliases`).
+The 2026-11 model experiments: YOLO26s at 1280 is the best detector, fuel_relabel.pt still counts best.
+A Colab notebook harvests matches to train YOLO26s at 1280, with a one-command Mac harvest for when
+YouTube refuses Colab.
+
+
 - **`train/colab_harvest_1280.ipynb`: harvest matches and train YOLO26s at
   1280.** The bake-off's 1280 model was the best detector but had seen four
   Einstein matches only. This notebook harvests 2026 competition matches
