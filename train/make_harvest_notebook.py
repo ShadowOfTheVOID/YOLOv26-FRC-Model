@@ -52,17 +52,16 @@ Three ways round it:
 * **A cookies file**: export `cookies.txt` from a browser signed in to a *spare* Google account (the "Get
   cookies.txt LOCALLY" extension), put it in `MyDrive/frc-harvest/` and set `YT_COOKIES = "cookies.txt"`.
   Your choice: cookies expire, and they let the downloader act as that account.
-* **Harvest on your own computer** (YouTube does not block home connections), then let Colab label and train.
-  In a checkout of this repo with the requirements installed (`pip install -r requirements.txt yt-dlp`, plus
-  ffmpeg), and `TBA_AUTH_KEY` set:
+* **Harvest on your Mac** (YouTube does not block home connections), then let Colab label and train. With
+  Google Drive for desktop signed in, in Terminal, in a checkout of this repo on this branch:
 
   ```
-  export TBAVID_DATA=~/frc-harvest/hdata
-  python3 run.py fetch -n 40 --per-event-cap 2 --seed 2026
+  bash deploy/harvest_on_mac.sh
   ```
 
-  then put that `hdata` folder (and the repo's `state/` folder, as `state`) into `MyDrive/frc-harvest/`
-  and Run all here: the harvest step finds the matches already there and goes straight to labelling.
+  It installs what it needs, asks for the TBA key, downloads 40 matches and copies them into
+  `MyDrive/frc-harvest/`. When Drive has finished uploading, Run all here: the harvest step finds the matches
+  already there and goes straight to labelling.
 ''')
 
 md("## 1. Settings")
