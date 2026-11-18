@@ -62,7 +62,7 @@ BRANCH      = "claude/practical-einstein-bgrb3r"      # switch to "main" once th
 MATCHES       = 40        # how many matches to label and train on (more is better; each is ~150 MB in Drive)
 PER_EVENT_CAP = 2         # at most this many from one event: variety beats volume
 SEED          = 2026      # fixes which matches are picked, so a re-run picks the same ones
-EXCLUDE       = ("cmptx", "cmpmi")   # the Championship (Einstein) events: Einstein 1 is the test, never trained on
+EXCLUDE       = ("2026cmptx",)   # Einstein Field: Einstein 1 is the test, never trained on
 YT_COOKIES    = ""        # "" or a cookies.txt in DRIVE_DIR (see the top of the notebook)
 
 # Label
@@ -138,9 +138,16 @@ try:
                                           "User-Agent": "TBACroppedOutVid/1.0"})
     print(f"TBA key works: {len(json.load(urllib.request.urlopen(req, timeout=30)))} events in 2026")
 except urllib.error.HTTPError as e:
-    problem = (f"TBA refused the key (401): use the Read API key from thebluealliance.com -> Account "
-               f"-> Read API Keys (not a Write key)." if e.code == 401 else
-               f"TBA answered {e.code}: not the key; TBA or this connection. Try again in a few minutes.")
+    if e.code == 401:
+        problem = ("TBA refused the key (401): use the Read API key from thebluealliance.com -> Account "
+                   "-> Read API Keys (not a Write key).")
+    elif e.code == 403 and os.path.exists(f"{DRIVE_DIR}/tba_cache.zip"):
+        # TBA's firewall refuses Colab's machines whatever the key (2026-11-18: 403 here, the same
+        # key answered elsewhere). The harvest then uses the event and match lists saved in Drive.
+        print("TBA blocks Colab's machines (403): using the saved event and match lists (tba_cache.zip)")
+    else:
+        problem = (f"TBA answered {e.code}" + (" and blocks Colab's machines; there is no tba_cache.zip in "
+                   f"{DRIVE_DIR} to use instead" if e.code == 403 else ": try again in a few minutes"))
 if problem:                     # raised outside the except, which Colab's error display trips over
     raise SystemExit(problem)
 ''')
@@ -164,6 +171,11 @@ def sync(src, dst):
 # bring back what earlier sessions harvested, and the never-twice ledger
 sync(DH, H)
 sync(f"{DRIVE_DIR}/state", f"{REPO}/state")
+# TBA's event and match lists saved on a machine TBA answers: used when it refuses Colab (403)
+if os.path.exists(f"{DRIVE_DIR}/tba_cache.zip"):
+    os.makedirs(f"{REPO}/state/tba_cache", exist_ok=True)
+    subprocess.run(["unzip", "-q", "-n", f"{DRIVE_DIR}/tba_cache.zip", "-d", f"{REPO}/state/tba_cache"])
+    print(f"saved TBA lists: {len(os.listdir(f'{REPO}/state/tba_cache'))} files")
 
 cfg = json.load(open(f"{REPO}/config.json"))
 cfg.update({"keep_raw": False,          # the clean main-camera clip is what gets labelled
