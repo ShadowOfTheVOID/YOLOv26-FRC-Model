@@ -98,6 +98,8 @@ def fetch(cfg: dict, count: int, retry_failed: bool = False,
                 "or harvest on another computer.")
         if fail:
             print(f"  ! download {fail}: {meta.get('title', '')[:60]}")
+            if download.LAST_ERROR:
+                print(f"    yt-dlp: {download.LAST_ERROR}")
             led.record(yt, fail, **_extras(cand, meta))
             continue
         print(f"  downloaded {raw.name} ({meta['duration']:.0f}s)")

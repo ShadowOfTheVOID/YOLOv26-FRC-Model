@@ -19,8 +19,9 @@
 # into the frc-harvest folder at drive.google.com (the notebook unpacks it). No
 # Homebrew: ffmpeg and ffprobe are static builds fetched into
 # ~/frc-harvest/bin when they are not already installed (osxexperts.net for
-# Apple silicon, evermeet.cx for Intel), yt-dlp goes into the script's own
-# Python environment, and Python 3 is the one macOS's developer tools have. Safe to run again: matches already downloaded are kept and
+# Apple silicon, evermeet.cx for Intel); yt-dlp is its standalone Mac program
+# and deno (which yt-dlp needs for YouTube) its release build, both into the
+# same folder; Python 3 is the one macOS's developer tools have. Safe to run again: matches already downloaded are kept and
 # never downloaded twice.
 set -euo pipefail
 N="${1:-40}"
@@ -74,9 +75,29 @@ fetch_bin() {   # $1 = ffmpeg or ffprobe
 mkdir -p "$BIN"
 for t in ffmpeg ffprobe; do command -v "$t" >/dev/null || fetch_bin "$t"; done
 ffmpeg -version | head -1
+# yt-dlp from pip needs Python 3.11+ (2026.10.26); macOS's python3 is 3.9, so
+# pip quietly installed an old yt-dlp that YouTube no longer answers, and
+# every download failed (2026-11-18). The standalone program carries its own
+# Python. Current yt-dlp also needs a JavaScript runtime for YouTube: deno.
+GH=https://github.com
+if [ ! -x "$BIN/yt-dlp" ]; then
+  echo "  yt-dlp <- $GH/yt-dlp/yt-dlp (yt-dlp_macos)"
+  curl -fsSL "$GH/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" -o "$BIN/yt-dlp"
+  chmod +x "$BIN/yt-dlp"
+else
+  "$BIN/yt-dlp" -U 2>&1 | tail -1 || true             # YouTube changes; keep it current
+fi
+if ! command -v deno >/dev/null; then
+  arch="$( [ "$(uname -m)" = arm64 ] && echo aarch64 || echo x86_64 )"
+  echo "  deno <- $GH/denoland/deno ($arch)"
+  curl -fsSL "$GH/denoland/deno/releases/latest/download/deno-$arch-apple-darwin.zip" -o "$BIN/deno.zip" \
+    && unzip -o -q "$BIN/deno.zip" -d "$BIN" && rm "$BIN/deno.zip" && chmod +x "$BIN/deno"
+fi
+xattr -d com.apple.quarantine "$BIN"/* 2>/dev/null || true
+echo "yt-dlp $("$BIN/yt-dlp" --version)"
 [ -x "$REPO/.venv-harvest/bin/python" ] || python3 -m venv "$REPO/.venv-harvest"
-"$REPO/.venv-harvest/bin/pip" -q install --upgrade -r "$REPO/requirements.txt" yt-dlp
-export PATH="$REPO/.venv-harvest/bin:$PATH"            # the yt-dlp just installed
+"$REPO/.venv-harvest/bin/pip" -q install --upgrade -r "$REPO/requirements.txt"
+"$REPO/.venv-harvest/bin/pip" -q uninstall -y yt-dlp 2>/dev/null || true   # the old one an earlier run put here
 
 if [ -z "${TBA_AUTH_KEY:-}" ]; then
   # from the keyboard: when piped from curl, stdin is this script itself

@@ -27,8 +27,22 @@ UNAVAILABLE_MARKERS = (
 )
 
 
+# yt-dlp's own last error line, for the harvest log: a Mac harvest
+# (2026-11-18) printed "download failed:" forty times with nothing after it,
+# hiding that its yt-dlp was too old for YouTube.
+LAST_ERROR = ""
+
+
+def _error_line(stderr: str) -> str:
+    lines = [l.strip() for l in (stderr or "").splitlines() if l.strip()]
+    errs = [l for l in lines if l.startswith("ERROR")]
+    return ((errs or lines or [""])[-1])[:300]
+
+
 def classify(stderr: str) -> str:
     """yt-dlp's error -> BLOCKED (this machine), UNAVAILABLE (the video) or FAILED."""
+    global LAST_ERROR
+    LAST_ERROR = _error_line(stderr)
     err = (stderr or "").lower()
     if any(m in err for m in BLOCKED_MARKERS):
         return BLOCKED
