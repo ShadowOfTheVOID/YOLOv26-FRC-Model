@@ -2,20 +2,22 @@ name: hub-app
 
 # Builds the Hub Counter app -- the hub fuel counter's web page as a
 # double-click program (apps/hubcounter/) -- on each OS, since each can only
-# be built on its own. The scraper is not in it. PyTorch, Ultralytics and the
-# fuel model (fuel_relabel.pt from the release in .github/models-release) are,
-# so every build can run the colour+model blend; the smoke test runs the
-# model once inside each build.
+# be built on its own. The scraper is not in it. ONNX Runtime and the fuel
+# model are, so every build can run the colour+model blend: fuel_relabel.pt
+# from the release in .github/models-release, exported to .onnx here by
+# train/export_onnx.py, which refuses an export whose boxes differ from the
+# .pt's. PyTorch is used for that export only, in its own venv, and never
+# reaches the apps. The smoke test runs the model once inside each build.
 #
 #   macOS (Apple silicon)  HubCounter-mac.dmg            drag Hub Counter.app to Applications
 #   Windows                HubCounter-Setup-windows.exe  installer (Start menu, uninstaller)
 #   Linux x64              HubCounter-linux-x64.tar.gz   Hub Counter/Hub Counter
 #   Linux arm64 (Pi 4/5)   HubCounter-linux-arm64.tar.gz Hub Counter/Hub Counter
 #
-# Each job also builds the Watchtower app (apps/watchtower/, Watchtower-*.zip /
-# .tar.gz): the same hub counter plus the Watchtower FMS (arnan-bajaj/
-# watchtower-fms at the tag in .github/watchtower-release), set up and
-# started together on a double-click.
+# Each job also builds the Watchtower app (apps/watchtower/): the Watchtower
+# FMS v2 and its own hub-camera runner (arnan-bajaj/watchtower-fms at the
+# commit in .github/watchtower-release), started together on a double-click
+# in one window on Control.
 #
 #   pull request touching the app or the hub code: build + smoke test each,
 #     kept as workflow artifacts (Actions tab -> the run -> Artifacts)
@@ -33,6 +35,8 @@ on:
       - "tbavid/fmslink.py"
       - "tbavid/count.py"
       - "tbavid/trackvis.py"
+      - "tbavid/onnxdet.py"
+      - "train/export_onnx.py"
       - ".github/workflows/hub-app.yml"
       - ".github/models-release"
   workflow_dispatch:
@@ -46,7 +50,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # macos-14 was retired by GitHub ("The configuration
+          # 'macos-14-arm64-us-default' is not supported", 2026-11-18): the job
+          # was cancelled before its first step. macos-15 is Apple silicon too.
+          - os: macos-15
             asset: HubCounter-mac.dmg
             program: dist/Hub Counter.app/Contents/MacOS/Hub Counter
             wasset: Watchtower-mac.dmg
@@ -78,24 +85,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      # PyPI's Linux torch carries CUDA on both x64 and arm64: the arm64 build
-      # came out at 3049 MB, over GitHub's 2 GB asset limit. PyTorch's CPU
-      # index has the same torch without it. Mac (MPS) and Windows wheels on
-      # PyPI are CPU/MPS already (Windows 288 MB, Linux x64 CPU 398 MB).
-      # Ultralytics --no-deps, or it pulls opencv-python beside the headless
-      # one (116 MB twice) and SciPy, which counting never imports.
-      - name: Install the build tools, OpenCV, PyTorch and Ultralytics
+      # ONNX Runtime runs the model: CPU by default, the accelerator when the
+      # CPU cannot keep up (hubmodel.open_onnx). On Windows the DirectML
+      # build (any DirectX 12 GPU); PyPI's Mac build has CoreML.
+      - name: Install the build tools, OpenCV and ONNX Runtime
         run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            pip install onnxruntime-directml
           else
-            pip install torch torchvision
+            pip install onnxruntime
           fi
-          pip install pyinstaller opencv-python-headless numpy yt-dlp
-          pip install --no-deps ultralytics ultralytics-thop
-          pip install matplotlib pillow pyyaml requests psutil polars
+          pip install pyinstaller opencv-python-headless numpy yt-dlp pyyaml requests
           pip install fastapi uvicorn websockets      # Watchtower's server
-          pip install pywebview qrcode                # Watchtower's own windows, phone QR code
+          pip install pywebview                       # the apps' own windows
 
       - name: The built-in fuel model, checked against CHANGELOG's checksum
         env:
@@ -110,6 +112,16 @@ jobs:
           assert got == want, f"fuel_relabel.pt is {got}, CHANGELOG says {want}"
           print("fuel_relabel.pt", got)
           PY
+
+      # torch + Ultralytics in their own venv, so the build's has neither.
+      # PyTorch's CPU index: PyPI's Linux torch carries CUDA, GBs of it.
+      - name: Export the fuel model to ONNX (checked box for box against the .pt)
+        run: |
+          python -m venv "$RUNNER_TEMP/export"
+          if [ "${{ runner.os }}" = "Windows" ]; then X="$RUNNER_TEMP/export/Scripts/python"; else X="$RUNNER_TEMP/export/bin/python"; fi
+          "$X" -m pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          "$X" -m pip install -q ultralytics onnx onnxslim onnxruntime opencv-python-headless
+          "$X" train/export_onnx.py models/fuel_relabel.pt
 
       - name: Build
         env:
@@ -127,7 +139,10 @@ jobs:
         run: python apps/hubcounter/smoke_test.py --window "${{ matrix.program }}"
 
       - name: Get Watchtower
-        run: git clone --depth 1 --branch "$(cat .github/watchtower-release)" https://github.com/arnan-bajaj/watchtower-fms.git watchtower-src
+        # A commit, not a tag: v2.7 (Match13) was on main, untagged, when pinned.
+        run: |
+          git clone --filter=blob:none https://github.com/arnan-bajaj/watchtower-fms.git watchtower-src
+          git -C watchtower-src checkout -q "$(cat .github/watchtower-release)"
 
       - name: Build Watchtower
         env:
@@ -136,12 +151,12 @@ jobs:
           HUBCOUNTER_REQUIRE_MODEL: "1"
         run: pyinstaller --noconfirm --workpath build/watchtower apps/hubcounter/HubCounter.spec
 
-      - name: Smoke test Watchtower (setup, FMS, counter preset to it, vision key, Quit)
+      - name: Smoke test Watchtower (setup, FMS, Control, hub cameras reporting, vision key, quit)
         run: python apps/watchtower/smoke_test.py "${{ matrix.wprogram }}"
 
       # Linux builds fall back to the browser (no WebKit GTK bundled), so the
       # window test runs where the app opens its own windows.
-      - name: Watchtower's app windows (Home, Scorekeeper, Hub cameras, Field display)
+      - name: Watchtower's app windows (Control, Field display)
         if: runner.os != 'Linux'
         run: python apps/watchtower/smoke_test.py --window "${{ matrix.wprogram }}"
 

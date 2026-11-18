@@ -731,12 +731,11 @@ def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
         cv2.imwrite(still_path, still)
         out(f"wrote {still_path}: draw each hub's funnel-mouth outline on it "
             f"(x,y pairs, bottom edge on the solid front rim)")
-    if not polys:
-        out("no outlines given, so no ball area measured")
-        return None
     # A generous region while measuring: the area is not known yet, so size
-    # the margin as if balls were large.
-    boxes = [region_of(p, 4000.0, w, h) for p in polys.values()]
+    # the margin as if balls were large. No outline yet: the whole picture,
+    # so the ruler can help draw the first one (Watchtower v2.5's Measure).
+    boxes = ([region_of(p, 4000.0, w, h) for p in polys.values()] if polys
+             else [(0, 0, w, h)])
     areas: List[float] = []
     frames = 0
     end = time.monotonic() + seconds
@@ -749,8 +748,8 @@ def measure(source: str, polys: Dict[str, List[Point]], seconds: float,
             areas += isolated_ball_areas(frame, box, lo, hi)
     cap.release()
     if not areas:
-        out(f"no isolated ball near either hub in {frames} frames. Put a few "
-            f"balls, apart from each other, near each hub and run it again.")
+        out(f"no lone ball {'near the outlines ' if polys else ''}in {frames} frames. "
+            f"Put a few balls in view, apart from each other, and run it again.")
         return None
     area = statistics.median(areas)
     out(f"one ball = {area:.0f} px under the counting gate "
@@ -853,9 +852,13 @@ class Zone:
     def __init__(self, name: str, hub: str, outline: Sequence[Point],
                  ball_area: float, blur: float = DEFAULT_BLUR,
                  line: Optional[Sequence[Point]] = None,
-                 out: Optional[Point] = None):
+                 out: Optional[Point] = None, colour: Optional[Dict] = None):
         self.name = name
         self.hub = hub
+        # This hub's own fuel colour (camprofile), or None for the camera's:
+        # one camera watching both hubs can see them under different light.
+        from .camprofile import check_colour
+        self.colour = check_colour(colour) if colour else None
         self.line = [tuple(map(float, p)) for p in line] if line else None
         self.out = tuple(map(float, out)) if out else None
         self.outline = [tuple(map(float, p)) for p in outline] if outline else None
@@ -910,15 +913,34 @@ class Camera:
         # camcheck: the small grey picture the outlines were drawn on, kept
         # so the page can tell when the camera has moved. Not used to count.
         self.reference = reference if isinstance(reference, dict) else None
-        # hubmodel.parse_model's dict, or None for colour only. Exit lines
-        # stay colour only: the model counter scores a ball that vanishes in
-        # the outline's box, and an exit line has no box.
+        # hubmodel.parse_model's dict, or None for colour only. Outlines and
+        # exit lines both have a model half (an exit line's is
+        # hubmodel.ModelExitCounter, since 2026-11-18: at the scrimmage
+        # balls were not counted through exit lines, which were colour only).
         self.model = model
         for z in zones:
-            z.weight = model["weight"] if model and z.outline else 0.0
+            z.weight = model["weight"] if model else 0.0
+
+    def zone_gate(self, z: "Zone"):
+        """The (lo, hi) colour gate a zone counts with: its own, else the camera's."""
+        from .camprofile import gate
+        return gate(z.colour or self.colour)
 
     def model_zones(self) -> List["Zone"]:
-        return [z for z in self.zones if z.outline] if self.model else []
+        return list(self.zones) if self.model else []
+
+    def model_eye(self):
+        """The model over every model zone, exit lines' crops not raised."""
+        from .hubmodel import ModelEye
+        zs = self.model_zones()
+        return ModelEye(self.model["weights"], {z.name: z.counter.poly for z in zs},
+                        self.model["device"], exits=[z.name for z in zs if z.line])
+
+    def model_counter(self, z: "Zone", fps: float):
+        from .hubmodel import counter_for
+        if z.line:
+            return counter_for("exit", list(z.line), z.out, fps, self.model["counter"])
+        return counter_for("outline", z.counter.poly, None, fps, self.model["counter"])
 
 
 class Setup:
@@ -1060,12 +1082,12 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
                     zones.append(Zone(zname, str(z.get("hub")), [],
                                       area if area > 0 else 1.0,
                                       min(max(blur, 0.0), 1.0),
-                                      line=line[:2], out=line[2]))
+                                      line=line[:2], out=line[2], colour=z.get("colour")))
                 else:
                     zones.append(Zone(zname, str(z.get("hub")),
                                       _outline(z.get("outline") or []),
                                       area if area > 0 else 1.0,
-                                      min(max(blur, 0.0), 1.0)))
+                                      min(max(blur, 0.0), 1.0), colour=z.get("colour")))
             except ValueError as e:
                 raise ValueError(f"zone {zname!r}: {e}")
         try:
@@ -1087,11 +1109,12 @@ def setup_from_dict(cfg: Dict, measuring: bool = False) -> Setup:
 
 def _zone_dict(z: Zone) -> Dict:
     pt = lambda p: [round(p[0], 1), round(p[1], 1)]
+    extra = {"colour": dict(z.colour)} if z.colour else {}
     if z.line:
         return {"name": z.name, "hub": z.hub, "line": [pt(p) for p in z.line],
-                "out": pt(z.out)}
+                "out": pt(z.out), **extra}
     return {"name": z.name, "hub": z.hub,
-            "outline": [pt(p) for p in z.counter.poly]}
+            "outline": [pt(p) for p in z.counter.poly], **extra}
 
 
 def setup_to_dict(setup: "Setup") -> Dict:
@@ -1380,8 +1403,7 @@ def run(sender, setup: Setup, realtime: bool = False,
         stride = model_stride(file_fps)
         zones = {z.name: z for z in cam.model_zones()}
         for z in zones.values():
-            z.model = ModelCounter(z.counter.poly, file_fps / stride,
-                                   **cam.model["counter"])
+            z.model = cam.model_counter(z, file_fps / stride)
 
         def off(offered, skipped, captured):
             # Colour only from here. The zone's count jumps from the blend
@@ -1398,8 +1420,19 @@ def run(sender, setup: Setup, realtime: bool = False,
                 report(cam, z, captured)
 
         def failed(e):
-            errors.append(f"{cam.name}: model failed: {e}")
-            stop.set()
+            # Since the model became the primary counter (2026-11-18: the
+            # colour counter broke at the scrimmage) a model failure must not
+            # stop counting: stopping restarted run(), which opened the same
+            # failing model again. Colour takes over, as when it is too slow,
+            # and the error stays on the page.
+            errors.append(f"{cam.name}: model failed: {e} -- counting by colour")
+            for z in zones.values():
+                z.weight = 0.0
+            model_off.append(cam.name)
+            out(f"{cam.name}: the model failed ({e}) -- counting by colour only "
+                f"for this session")
+            for z in zones.values():
+                report(cam, z, time.monotonic())
 
         worker = ModelWorker(
             eye, {n: z.model for n, z in zones.items()},
@@ -1418,11 +1451,8 @@ def run(sender, setup: Setup, realtime: bool = False,
         if cam.model:
             # Before the camera opens, so seconds of loading do not become
             # seconds of buffered frames.
-            from .hubmodel import ModelEye
             try:
-                eye = ModelEye(cam.model["weights"],
-                               {z.name: z.counter.poly for z in cam.model_zones()},
-                               cam.model["device"])
+                eye = cam.model_eye()
             except Exception as e:
                 errors.append(f"{cam.name}: could not load the model "
                               f"{cam.model['weights']!r}: {e}")
@@ -1497,10 +1527,9 @@ def run(sender, setup: Setup, realtime: bool = False,
             n += 1
             if not eyes:
                 h, w = frame.shape[:2]
-                lo, hi = gate(cam.colour)
                 eyes = {z.name: ZoneEye(region_of(z.counter.poly,
                                                   cam.ball_area, w, h),
-                                        cam.remove_static, file_fps, lo, hi)
+                                        cam.remove_static, file_fps, *cam.zone_gate(z))
                         for z in cam.zones}
             rose = [z for z in cam.zones if z.counter.update(eyes[z.name].blobs(frame))]
             tally.tick(captured)
@@ -1680,7 +1709,7 @@ def record_blobs(camera: Camera, video: str, remove_static: bool,
             h, w = frame.shape[:2]
             eyes = {z.name: ZoneEye(region_of(z.counter.poly,
                                               camera.ball_area, w, h),
-                                    remove_static, fps, *gate(camera.colour))
+                                    remove_static, fps, *camera.zone_gate(z))
                     for z in camera.zones}
         frames.append({name: eye.blobs(frame) for name, eye in eyes.items()})
         fi += 1
@@ -1734,14 +1763,11 @@ def count_recording(setup: Setup, video: str, camera: str = "",
     if cam.model:
         # In step with the frames here, not on a thread: offline there is no
         # deadline, and a skipped frame would make the count depend on speed.
-        from .hubmodel import ModelCounter, ModelEye, model_stride
-        model_eye = ModelEye(cam.model["weights"],
-                             {z.name: z.counter.poly for z in cam.model_zones()},
-                             cam.model["device"])
+        from .hubmodel import model_stride
+        model_eye = cam.model_eye()
         stride = model_stride(fps)
         for z in cam.model_zones():
-            z.model = ModelCounter(z.counter.poly, fps / stride,
-                                   **cam.model["counter"])
+            z.model = cam.model_counter(z, fps / stride)
     timeline: List[Tuple[float, int, int]] = []
     # Per cross-checked hub, (t, outline, exit) whenever either changed:
     # what confirm_report replays at any exit delay.
@@ -1754,7 +1780,7 @@ def count_recording(setup: Setup, video: str, camera: str = "",
         if eyes is None:
             h, w = frame.shape[:2]
             eyes = [(z, ZoneEye(region_of(z.counter.poly, cam.ball_area, w, h),
-                                cam.remove_static, fps, *gate(cam.colour))) for z in cam.zones]
+                                cam.remove_static, fps, *cam.zone_gate(z))) for z in cam.zones]
         for z, eye in eyes:
             z.counter.update(eye.blobs(frame))
         t = fi / fps

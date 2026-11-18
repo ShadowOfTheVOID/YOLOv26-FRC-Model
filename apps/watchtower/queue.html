@@ -12,62 +12,84 @@
      key) for ?event=KEY or while Watchtower has no schedule.
      Teams in the pits and the queuers' line had to ask the scorekeeper what
      was next; Watchtower's own pages show only the current match. -->
+<link rel="stylesheet" href="/wt/theme.css">
 <style>
-  .wrap { max-width: 920px; margin: 0 auto; padding: 1rem 1rem 2rem; }
-  .top { display: flex; align-items: center; gap: .8rem; margin: .4rem 0 1rem; flex-wrap: wrap; }
-  .top img { width: 40px; height: 40px; border-radius: 10px; background: var(--ink); }
-  .top h1 { font-size: 1.3rem; }
+  /* 2026-11 redesign: a pit board. Tokens and dark mode come from theme.css. */
+  body { background: var(--wall); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 1.1rem 3rem; }
+  .top { display: flex; align-items: center; gap: .9rem; padding: 1.4rem 0 1.1rem; flex-wrap: wrap; }
+  .top img { width: 44px; height: 44px; border-radius: 12px; background: var(--barbg); padding: 6px; }
+  .top h1 { font-size: 1.45rem; font-weight: 800; letter-spacing: -.025em; }
+  .top .sub { display: flex; align-items: center; gap: .45rem; color: var(--muted); font-size: .85rem; font-weight: 550; margin-top: .1rem; }
   .top .sp { flex: 1; }
-  .team { display: flex; gap: .4rem; align-items: center; }
-  .team input { width: 7.5rem; min-height: var(--tap); padding: .4rem .7rem; border-radius: var(--r-sm);
-    border: 1px solid var(--line-strong); background: var(--panel); font-weight: 650; }
-  .conn { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); flex: none; }
-  .conn.on { background: var(--ok); }
-  .mine { background: var(--ink); color: #fff; border-radius: var(--r-lg); padding: .9rem 1.1rem; margin-bottom: 1rem; font-size: 1.05rem; }
-  .mine b { font-size: 1.2rem; }
-  .sec { font-size: .78rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 1.2rem 0 .5rem; }
-  .m { display: grid; grid-template-columns: 8.5rem 1fr 1fr; gap: .6rem; align-items: stretch; background: var(--panel);
-    border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: .7rem; margin-bottom: .55rem; }
-  .m.field { border: 2px solid var(--fuel); }
-  .m.hl { outline: 3px solid var(--ink); outline-offset: -1px; }
-  .who { display: flex; flex-direction: column; justify-content: center; padding-left: .3rem; }
-  .who b { font-size: 1.15rem; }
-  .who .tag { font-size: .78rem; font-weight: 700; color: var(--muted); }
-  .m.field .who .tag { color: #8a6d00; }
-  .m.deck .who .tag { color: var(--ok); }
-  .al { border-radius: var(--r-md); padding: .45rem .6rem; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
-  .al.red { background: var(--red-soft); border: 1px solid var(--red-line); }
-  .al.blue { background: var(--blue-soft); border: 1px solid var(--blue-line); }
-  .al .an { font-size: .72rem; font-weight: 750; width: 100%; }
+  .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+  .conn.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .team { position: relative; display: flex; align-items: center; }
+  .team svg { position: absolute; left: .8rem; width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+  .team input { width: 11rem; min-height: 46px; padding: .4rem .9rem .4rem 2.3rem; border-radius: 12px; font-size: 1.05rem;
+    font-weight: 700; border: 1px solid var(--line-strong); background: var(--panel); box-shadow: var(--shadow); }
+  .mine { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .3rem 1rem; padding: 1.1rem 1.25rem;
+    margin-bottom: 1.2rem; border-radius: 18px; background: var(--barbg); color: #fff; box-shadow: 0 10px 30px rgba(15,18,22,.18); }
+  .mine .num { grid-column: 1; grid-row: 1 / 3; font: 850 2.6rem/1 ui-monospace, Menlo, monospace; letter-spacing: -.04em; color: var(--fuel); min-width: 2ch; text-align: center; }
+  .mine .lbl { grid-column: 2; grid-row: 1; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #9aa3ae; }
+  .mine .what { grid-column: 2; grid-row: 2; font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; }
+  .mine .stn { grid-column: 3; grid-row: 1 / 3; align-self: center; padding: .45rem .8rem; border-radius: 10px; font-weight: 800; font-size: .9rem; text-transform: uppercase; letter-spacing: .06em; }
+  .mine .stn.red { background: var(--red); } .mine .stn.blue { background: var(--blue); }
+  .mine.warn { background: var(--warn-soft); color: var(--warn); box-shadow: none; display: block; }
+  .mine.plain { display: block; }
+  .sec { display: flex; align-items: center; gap: .6rem; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); margin: 1.4rem 0 .6rem; }
+  .sec::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .m { display: grid; grid-template-columns: 9.5rem 1fr 1fr; gap: .55rem; align-items: stretch; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: .6rem; margin-bottom: .5rem; transition: transform .15s; }
+  .m.field { border: 0; padding: .8rem; box-shadow: 0 0 0 2px var(--fuel), 0 12px 36px color-mix(in srgb, var(--fuel) 28%, transparent); }
+  .m.hl { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
+  .m.field.hl { box-shadow: 0 0 0 2px var(--fuel), 0 0 0 5px var(--ink); }
+  .who { display: flex; flex-direction: column; justify-content: center; gap: .3rem; padding-left: .45rem; }
+  .who b { font-size: 1.08rem; font-weight: 760; letter-spacing: -.015em; }
+  .who .tag { align-self: flex-start; font-size: .7rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+    padding: .18rem .5rem; border-radius: 99px; background: var(--panel-2); color: var(--muted); }
+  .m.field .who .tag { background: var(--fuel); color: #1a1500; }
+  .m.field .who .tag::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: .35rem; border-radius: 50%;
+    background: #d4141b; vertical-align: 1px; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .m.deck .who .tag { background: color-mix(in srgb, var(--fuel) 22%, transparent); color: color-mix(in srgb, var(--fuel) 30%, var(--ink)); }
+  .m.soon .who .tag { background: var(--ok-soft); color: var(--ok); }
+  .al { border-radius: 10px; padding: .5rem .55rem; display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+  .al.red { background: var(--red-soft); } .al.blue { background: var(--blue-soft); }
+  .al .an { font-size: .66rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; width: 100%; }
   .al.red .an { color: var(--red); } .al.blue .an { color: var(--blue); }
-  .t { font: 750 1.2rem/1.2 ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; padding: .1rem .35rem; border-radius: 6px; }
+  .t { flex: 1; text-align: center; font: 780 1.15rem/1.25 ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums;
+    padding: .15rem .3rem; border-radius: 7px; }
   .al.red .t { color: var(--red); } .al.blue .t { color: var(--blue); }
-  .t.me { background: var(--ink); color: #fff !important; }
-  .t sup { font-size: .6em; }
-  .empty { text-align: center; color: var(--muted); padding: 2.5rem 1rem; background: var(--panel); border-radius: var(--r-lg); border: 1px dashed var(--line-strong); }
-  .more { color: var(--muted); text-align: center; font-size: .9rem; margin-top: .6rem; }
+  .t.me { background: var(--ink); color: var(--on-ink) !important; }
+  .t sup { font-size: .55em; opacity: .8; }
+  .empty { text-align: center; color: var(--muted); padding: 3rem 1rem; background: var(--panel); border-radius: 16px; border: 1px dashed var(--line-strong); }
+  .more { color: var(--muted); text-align: center; font-size: .9rem; margin-top: .8rem; }
   @media (max-width: 620px) {
-    .m { grid-template-columns: 1fr 1fr; }
-    .m { gap: .4rem; padding: .55rem; }
-    .who { grid-column: 1 / -1; flex-direction: row; gap: .6rem; align-items: baseline; justify-content: flex-start; text-align: left; }
-    .al { padding: .35rem .4rem; gap: .1rem; flex-wrap: nowrap; justify-content: space-between; }
+    .top { padding-top: 1rem; } .team { width: 100%; } .team input { width: 100%; }
+    .m { grid-template-columns: 1fr 1fr; gap: .4rem; padding: .5rem; }
+    .who { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; padding: .1rem .3rem .2rem; }
+    .al { padding: .35rem .3rem; gap: .1rem; flex-wrap: nowrap; }
     .al .an { display: none; }
-    .t { font-size: 1rem; padding: .1rem .2rem; }
+    .t { font-size: 1rem; padding: .1rem .15rem; }
+    .mine { grid-template-columns: auto 1fr; } .mine .stn { grid-row: 3; grid-column: 1 / -1; text-align: center; }
   }
   /* A pit TV across the room: ?tv=1 */
-  body.tv .wrap { max-width: 1400px; }
-  body.tv .m { grid-template-columns: 12rem 1fr 1fr; padding: 1rem; }
-  body.tv .t { font-size: 2rem; }
-  body.tv .who b { font-size: 1.7rem; }
+  body.tv .wrap { max-width: 1500px; }
+  body.tv .top h1 { font-size: 2.2rem; }
+  body.tv .m { grid-template-columns: 14rem 1fr 1fr; padding: 1rem; }
+  body.tv .t { font-size: 2.1rem; }
+  body.tv .who b { font-size: 1.8rem; }
   body.tv .team { display: none; }
 </style>
 </head><body>
 <main class="wrap">
   <div class="top"><img src="/static/icon.svg" alt=""><div><h1 id="ev">Match queue</h1>
-    <div class="muted small" id="sub">Connecting…</div></div><span class="sp"></span>
-    <label class="team"><span class="muted small">Your team</span>
-      <input id="team" inputmode="numeric" placeholder="e.g. 254" autocomplete="off"></label>
-    <span class="conn" title="Live"></span></div>
+    <div class="sub"><span class="conn" title="Live"></span><span id="sub">Connecting…</span></div></div><span class="sp"></span>
+    <label class="team" title="Your team number: highlights your matches and says when you are up">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="team" inputmode="numeric" placeholder="Your team #" autocomplete="off" aria-label="Your team number"></label></div>
   <div class="mine" id="mine" hidden></div>
   <div id="list"></div>
 </main>
@@ -161,14 +183,14 @@ function render() {
   const played = ms.filter((m) => m.status === "committed" || m.status === "review").length;
   document.getElementById("sub").textContent = v.loading ? "Connecting…" :
     [ms.length ? `${played} played · ${q.length} to go` : "", v.src].filter(Boolean).join(" · ") || "Match queue";
-  let h = v.error ? `<div class="mine" style="background:var(--warn-soft);color:var(--warn)">${esc(v.error)}</div>` : "";
+  let h = v.error ? `<div class="mine warn">${esc(v.error)}</div>` : "";
   if (field) h += `<div class="sec">On the field</div>` + row(field, "field", "Playing now");
   if (q.length) {
     h += `<div class="sec">Queue</div>`;
     q.slice(0, SHOW).forEach((m, i) => {
       const at = planned(m);
       const tag = i === 0 ? (field ? "On deck" : "Up next") : i <= 2 ? "Queue now" : (at ? `Planned ${at}` : `#${i + 1} in line`);
-      h += row(m, i === 0 ? "deck" : "", tag);
+      h += row(m, i === 0 ? "deck" : i <= 2 ? "soon" : "", tag);
     });
     if (q.length > SHOW) h += `<div class="more">and ${q.length - SHOW} more</div>`;
   } else if (!field && !v.loading && !(v.error && !ms.length)) {
@@ -180,13 +202,16 @@ function render() {
   if (!team || v.loading) { mine.hidden = true; return; }
   mine.hidden = false;
   const i = q.findIndex((m) => has(m, team));
-  if (field && has(field, team)) mine.innerHTML = `<b>${esc(team)}</b> is on the field now (${esc(station(field, team))}).`;
-  else if (i < 0) mine.innerHTML = `<b>${esc(team)}</b> has no more matches scheduled.`;
-  else {
+  mine.className = "mine";
+  const stn = (m) => { const st = station(m, team); return `<span class="stn ${st.split(" ")[0]}">${esc(st)}</span>`; };
+  if (field && has(field, team)) {
+    mine.innerHTML = `<span class="num">●</span><span class="lbl">Team ${esc(team)}</span><span class="what">On the field now</span>${stn(field)}`;
+  } else if (i < 0) {
+    mine.className = "mine plain"; mine.innerHTML = `<b>${esc(team)}</b> has no more matches scheduled.`;
+  } else {
     const m = q[i], ahead = i + (field ? 1 : 0), at = planned(m);
-    mine.innerHTML = `<b>${esc(team)}</b>: next is <b>${esc(title(m))}</b>, ${esc(station(m, team))}` +
-      (ahead ? ` — ${ahead} match${ahead > 1 ? "es" : ""} before it` : " — up next") +
-      (at ? ` (planned ${esc(at)})` : "") + ".";
+    mine.innerHTML = `<span class="num">${ahead || "UP"}</span><span class="lbl">Team ${esc(team)} · ${ahead ? (ahead > 1 ? "matches before yours" : "match before yours") : "you're next"}</span>` +
+      `<span class="what">${esc(title(m))}${at ? ` · planned ${esc(at)}` : ""}</span>${stn(m)}`;
   }
 }
 FMS.on(render);

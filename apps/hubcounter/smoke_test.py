@@ -61,7 +61,7 @@ def main(program: str) -> int:
         if proc.poll() is None:
             proc.kill()
     # The built-in model, run once inside the build: catches a missing
-    # Ultralytics yaml, a torch library the bundler left out, or no model.
+    # ONNX Runtime library the bundler left out, or no model.
     if os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
         result = os.path.join(home, "model.txt")
         code = subprocess.run([program, "--selftest-model", result], env=env,

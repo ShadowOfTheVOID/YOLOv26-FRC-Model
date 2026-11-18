@@ -502,6 +502,14 @@ def resolve_source(job: Dict, data: Path) -> Dict:
     return dict(job, kind=None, path=None)
 
 
+def torch_device(spec: str) -> str:
+    """Ultralytics' device spelling -> PyTorch's: '0' -> 'cuda:0', '0,1' -> 'cuda:0'
+    (one model, one device); 'cpu', 'mps', 'cuda:1' pass through."""
+    spec = str(spec).strip()
+    first = spec.split(",")[0].strip()
+    return f"cuda:{first}" if first.isdigit() else spec
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", type=Path, required=True)
@@ -598,8 +606,12 @@ def main() -> int:
 
     fuel_model, robot_model = YOLO(args.fuel), YOLO(args.robots)
     if args.device:
-        fuel_model.to(args.device)
-        robot_model.to(args.device)
+        # "--device 0" is Ultralytics' spelling (train/README.md uses it), but
+        # model.to() is plain PyTorch, which refuses it: "Invalid device
+        # string: '0'" on the first Colab run (2026-11-16), which built nothing.
+        dev = torch_device(args.device)
+        fuel_model.to(dev)
+        robot_model.to(dev)
     for split in ("train", "val"):
         (args.out / "images" / split).mkdir(parents=True, exist_ok=True)
         (args.out / "labels" / split).mkdir(parents=True, exist_ok=True)

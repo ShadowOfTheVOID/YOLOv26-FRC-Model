@@ -1,14 +1,17 @@
 """Smoke test a built Watchtower app on any OS: python smoke_test.py PATH_TO_PROGRAM
 
 Starts it with a scratch home folder and checks what a double-click must
-give: the first-launch event.yaml with PINs and the start page; the FMS on
-:8000; the hub counter on :8790 with its address box already set to that FMS;
-the match queue page; a count accepted with that address's vision key (and refused with a wrong
-one); and Quit stopping both. A bundle missing a uvicorn protocol module, the
-FMS pages or the example configs fails here, not at a venue.
+give: the first-launch event.yaml with PINs; the FMS on :8000 serving
+Control and the match queue; Watchtower's own hub-camera runner reporting to
+it (a second copy of the program, `--vision`); a count accepted with
+event.yaml's vision key and refused with a wrong one; and stopping the app
+stopping both. A bundle missing a uvicorn protocol module, the FMS pages,
+a vision module or the example configs fails here, not at a venue.
 """
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -17,7 +20,6 @@ import urllib.error
 import urllib.request
 
 FMS = "http://127.0.0.1:8000"
-HUB = "http://127.0.0.1:8790"
 
 
 def fail(msg: str) -> None:
@@ -49,64 +51,70 @@ def up(url: str) -> bool:
         return False
 
 
+def log_tail(home: str, name: str) -> str:
+    p = os.path.join(home, "Documents", "Watchtower", name)
+    lines = open(p, errors="replace").read().splitlines()[-15:] if os.path.exists(p) else []
+    return " / ".join(l.strip() for l in lines if l.strip())[-1500:]
+
+
+def stop(proc) -> None:
+    """What the system's quit does: SIGTERM (Windows has only terminate)."""
+    if sys.platform == "win32":
+        proc.terminate()
+    else:
+        proc.send_signal(signal.SIGTERM)
+
+
 def main(program: str) -> int:
     home = tempfile.mkdtemp(prefix="watchtower-home-")
     env = dict(os.environ, HOME=home, USERPROFILE=home)
     proc = subprocess.Popen([program, "--no-browser"], env=env)
     try:
-        for _ in range(120):                # torch-sized bundles start slowly
-            if up(FMS + "/") and up(HUB + "/"):
+        for _ in range(120):
+            if up(FMS + "/control"):
                 break
             if proc.poll() is not None:
-                fail(f"exited with code {proc.returncode} before both pages came up")
+                fail(f"exited with code {proc.returncode} before Control came up | {log_tail(home, 'watchtower.log')}")
                 return 1
             time.sleep(1)
         else:
-            fail("the FMS (:8000) and the hub counter (:8790) never both came up")
+            fail("the FMS (:8000) never came up | " + log_tail(home, "watchtower.log"))
             return 1
         d = os.path.join(home, "Documents", "Watchtower")
-        assert os.path.isfile(os.path.join(d, "config", "event.yaml")), "no event.yaml made"
-        # Home (browser mode here: --no-browser): its address carries the
-        # launch token; the API refuses calls without it and answers with it.
-        link = os.path.join(d, "webview", "home-url.txt")
-        # main() writes it after both servers are up, so a fast start (macOS
-        # CI, 2026-10-09) found the pages answering and no file yet.
-        for _ in range(30):
-            if os.path.isfile(link) or proc.poll() is not None:
-                break
-            time.sleep(0.5)
-        assert os.path.isfile(link), "no Home address written"
-        url = open(link).read().strip()
-        token = url.split("t=", 1)[1]
-        assert "Watchtower" in get(url), "Home page not served"
-        home_api = url.split("/?")[0] + "/api/state"
-        assert post(home_api, [], {"X-Home-Token": "wrong"}) == 403, "Home API answered without the token"
-        req = urllib.request.Request(home_api, data=b"[]", method="POST",
-                                     headers={"Content-Type": "application/json", "X-Home-Token": token})
-        state = json.loads(urllib.request.urlopen(req, timeout=5).read())["result"]
-        assert state["fms_ok"] and set(state["pins"]) == {"control", "ref", "emcee"}, "Home state wrong"
+        ev = open(os.path.join(d, "config", "event.yaml")).read()
+        assert re.search(r'control: "\d{6}"', ev), "event.yaml has no Control PIN"
         assert "Match Queue" in get(FMS + "/queue"), "the match queue page is not served"
-        # Watchtower first; bioarena may follow after a comma (Phones & PINs).
-        target = json.loads(get(HUB + "/api/state"))["default_target"].split(",")[0].strip()
-        assert target.startswith("http://") and target.endswith("@127.0.0.1:8000"), \
-            "the hub counter is not set to this Watchtower"
-        key = target[len("http://"):target.index("@")]
-        code = post(FMS + "/api/vision/events", {"events": {"red": [[1.0, 1]]}},
-                    {"X-Vision-Key": key})
-        assert code == 200, f"Watchtower refused the preset vision key ({code})"
+        assert "/wt/theme.css" in get(FMS + "/ref") and "/wt/theme.css" in get(FMS + "/control"), \
+            "our theme is not on Watchtower's pages"
+        assert "/wt/theme.css" not in get(FMS + "/display"), "the field display must keep its own look"
+        assert "--fuel" in get(FMS + "/wt/theme.css"), "theme.css is not bundled"
+        # Watchtower's own camera runner, a second copy of the program, reports
+        # each hub ("no camera" until Setup picks one).
+        for _ in range(60):
+            vision = json.loads(get(FMS + "/api/state")).get("vision") or {}
+            if {"red", "blue"} <= set(vision):
+                break
+            time.sleep(1)
+        else:
+            fail("the hub-camera runner never reported | " + log_tail(home, "vision.log"))
+            return 1
+        key = re.search(r'vision_key: "([^"]+)"', ev).group(1)
+        code = post(FMS + "/api/vision/events", {"events": {"red": [[1.0, 1]]}}, {"X-Vision-Key": key})
+        assert code == 200, f"Watchtower refused event.yaml's vision key ({code})"
         code = post(FMS + "/api/vision/events", {}, {"X-Vision-Key": "wrong"})
         assert code == 401, f"a wrong vision key got {code}, not 401"
-        assert post(HUB + "/api/quit", {}) == 200
+        stop(proc)
         try:
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
-            fail("still running 30 s after Quit")
+            fail("still running 30 s after being told to quit")
             return 1
-        if up(FMS + "/"):
-            fail("Quit left the FMS running")
+        time.sleep(2)
+        if up(FMS + "/control"):
+            fail("quitting left the FMS running")
             return 1
-        print(f"OK: first-launch setup, FMS, match queue, hub counter preset to it, vision key, Quit "
-              f"(exit code {proc.returncode})")
+        print(f"OK: first-launch setup, Control, match queue, hub cameras reporting "
+              f"({', '.join(sorted(vision))}), vision key, quit (exit code {proc.returncode})")
         return 0
     finally:
         if proc.poll() is None:
@@ -115,9 +123,8 @@ def main(program: str) -> int:
 
 def window_test(program: str) -> int:
     """--window: the real app windows (WebKit on macOS, WebView2 on Windows):
-    Home fills itself through the Python API, and Scorekeeper, Hub cameras
-    and Field display each open on their page. Needs a desktop session,
-    which GitHub's macOS and Windows runners have."""
+    Control loads in the main window and the field display opens in another.
+    Needs a desktop session, which GitHub's macOS and Windows runners have."""
     home = tempfile.mkdtemp(prefix="watchtower-home-")
     env = dict(os.environ, HOME=home, USERPROFILE=home)
     out = os.path.join(home, "window.json")

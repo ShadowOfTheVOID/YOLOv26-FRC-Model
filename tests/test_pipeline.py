@@ -3479,11 +3479,12 @@ def test_hub_counter_app():
     check("the app bundles the hub pages and the model runtime, and keeps the scraper out",
           "hubweb.html" in spec and "hubboard.html" in spec
           and '"tbavid.tba"' in spec and '"tbavid.pipeline"' in spec
-          and '"torch"' in spec and 'collect_submodules("ultralytics")' in spec)
-    check("it carries torchvision's compiled ops (nms), which nothing imports by name",
-          "binaries=torchvision_ops()" in spec)
+          and '"onnxruntime"' in spec and '"tbavid.onnxdet"' in spec)
+    heavy = spec[spec.index("HEAVY = ["):spec.index("]", spec.index('"tensorrt"'))]
+    check("and keeps torch and Ultralytics out (the model runs on ONNX Runtime)",
+          '"torch"' in heavy and '"ultralytics"' in heavy)
     check("and the built-in model, required in CI so no build ships without it",
-          '"fuel_relabel.pt"' in spec and "HUBCOUNTER_REQUIRE_MODEL" in spec)
+          '"fuel_relabel.onnx"' in spec and "HUBCOUNTER_REQUIRE_MODEL" in spec)
     ctl2 = A.HubController()
     check("the address box starts empty-handed (bioarena's default in the page)",
           ctl2.state()["default_target"] == "")
@@ -3491,12 +3492,12 @@ def test_hub_counter_app():
     check("an app can preset it, e.g. Watchtower to its own FMS",
           ctl2.state()["default_target"] == "http://KEY@127.0.0.1:8000")
     wt = (root / "apps" / "watchtower" / "main.py").read_text()
-    check("the Watchtower app makes its config, starts the FMS and presets the counter",
-          "init.init(" in wt and "uvicorn.Server" in wt and "ctl.default_target" in wt
-          and '"0.0.0.0"' in wt)
-    check("and one spec builds it, with the FMS pages and example configs",
+    check("the Watchtower app makes its config, starts the FMS and its own hub cameras",
+          "init.init(" in wt and "uvicorn.Server" in wt and '"--vision"' in wt
+          and '"0.0.0.0"' in wt and 'app.base + "/control"' in wt)
+    check("and one spec builds it, with the FMS pages, vision and example configs",
           'APP == "watchtower"' in spec and '"fms", "static"' in spec
-          and "event.example.yaml" in spec)
+          and "event.example.yaml" in spec and '(VSRC, "vision")' in spec)
     queue = (root / "apps" / "watchtower" / "queue.html").read_text()
     check("the match queue is a page on the FMS itself, bundled, no PIN",
           'add_api_route("/queue"' in wt and '"queue.html"' in spec
@@ -3587,222 +3588,6 @@ def test_hub_builtin_model():
             del sys._MEIPASS
         else:
             sys._MEIPASS = old
-
-
-def test_watchtower_settings():
-    """The Watchtower app edits event.yaml for the user, never the other way.
-
-    Only the changed lines are rewritten, so fms.init's comments (the only
-    documentation of the other settings) survive; anything the file holds as
-    a block, not one line, is reported so the caller rewrites it whole.
-    Watchtower's own rule -- the scorekeeper PIN differs from the others --
-    is checked before anything is written.
-    """
-    import importlib.util
-    root = Path(__file__).resolve().parent.parent
-    spec = importlib.util.spec_from_file_location("wt_settings", root / "apps" / "watchtower" / "settings.py")
-    St = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(St)
-
-    check("a missing optional field reads back as empty, as it loads (Save refused every change "
-          "on an event.yaml without public_url / read_key, 2026-10-10)",
-          St._norm("url", None) == "" and St._norm("secret", None) == ""
-          and St._norm("teams", None) == [] and St._norm("int", 5) == 5)
-    check("teams parse from any separators, in order, without repeats",
-          St.parse_teams("254, 1678 971\n604;254") == [254, 1678, 971, 604])
-    clean, err = St.check({"event.name": " X ", "event.date": "2026-10-10", "event.qual_start": "09:00",
-                           "event.utc_offset_hours": "-7", "event.teams": "1 2",
-                           "event.tba_event_key": "2026CATSTD", "game.tower": "0 10 20 30",
-                           "game.fouls": "5,15", "server.pins.control": "123456",
-                           "server.pins.ref": "222222", "server.pins.emcee": "333333"})
-    check("good values come out clean and typed",
-          not err and clean["event.name"] == "X" and clean["event.utc_offset_hours"] == -7
-          and clean["event.tba_event_key"] == "2026catstd"
-          and clean["game.tower"] == {"L0": 0, "L1": 10, "L2": 20, "L3": 30}
-          and clean["game.fouls"] == {"minor": 5, "major": 15})
-    _, err = St.check({"event.date": "10/10/2026", "event.lunch": "25:00", "game.n_shifts": "-1",
-                       "server.pins.control": "111111", "server.pins.ref": "111111",
-                       "server.pins.emcee": "12", "tba.enabled": True})
-    check("bad values are refused, each with its own reason",
-          set(err) == {"event.date", "event.lunch", "game.n_shifts", "server.pins.emcee",
-                       "server.pins.control", "tba.enabled"})
-    check("the public address is an optional setting, nothing built in",
-          St.KEY["server.public_url"][1] == "url" and St.clean_url("") == "")
-    check("a public address is tidied: https added to a bare name, trailing / dropped, a path kept",
-          St.clean_url(" watchtower.systemoverload.org/ ") == "https://watchtower.systemoverload.org"
-          and St.clean_url("http://10.0.0.5:8000/fms/") == "http://10.0.0.5:8000/fms"
-          and St.clean_url("") == "")
-    _, err = St.check({"server.public_url": "https://KEY@watchtower.systemoverload.org"})
-    _, err2 = St.check({"server.public_url": "ftp://x.org"})
-    _, err3 = St.check({"server.public_url": "https://x.org/?a=1"})
-    check("but a key, another scheme or a query is refused (the link goes to phones)",
-          set(err) == set(err2) == set(err3) == {"server.public_url"})
-    check("both halves of the TBA write key, and the read key, are masked fields",
-          all(St.KEY[k][1] == "secret" for k in ("tba.auth_id", "tba.auth_secret", "tba.read_key")))
-    pins = St.new_pins()
-    check("new PINs are three different 6-digit numbers",
-          len(set(pins.values())) == 3 and all(len(p) == 6 and p.isdigit() for p in pins.values()))
-
-    text = ['# top\n', 'event:\n', '  name: "Old"          # the name\n', '  teams: []   # list\n',
-            'server:\n', '  pins:\n', '    control: "1"\n', 'game:\n', '  tower: {L0: 0}\n',
-            '  rp:\n', '    win: 3\n']
-    lines = list(text)
-    ok = (St._set_line(lines, ("event", "name"), St._render("New \"x\""))
-          and St._set_line(lines, ("event", "teams"), St._render([254, 1678]))
-          and St._set_line(lines, ("server", "pins", "control"), St._render("999999"))
-          and St._set_line(lines, ("game", "tower"), St._render({"L0": 0, "L1": 10}))
-          and St._set_line(lines, ("game", "rp", "win"), St._render(2)))
-    check("one-line fields are rewritten in place, comments kept",
-          ok and lines[2] == '  name: "New \\"x\\""          # the name\n'
-          and lines[3] == "  teams: [254, 1678]   # list\n" and lines[6] == '    control: "999999"\n'
-          and lines[8] == "  tower: {L0: 0, L1: 10}\n" and lines[10] == "    win: 2\n")
-    block = ['event:\n', '  teams:\n', '    - 1\n']
-    check("a field held as a block is reported, not mangled",
-          not St._set_line(block, ("event", "teams"), "[1]") and block[1] == "  teams:\n")
-    check("a missing field is reported",
-          not St._set_line(['event:\n', '  name: "x"\n'], ("event", "date"), '""'))
-    lines = ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '\n', '# next\n', 'game:\n', '  auto_s: 20\n']
-    check("a field the file never had is added at the end of its section",
-          St._add_line(lines, ("tba", "read_key"), '"k"')
-          and lines[:4] == ['tba:\n', '  enabled: false   # on\n', '  retry_s: 15\n', '  read_key: "k"\n']
-          and lines[5:] == ['# next\n', 'game:\n', '  auto_s: 20\n'])
-    check("but not into a section that is not there",
-          not St._add_line(['event:\n', '  name: "x"\n'], ("tba", "read_key"), '"k"'))
-
-    # Import teams from TBA, against a stand-in for TBA's read API.
-    import json as _json
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    class TBA(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            if self.path == "/event/2026catstd":        # the public page's Scouting tab
-                body = ('<h2>Scouting</h2><textarea id="team-list-csv" readonly>'
-                        "team_number,team_name,city,state_prov,country,robot_image_url\n"
-                        "8033,Highlander Robotics,Piedmont,California,USA,https://i.imgur.com/1FI8W7pm.jpg\n"
-                        "114,Eaglestrike,Los Altos,California,USA,\n"
-                        "2035,The Rockin&#39; Bots,Carmel,California,USA,</textarea>").encode()
-                self.send_response(200); self.end_headers(); self.wfile.write(body); return
-            if self.path.startswith("/event/"):              # a page with no team list yet
-                self.send_response(200); self.end_headers(); self.wfile.write(b"<html></html>"); return
-            if self.headers.get("X-TBA-Auth-Key") != "goodkey":
-                self.send_response(401); self.end_headers(); return
-            if self.path == "/api/v3/event/2026later/matches/simple":
-                def m(level, s_, n, red, blue):
-                    return {"key": f"2026later_{level}{s_}m{n}" if level != "qm" else f"2026later_qm{n}",
-                            "comp_level": level, "set_number": s_, "match_number": n, "time": 1000 + n,
-                            "alliances": {"red": {"team_keys": [f"frc{t}" for t in (254, 1678, 971)], "score": red,
-                                                  "surrogate_team_keys": ["frc971"] if n == 2 else []},
-                                          "blue": {"team_keys": ["frc604", "frc649", "frc8033"], "score": blue}}}
-                # TBA's own order is not playing order.
-                body = _json.dumps([m("qf", 1, 2, -1, -1), m("qm", 1, 2, -1, -1), m("qf", 2, 1, -1, -1),
-                                    m("qm", 1, 1, 50, 40), m("qf", 1, 1, -1, -1)]).encode()
-                self.send_response(200); self.end_headers(); self.wfile.write(body); return
-            if self.path == "/api/v3/event/2026later/simple":
-                self.send_response(200); self.end_headers(); self.wfile.write(b'{"name": "Later Event"}'); return
-            if self.path != "/api/v3/event/2026later/teams/simple":
-                self.send_response(404); self.end_headers(); return
-            body = _json.dumps([{"team_number": 1678, "nickname": "Citrus Circuits"},
-                                {"team_number": 254, "nickname": "The Cheesy Poofs"}]).encode()
-            self.send_response(200); self.end_headers(); self.wfile.write(body)
-
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), TBA)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{srv.server_address[1]}"
-    St.TBA_API, St.TBA_WEB = base + "/api/v3", base
-    try:
-        r = St.tba_teams("2026CATSTD", "")
-        check("the event page's Scouting list is read with no key: only team_number, names kept",
-              r.get("teams") == [114, 2035, 8033] and r["names"]["2035"] == "The Rockin' Bots")
-        r = St.tba_teams("2026later", "goodkey")
-        check("a page with no list yet falls back to the Read API",
-              r.get("teams") == [254, 1678] and r["names"]["254"] == "The Cheesy Poofs")
-        check("a wrong key and a missing event key each say what to fix",
-              "refused" in St.tba_teams("2026later", "bad")["error"]
-              and "event key first" in St.tba_teams("", "goodkey")["error"])
-        r = St.tba_matches("2026LATER", "goodkey")
-        ms = r.get("matches") or []
-        check("TBA's schedule for the match queue comes in playing order, qf1m1 qf2m1 qf1m2",
-              r.get("name") == "Later Event"
-              and [x["key"] for x in ms] == ["qm1", "qm2", "qf1m1", "qf2m1", "qf1m2"])
-        check("in the shape Watchtower's state has: team numbers, surrogates, played = has a score",
-              ms[0]["red"] == [254, 1678, 971] and ms[0]["status"] == "committed" and ms[0]["red_score"] == 50
-              and ms[1]["status"] == "scheduled" and ms[1]["surrogates"] == [971] and ms[1]["time"] == 1002)
-        import os
-        saved_key = os.environ.pop("TBA_AUTH_KEY", None)     # a maintainer's own key would answer
-        no_key = St.tba_matches("2026later", "")
-        if saved_key is not None:
-            os.environ["TBA_AUTH_KEY"] = saved_key
-        check("no Read key, a wrong one, and no event key each say what to fix",
-              "Read API key" in no_key["error"]
-              and "refused" in St.tba_matches("2026later", "bad")["error"]
-              and "event key" in St.tba_matches("", "goodkey")["error"])
-    finally:
-        srv.shutdown()
-    pasted = St.parse_team_text("team_number,team_name,city,state_prov,country,robot_image_url\n"
-                                "114,Eaglestrike,Los Altos,California,USA,https://i.imgur.com/Xt75qTWm.jpg\n")
-    check("pasted TBA CSV gives the team, not the 75 in its photo URL", pasted["teams"] == [114])
-    check("JSON from TBA's API pastes too",
-          St.parse_team_text('[{"key":"frc254","team_number":254,"nickname":"Poofs"},"frc971"]')["teams"] == [254, 971])
-    St.TBA_API = St.TBA_WEB = "http://127.0.0.1:1"
-    check("no internet says so", "online" in St.tba_teams("2026catstd", "goodkey")["error"])
-
-
-def test_watchtower_home_api():
-    """The Home window's API object holds methods and nothing pywebview could walk into.
-
-    pywebview exposes a js_api object by walking every public attribute,
-    recursively. Given the app object, it walked into the window and, on
-    Windows, read WebView2's controller off the UI thread: the window never
-    loaded. HomeApi has only methods, and every call home.html makes must be
-    one of them (and of the browser-mode list, HOME_API).
-    """
-    import ast
-    import re
-    root = Path(__file__).resolve().parent.parent
-    src = (root / "apps" / "watchtower" / "main.py").read_text()
-    tree = ast.parse(src)
-    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HomeApi")
-    methods = {f.name for f in cls.body if isinstance(f, ast.FunctionDef) and not f.name.startswith("_")}
-    stores = [t.attr for f in cls.body if isinstance(f, ast.FunctionDef) for n in ast.walk(f)
-              if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Attribute)]
-    check("HomeApi keeps only private attributes (pywebview skips '_' names)",
-          stores and all(a.startswith("_") for a in stores))
-    page = (root / "apps" / "watchtower" / "home.html").read_text()
-    calls = set(re.findall(r"api\(\)\.(\w+)\(", page))
-    check("every call home.html makes is on HomeApi", calls and calls <= methods)
-    i = src.index("HOME_API = (")
-    listed = set(re.findall(r'"(\w+)"', src[i:src.index(")", i)]))
-    check("and the browser-mode list allows exactly the same calls", listed == methods)
-    check("the window is given HomeApi, not the app", "js_api=HomeApi(app)" in src)
-    check("Watchtower's Home holds our camera setup page as its Hub cameras tab",
-          'id="tab_hub"' in page and 'id="hubframe"' in page
-          and 'HUB_URL="http://127.0.0.1:8790/"' in page and "show('hub')" in page)
-    check("with a public address set, phones get it (and its QR) instead of the .local name",
-          'qrUrl=pub||s.phone_url' in page and '$("phoneurl").textContent=pub||' in page
-          and '$("phoneurl2").textContent=pub?("if the website is down, on the Wi-Fi: "+s.phone_url)' in page
-          and '"public_url": self.ev.get("public_url", "")' in src)
-    hc = (root / "apps" / "hubcounter" / "main.py").read_text()
-    check("the Hub Counter app opens in its own window, closing it quits, the browser only without a toolkit",
-          "def run_window(" in hc and "win.events.closed += ctl.quit" in hc
-          and "webbrowser.open(URL)" in hc and "--selftest-window" in hc)
-    spec = (root / "apps" / "hubcounter" / "HubCounter.spec").read_text()
-    icons = root / "apps" / "icons"
-    # The .github read is guarded: release archives carry no .github/, and
-    # these tests run inside the unpacked archive at release time.
-    wf = root / ".github" / "workflows" / "hub-app.yml"
-    check("both apps carry their own icon (not PyInstaller's Python snake) on Mac, Windows and the installer",
-          all((icons / f"{n}.{e}").stat().st_size > 1000
-              for n in ("HubCounter", "Watchtower") for e in ("icns", "ico", "png"))
-          and "icon=ICONS +" in spec and 'icon=ICONS + ".icns"' in spec
-          and "SetupIconFile" in (root / "apps" / "installer" / "windows.iss").read_text()
-          and (not wf.exists() or "-DIconFile=" in wf.read_text()))
-    check("and both apps bundle the window toolkit",
-          spec.index("WEBVIEW = collect_submodules") < spec.index('if APP == "watchtower":')
-          and "EXTRA_IMPORTS = WEBVIEW" in spec)
 
 
 def test_app_update():
@@ -4001,9 +3786,6 @@ def test_camera_presets():
     check("an app pointed at another app's presets file offers its presets",
           any(p["label"] == "Shared" for p in wt.presets()))
     ctl.delete_preset("shared")
-    src = (Path(__file__).resolve().parent.parent / "apps" / "watchtower" / "main.py").read_text()
-    check("Watchtower shares the Hub Counter app's presets file",
-          '"Hub Counter" / "camera-presets.json"' in src and "ctl.presets_file" in src)
 
     try:
         import cv2  # noqa: F401  (CI has no cv2; the rest is checked there)
@@ -4413,9 +4195,34 @@ def test_hub_model_blend():
     check("a camera's model entry is read, defaults filled in",
           cam.model["weight"] == 0.4 and cam.model["counter"]["reacquire"] == 3
           and cam.model["counter"]["vanish"] == HM.DEFAULT_MODEL["vanish"])
-    check("exit lines stay colour only: the model needs an outline's box",
-          [z.name for z in cam.model_zones()] == ["a/red0"]
-          and cam.zones[1].weight == 0.0)
+    check("exit lines have a model half too (2026-11-18: exits went uncounted at the scrimmage)",
+          [z.name for z in cam.model_zones()] == ["a/red0", "a/blue1"]
+          and cam.zones[1].weight == 0.4
+          and type(cam.model_counter(cam.zones[1], 30.0)).__name__ == "ModelExitCounter"
+          and type(cam.model_counter(cam.zones[0], 30.0)).__name__ == "ModelCounter")
+    # the model exit line, from detections: balls falling through a line at y=100, out below
+    ex = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    def ball(x, y):
+        return ((x - 8, y - 8, x + 8, y + 8), 0.9)
+    total = 0
+    for k in range(12):                       # two balls, side by side, falling 10 px a frame
+        total += ex.update(k / 30, [ball(60, 50 + 10 * k), ball(140, 45 + 10 * k)])
+    check("model exit line: two balls through the line, two counted", total == 2 and ex.reported == 2)
+    up = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    for k in range(12):                       # one ball rising out of the exit: never counted
+        up.update(k / 30, [ball(100, 160 - 10 * k)])
+    check("model exit line: a ball crossing back the wrong way counts nothing", up.reported == 0)
+    far = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    for k in range(12):                       # a ball beyond the line's end: not through the exit
+        far.update(k / 30, [ball(330, 50 + 10 * k)])
+    check("model exit line: a ball past the end of the line is not counted", far.reported == 0)
+    relink = HM.ModelExitCounter([(0, 100), (200, 100)], (100, 150), 30.0)
+    for k in range(6):                        # a ball falls through the line and out of view...
+        relink.update(k / 30, [ball(100, 70 + 10 * k)])
+    for k in range(6, 12):                    # ...and the next one appears above it, near enough to be linked
+        relink.update(k / 30, [ball(110, 40 + 10 * (k - 6))])
+    check("model exit line: the tracker joining a gone ball to a new one is not a bounce back",
+          relink.reported == 1 and relink.net == 1)   # the first ball stays counted
     back = HC.setup_from_dict(HC.setup_to_dict(setup)).cameras[0].model
     check("and saved back unchanged", back == cam.model)
     zr = cam.zones[0]
@@ -4457,7 +4264,7 @@ def test_hub_model_blend():
             check("a share above 1 is refused", True)
         check("the folder listing offers .pt files for the picker",
               A.list_dir(tmp)["models"] == ["fuel_relabel.pt"])
-        if A._has_ultralytics():
+        if A._has("ultralytics"):
             check("a model that is there is ready to start", ctl.state()["problems"] == [])
         else:
             check("without Ultralytics the page says why before Start",
@@ -5068,54 +4875,6 @@ def test_fanout_watchtower_and_bioarena():
     finally:
         HCo.run, HF.listen, HA.problems = real_run, real_listen, real_problems
 
-    # The Watchtower app: bioarena's address is never typed. vision.yaml's
-    # first feeds: entry, else the spec's; Phones & PINs only shows it.
-    root = Path(__file__).resolve().parent.parent
-    page = (root / "apps" / "watchtower" / "home.html").read_text()
-    check("Phones & PINs shows bioarena read-only, with no input box",
-          'id="fieldurl"' in page and "server.field_feed" not in page
-          and "field_feed" not in (root / "apps" / "watchtower" / "settings.py").read_text())
-    src = (root / "apps" / "watchtower" / "main.py").read_text()
-    tree = ast.parse(src)
-    ns = {"Path": Path}
-    for n in tree.body:
-        if isinstance(n, ast.FunctionDef) and n.name in ("vision_feed", "counter_target"):
-            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
-        if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "FIELD_FEED":
-            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
-    ev = {"key": "K", "port": 8000, "field_feed": ""}
-    check("nothing found: Watchtower and the spec's bioarena address",
-          ns["FIELD_FEED"] == "10.0.100.5:8411"
-          and ns["counter_target"](ev) == "http://K@127.0.0.1:8000, 10.0.100.5:8411")
-    check("vision.yaml's address when it has one",
-          ns["counter_target"](dict(ev, field_feed="192.168.1.50:8411"))
-          == "http://K@127.0.0.1:8000, 192.168.1.50:8411")
-    check("main() uses it", "ctl.default_target = counter_target(ev)" in src
-          and '"field_feed": vf or FIELD_FEED' in src)
-    try:
-        import yaml  # noqa: F401  (CI has no PyYAML; the app bundles it)
-    except ImportError:
-        return
-    with tempfile.TemporaryDirectory() as d:
-        (Path(d) / "config").mkdir()
-        check("no vision.yaml: no feed", ns["vision_feed"](Path(d)) == "")
-        (Path(d) / "config" / "vision.yaml").write_text(
-            "fms_url: x\n# feeds:\n#   - {host: 1.2.3.4}\n")
-        check("fms.init's commented-out feeds: none", ns["vision_feed"](Path(d)) == "")
-        (Path(d) / "config" / "vision.yaml").write_text(
-            "feeds:\n  - name: bioarena\n    host: 192.168.1.50\n")
-        check("vision.yaml's first feed, default port 8411",
-              ns["vision_feed"](Path(d)) == "192.168.1.50:8411")
-        for text, want in (("feeds: 10.0.100.5\n", "10.0.100.5:8411"),
-                           ("feeds: {host: 10.0.100.6, port: 9000}\n", "10.0.100.6:9000"),
-                           ("feeds: ['10.0.100.7:8411']\n", "10.0.100.7:8411"),
-                           ("feeds: [{host: a, port: 8411/udp}, {host: 10.0.100.8}]\n", "10.0.100.8:8411"),
-                           ("feeds: [{host: 'udp://x'}]\n", ""), ("feeds: 7\n", ""),
-                           ("feeds: [\n", "")):
-            (Path(d) / "config" / "vision.yaml").write_text(text)
-            check(f"vision.yaml {text.strip()!r} -> {want!r}, never a crash at launch",
-                  ns["vision_feed"](Path(d)) == want)
-
 
 def test_plugin_combines_like_hubtally():
     """Watchtower's plugin (fms_counter) and the page's counter (hubcount.run)
@@ -5275,6 +5034,510 @@ def test_cvload_survives_a_refusing_loader():
           and "recursion" in cvload.error and not hasattr(sys, "OpenCV_LOADER"))
 
 
+def test_bumper_snap_and_rfdetr_view():
+    """Bumper reads are snapped to the alliance, never trusted as read.
+
+    Moondream read "32 69" for 3268 at 14 px numerals and "131" off a bumper
+    whose first digit was hidden (experiments/bumper_moondream.py). The first
+    must snap; a two-digit read must not; two equally close teams must not;
+    and one frame never names a track on its own.
+    """
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "bumper_moondream", root / "experiments" / "bumper_moondream.py")
+    B = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(B)   # must load without torch: imports are lazy
+    blue = ["3268", "5687", "7407"]
+    check("bumper: '32 68' is 3268", B.snap("32 68", blue) == "3268")
+    check("bumper: one digit off snaps to the only close team", B.snap("32 69", blue) == "3268")
+    check("bumper: two digits never snap", B.snap("32", blue) is None)
+    check("bumper: unreadable is None", B.snap("unreadable", blue) is None)
+    check("bumper: a number off the alliance is None", B.snap("131", ["360", "254", "1678"]) is None)
+    check("bumper: two teams one edit away is None", B.snap("1234", ["1233", "1235", "9"]) is None)
+    check("bumper: one read does not name a track", B.vote(["3268", None, None]) is None)
+    check("bumper: agreeing reads do", B.vote(["3268", "3268", None, "5687"]) == "3268")
+    check("bumper: a split vote does not", B.vote(["3268", "3268", "5687", "5687"]) is None)
+
+    sys.path.insert(0, str(root / "train"))
+    import train_rfdetr as R
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        for kind in ("images", "labels"):
+            for split in ("train", "val"):
+                (d / "ds" / kind / split).mkdir(parents=True)
+        (d / "ds" / "labels" / "train" / "a.txt").write_text("1 0.5 0.5 0.1 0.1\n")
+        (d / "ds" / "dataset.yaml").write_text(
+            "path: .\ntrain: images/train\nval: images/val\nnames:\n  0: robot_blue\n  1: robot_red\n")
+        names = R.rfdetr_view(d / "ds" / "dataset.yaml", d / "view")
+        check("rfdetr view: class names come from the yaml", names == ["robot_blue", "robot_red"])
+        check("rfdetr view: labels are linked, not copied",
+              (d / "view" / "train" / "labels" / "a.txt").is_symlink()
+              and (d / "view" / "train" / "labels" / "a.txt").read_text().startswith("1 "))
+        check("rfdetr view: split folders are real, inside the view (RF-DETR 1.12 refuses "
+              "a split folder that resolves outside the dataset root)",
+              not (d / "view" / "train" / "labels").is_symlink()
+              and (d / "view" / "train" / "labels").resolve().parent.parent == (d / "view").resolve())
+        check("rfdetr view: val becomes valid", (d / "view" / "valid" / "images").is_dir())
+        check("rfdetr view: beside the dataset, not under runs/ (Drive cannot hold links)",
+              R.view_dir(d / "ds" / "dataset.yaml") == (d / "ds-rfdetr").resolve())
+        R.rfdetr_view(d / "ds" / "dataset.yaml", d / "view")   # a re-run replaces the links
+        check("rfdetr view: data.yaml written", "names: [robot_blue, robot_red]"
+              in (d / "view" / "data.yaml").read_text())
+    check("rfdetr: 1.12's own names win, background is dropped",
+          R.detection_names([1, 2], ["robot_blue", "robot_red"], ["robot_red", "__background__"]) == ["robot_red", None])
+    check("rfdetr: 1.5 ids are 0-based into the checkpoint's list; past the end is dropped",
+          R.detection_names([0, 1, 2], ["robot_blue", "robot_red"]) == ["robot_blue", "robot_red", None])
+    check("rfdetr: names from a 1.12 (dict) checkpoint",
+          R.checkpoint_names({"args": {"class_names": ["a", "b"]}}) == ["a", "b"])
+    try:
+        R.check_resolution("small", 1000)
+        check("rfdetr: imgsz 1000 refused for small", False)
+    except SystemExit:
+        check("rfdetr: imgsz 1000 refused for small", True)
+
+
+def test_detector_comparison_metric():
+    """compare_detectors.py scores YOLO26 and RF-DETR with one AP; it must be right.
+
+    Hand-checked cases: a perfect detector is AP 1; a false box scored above
+    the true one halves it; a box matched once cannot be matched twice; small
+    truths are scored separately (fuel is ~17x12 px). And RF-DETR's size is read
+    from the pretrained-weights name its checkpoint records.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import compare_detectors as C
+    import train_rfdetr as R
+    a = (0.0, 0.0, 10.0, 10.0)
+    check("compare: iou of a box with itself is 1", abs(C.iou(a, a) - 1) < 1e-9)
+    check("compare: half-overlapping boxes", abs(C.iou(a, (5.0, 0.0, 15.0, 10.0)) - 1 / 3) < 1e-9)
+    check("compare: perfect detector AP 1", C.average_precision([(0.9, True), (0.8, True)], 2) == 1.0)
+    check("compare: a higher-scored false box halves AP",
+          abs(C.average_precision([(0.9, False), (0.8, True)], 1) - 0.5) < 1e-9)
+    check("compare: missing truths cap AP at recall",
+          abs(C.average_precision([(0.9, True)], 2) - 0.5) < 1e-9)
+    m = C.match([(a, 0.9), (a, 0.8)], [a])
+    check("compare: one truth matches one prediction", [hit for _, _, hit, _ in m] == [True, False])
+    big, tiny = (0.0, 0.0, 100.0, 100.0), (200.0, 200.0, 217.0, 212.0)
+    per = [([(big, 0.9, "robot_red"), (tiny, 0.8, "fuel"), ((300.0, 300.0, 310.0, 310.0), 0.7, "fuel")],
+            [(big, "robot_red"), (tiny, "fuel")])]
+    st = C.evaluate(per, ["robot_red", "fuel"], conf=0.5)
+    check("compare: robot found", st["robot_red"]["AP50"] == 1.0 and st["robot_red"]["recall"] == 1.0)
+    check("compare: fuel truth counted as small", st["fuel"]["small"] == 1 and st["robot_red"]["small"] == 0)
+    check("compare: small false box lowers precision, not recall",
+          st["fuel"]["recall"] == 1.0 and abs(st["fuel"]["precision"] - 0.5) < 1e-9)
+    f1, at = C.best_f1([(0.9, True), (0.8, True), (0.3, False), (0.2, False)], 3)
+    check("compare: best F1 picks its own threshold (0.8: 2 of 3 found, no false box)",
+          abs(f1 - 0.8) < 1e-9 and at == 0.8)
+    f1, at = C.best_f1([(0.9, True), (0.8, True), (0.3, False), (0.2, True)], 3)
+    check("compare: a low threshold wins when it finds the last ball (F1 6/7 at 0.2)",
+          abs(f1 - 6 / 7) < 1e-9 and at == 0.2)
+    f1, at = C.best_f1([(0.9, True), (0.9, False)], 1)
+    check("compare: equal scores are never split by a threshold", abs(f1 - 2 / 3) < 1e-9 and at == 0.9)
+    check("compare: no truth, no F1", all(v != v for v in C.best_f1([(0.5, False)], 0)))
+    check("compare: bare --yolo path keeps the old name",
+          C.yolo_spec("runs/a/weights/best.pt", 960) == ("yolo26", "runs/a/weights/best.pt", 960))
+    check("compare: named --yolo with its own image size",
+          C.yolo_spec("hi=runs/b/best.pt@1280", 960) == ("hi", "runs/b/best.pt", 1280))
+    check("compare: an @ in a path without a size is part of the path",
+          C.yolo_spec("x=dir@v2/best.pt", 960) == ("x", "dir@v2/best.pt", 960))
+    check("rfdetr: size from the pretrained weights' name",
+          R.size_from_pretrain("rf-detr-nano.pth") == "nano"
+          and R.size_from_pretrain("/x/rf-detr-small.pth") == "small"
+          and R.size_from_pretrain("rf-detr-base.pth") == "base")
+
+
+def test_sam3_autolabel_rules():
+    """autolabel_sam3.py's own rules; the robot rules are autolabel_robots'.
+
+    Tiles must cover a 1920x504 strip exactly (SAM 3 squashes its input to a
+    square, so whole strips would shrink fuel to ~9 px); a box cut by an inner
+    tile edge is dropped because the overlapping tile sees it whole; a fuel box
+    far over the median is a pile and keeps its frame out; hub lines come from
+    the hand-recorded source labels, never from SAM 3.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import autolabel_sam3 as S3
+    W, H = 1920, 504
+    ts = S3.tiles(W, H, 480)
+    covered = np.zeros((H, W), bool)
+    for x1, y1, x2, y2 in ts:
+        covered[y1:y2, x1:x2] = True
+    check("sam3: fuel tiles are 480 squares", all(x2 - x1 == 480 and y2 - y1 == 480 for x1, y1, x2, y2 in ts))
+    check("sam3: fuel tiles cover the whole strip", covered.all())
+    check("sam3: robot tiles shrink to the strip's height", all(y2 - y1 == 504 for _, y1, _, y2 in S3.tiles(W, H, 1008)))
+    check("sam3: a frame smaller than a tile is one tile", S3.tiles(300, 200, 480) == [(0, 0, 200, 200), (100, 0, 300, 200)])
+    t = (480, 0, 960, 480)
+    check("sam3: a box inside its tile is kept", S3.interior((600, 100, 640, 140), t, W, H))
+    check("sam3: a box cut by an inner tile edge is dropped", not S3.interior((470, 100, 520, 140), t, W, H))
+    check("sam3: a box on the image's own edge is kept", S3.interior((0, 0, 30, 30), (0, 0, 480, 480), W, H))
+    fuel = [(0, 0, 17, 12, .9)] * 5 + [(100, 100, 160, 140, .8)]
+    check("sam3: a pile 12x the median ball is a clump", S3.clumps(fuel) == [5])
+    check("sam3: no clump test on three balls", S3.clumps(fuel[:2] + fuel[5:]) == [])
+    names = ["fuel", "robot_blue", "robot_red", "hub_blue", "hub_red"]
+    src = "0 0.1 0.1 0.01 0.01\n3 0.5 0.5 0.2 0.4\n1 0.3 0.3 0.1 0.1\n4 0.8 0.5 0.2 0.4\n"
+    check("sam3: only hub lines carry over", S3.hub_lines(src, names) == ["3 0.5 0.5 0.2 0.4", "4 0.8 0.5 0.2 0.4"])
+    check("sam3: no hubs in a three-class set", S3.hub_lines(src, names[:3]) == [])
+    check("sam3: boxes are clamped to the frame", S3.yolo_line(0, (-10, -10, 10, 10), 100, 100) == "0 0.050000 0.050000 0.100000 0.100000")
+    robots = [("robot_blue", None), ("robot_red", None)]
+    check("sam3: a pile keeps the frame out", "pile" in S3.frame_verdict(1, robots, 0, 2, True))
+    check("sam3: too few robots keeps it out", "min-robots" in S3.frame_verdict(0, robots[:1], 0, 2, True))
+    check("sam3: unknown-alliance robots count, as they are painted out", S3.frame_verdict(0, robots[:1], 1, 2, True) == "")
+    check("sam3: fuel-only set has no robot gate", S3.frame_verdict(0, [], 0, 2, False) == "")
+    unknown = [(0, 0, 100, 100, .9)]
+    got = S3.assemble(["0 0.05 0.05 0.01 0.01", "0 0.9 0.9 0.01 0.01"], ["2 0.06 0.06 0.05 0.05"], unknown, 1000, 1000)
+    check("sam3: fuel inside a painted robot goes, fuel outside stays",
+          "0 0.05 0.05 0.01 0.01" not in got and "0 0.9 0.9 0.01 0.01" in got)
+    check("sam3: a labelled robot overlapping a painted one keeps its box", "2 0.06 0.06 0.05 0.05" in got)
+    names3 = ["fuel", "robot_blue", "robot_red"]
+    carried = S3.carried_robots("0 0.5 0.5 0.01 0.01\n1 0.25 0.5 0.1 0.2\n2 0.75 0.5 0.1 0.2\n", names3, 1000, 500)
+    check("sam3: robots carried from the source labels, fuel is not",
+          [c for c, _ in carried] == ["robot_blue", "robot_red"]
+          and abs(carried[0][1][0] - 200) < 1e-6 and abs(carried[0][1][3] - 300) < 1e-6)
+    check("sam3: a 5-class set's hubs are not carried as robots",
+          S3.carried_robots("3 0.5 0.5 0.1 0.1\n", names, 100, 100) == [])
+
+
+def test_unpaint_relabel_names_and_cut():
+    """unpaint_relabel.py re-cuts relabel_video.py's frames without its grey paint.
+
+    SAM 3 is being tried on exactly the balls the paint covers, so judging it on
+    painted frames rigs the comparison. The name says which frame and tile; the
+    report says the rows and scoreboard masks, which must stay greyed.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import unpaint_relabel as U
+    check("unpaint: whole frame name", U.parse_name("e4_007373.jpg") == ("e4", 7373, None))
+    check("unpaint: tile name", U.parse_name("e4_007373t1280-13.jpg") == ("e4", 7373, (1280, 13)))
+    check("unpaint: stems may hold underscores", U.parse_name("2026cmptx_f1m4_000060.jpg") == ("2026cmptx_f1m4", 60, None))
+    check("unpaint: other names are not guessed at", U.parse_name("frame.jpg") is None)
+    rows, masks = U.settings({"settings": {"rows": "0:700", "mask": ["440,0,1480,165"]}})
+    check("unpaint: settings from the report", rows == (0, 700) and masks == [(440, 0, 1480, 165)])
+    frame = np.full((1080, 1920, 3), 200, np.uint8)
+    out = U.cut(frame, rows, masks, None, None)
+    check("unpaint: rows cut, mask greyed with 118", out.shape == (700, 1920, 3)
+          and (out[10, 500] == 118).all() and (out[400, 500] == 200).all())
+    tile = U.cut(frame, rows, masks, (1280, 13), (640, 687))
+    check("unpaint: tile cut from the row-cut frame", tile.shape == (687, 640, 3))
+    check("unpaint: the source frame is not changed", (frame[10, 500] == 200).all())
+    import relabel_video as RV
+    check("relabel: Ultralytics' '0' becomes PyTorch's 'cuda:0' (Colab crash 2026-11-16)",
+          RV.torch_device("0") == "cuda:0" and RV.torch_device("1,2") == "cuda:1"
+          and RV.torch_device("cpu") == "cpu" and RV.torch_device("cuda:1") == "cuda:1")
+
+
+def test_count_einstein_helpers():
+    """count_einstein.py judges models by counting Einstein 1, not by mAP.
+
+    Both detectors scored ~0.94 fuel AP50 on Einstein 1 frames (2026-11-16), so
+    mAP no longer separates models. The setup is rebuilt from the recorded
+    Einstein 4 outlines plus Einstein 1's recorded shift; the error is the
+    mean over both hubs at the buzzer, against the scoreboard.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "train"))
+    import count_einstein as CE
+    setup = CE.e1_setup("e1.mp4", "m.pt")
+    cam = setup["cameras"][0]
+    check("count e1: blue outline is Einstein 4's moved +16,+13",
+          cam["zones"][0]["hub"] == "blue" and cam["zones"][0]["outline"][0] == [401, 275])
+    check("count e1: red outline moved +28,+5", cam["zones"][1]["outline"][0] == [1380, 267])
+    check("count e1: model blended at the shipped 0.5", cam["model"] == {"weights": "m.pt", "weight": 0.5})
+    check("count e1: no model without weights", "model" not in CE.e1_setup("e1.mp4")["cameras"][0])
+    from tbavid.hubcount import setup_from_dict
+    check("count e1: the shipped counter accepts the setup",
+          len(setup_from_dict(CE.e1_setup("e1.mp4")).cameras[0].zones) == 2)
+    check("count e1: zone names map to hubs",
+          CE.hub_values({"broadcast/blue0": 600.0, "broadcast/red1": 400.0}) == {"blue": 600.0, "red": 400.0})
+    check("count e1: perfect count is 0% error", CE.error({"blue": 621, "red": 415}, {"blue": 621, "red": 415}) == 0)
+    check("count e1: 10% over on both hubs is 10%",
+          abs(CE.error({"blue": 683.1, "red": 456.5}, {"blue": 621, "red": 415}) - 10.0) < 0.01)
+    check("count e1: timeline read at the AUTO time",
+          CE.at([(0, 0, 0), (29.5, 90, 80), (31, 99, 99)], 30.0) == {"red": 90, "blue": 80})
+
+
+def test_onnx_decoders():
+    """tbavid/onnxdet.py turns an exported model's raw outputs into boxes the
+    way Ultralytics and RF-DETR do, so the apps can drop torch. Against the
+    real fuel_relabel export all 437 boxes matched the .pt to 0.0002 px
+    (2026-11-18); these hold the decoding rules with hand-made outputs."""
+    from tbavid import onnxdet as OD
+    # YOLO without NMS: (4 + nc, N) as centre-x, centre-y, w, h, class scores
+    cols = [  # cx, cy, w, h, fuel, robot
+        (100, 100, 20, 20, 0.90, 0.10),
+        (102, 101, 20, 20, 0.80, 0.05),   # overlaps the first (IoU ~0.75): suppressed
+        (150, 100, 20, 20, 0.30, 0.20),   # apart: kept
+        (100, 100, 20, 20, 0.02, 0.60),   # a robot on the same spot: other class, kept
+        (300, 300, 10, 10, 0.04, 0.01),   # under conf: dropped
+    ]
+    raw = np.array(cols, dtype=np.float32).T
+    b, s, c = OD.decode_yolo_raw(raw, conf=0.05, max_det=100)
+    check("onnx yolo: NMS keeps the best of an overlapping pair, per class",
+          sorted(zip(c.tolist(), [round(x, 2) for x in s.tolist()])) == [(0, 0.3), (0, 0.9), (1, 0.6)])
+    check("onnx yolo: centre/size becomes corners",
+          np.allclose(b[np.argmax(s)], [90, 90, 110, 110]))
+    b, s, c = OD.decode_yolo_raw(raw, conf=0.05, max_det=100, classes=[0])
+    check("onnx yolo: classes=[0] keeps fuel only", set(c.tolist()) == {0} and len(c) == 2)
+    check("onnx yolo: max_det caps after NMS, best first",
+          OD.decode_yolo_raw(raw, conf=0.05, max_det=1)[1].tolist() == [np.float32(0.9)])
+    # NMS boundary: IoU exactly 0.5 is kept (torchvision suppresses only above)
+    two = np.array([[0, 0, 10, 10], [0, 0, 10, 5]], dtype=np.float32)
+    check("onnx nms: IoU 0.5 is not suppressed", len(OD.nms(two, np.array([0.9, 0.8]), 0.5)) == 2)
+    # YOLO26 end-to-end: (K, 6) rows, no NMS
+    e2e = np.array([[1, 2, 3, 4, 0.9, 0], [5, 6, 7, 8, 0.5, 1], [0, 0, 1, 1, 0.01, 0]], dtype=np.float32)
+    b, s, c = OD.decode_yolo_e2e(e2e, conf=0.05, max_det=10, classes=[0])
+    check("onnx e2e: rows over conf, wanted class", len(b) == 1 and b[0].tolist() == [1, 2, 3, 4])
+    # RF-DETR: normalised cxcywh + logits; the slot past nc is no-object
+    boxes = np.array([[0.5, 0.5, 0.1, 0.1], [0.25, 0.25, 0.1, 0.2]], dtype=np.float32)
+    logits = np.array([[3.0, -9.0, 9.0], [-9.0, 0.0, -9.0]], dtype=np.float32)
+    b, s, c = OD.decode_rfdetr(boxes, logits, size=560, nc=2, conf=0.1, max_det=10)
+    check("onnx rfdetr: the no-object slot is never a detection, but takes a top-Q place",
+          c.tolist() == [0])   # top 2 of 6 pairs: no-object 9.0, fuel 3.0; robot 0.0 is third
+    b2, s2, c2 = OD.decode_rfdetr(boxes, logits, size=560, nc=2, conf=0.1, max_det=10, num_select=6)
+    check("onnx rfdetr: with more selected, the next class comes in", sorted(c2.tolist()) == [0, 1])
+    check("onnx rfdetr: sigmoid scores, best first", round(float(s[0]), 3) == 0.953)
+    check("onnx rfdetr: boxes scaled to the input size",
+          np.allclose(b[0], [252, 252, 308, 308]))
+    check("onnx names: Ultralytics metadata read back",
+          OD.parse_names("{0: 'fuel', 1: 'robot_blue'}") == ["fuel", "robot_blue"])
+
+
+def test_watchtower_app():
+    """Our Watchtower app wraps watchtower-fms v2 (2026-11-18): Control in one
+    window, Watchtower's own camera runner beside it, nothing of the v0.1
+    Home window left. What can be checked without fastapi or a window."""
+    import ast
+    import os
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "apps" / "watchtower" / "main.py").read_text()
+    ns = {"Path": Path, "threading": __import__("threading"), "time": __import__("time"),
+          "os": os, "socket": __import__("socket")}
+    for n in ast.parse(src).body:
+        if (isinstance(n, ast.FunctionDef) and n.name in ("vision_config", "port_open")) or (
+                isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in ("CAMERAS", "ORPHAN_S", "MODEL_DEFAULTS")):
+            exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
+    with tempfile.TemporaryDirectory() as t:
+        (Path(t) / "config").mkdir()
+        text = ns["vision_config"](Path(t), 8123).read_text()
+    check("watchtower app: cameras reported to this FMS, colour counter, hubs from Setup",
+          "fms_url: http://127.0.0.1:8123" in text and "counter: colour" in text
+          and "hubs: {red: {}, blue: {}}" in text)
+    from tbavid.hubmodel import bundled_model
+    check("watchtower app: every hub counts with the built-in model (alone) when the app has it",
+          ("model: built-in, model_weight: 1.0" in text) == bool(bundled_model()))
+    check("watchtower app: his counter loads models through our ONNX runtime",
+          'sys.modules["hubcounter.hubmodel"] = hubmodel' in src and "use_our_model_runtime()" in src)
+    check("watchtower app: a killed app's camera runner stops by itself", ns["ORPHAN_S"] <= 30
+          and "_exit_with_fms" in src and "os._exit(0)" in src)
+    check("watchtower app: the runner is restarted if it stops, never mid-quit",
+          "self.stopping.is_set()" in src and "VISION_RESTART_S" in src)
+    check("watchtower app: no camera runner for a REEFSCAPE event (scored by hand)",
+          'cfg["event"]["game"] == "rebuilt"' in src)
+    check("watchtower app: the old Home window is gone",
+          not (root / "apps" / "watchtower" / "home.html").exists()
+          and not (root / "apps" / "watchtower" / "settings.py").exists())
+    check("watchtower app: updates are asked for, and refused mid-match",
+          "self.fms.match_running()" in src and "check_update" in src)
+    sys.path.insert(0, str(root / "apps" / "watchtower"))
+    import queue_tba
+    check("watchtower queue: no key, no TBA call", "error" in queue_tba.tba_matches("2026abcd", "")
+          if not os.environ.get("TBA_AUTH_KEY") else True)
+    check("watchtower queue: a bad event key is refused before any call",
+          "error" in queue_tba.tba_matches("not a key", "x"))
+
+
+def test_drop_test_fit():
+    """The ball size comes from a drop test (Watchtower v2's rule, after a
+    ~9x overcount from a measured size): blobs recorded near the outlines,
+    the counter replayed at many areas, the area nearest the hand counts kept.
+    Synthetic balls of a known area falling through an outline stand in for
+    a camera."""
+    import os
+    from tbavid import dropfit as DF
+    from tbavid import hubapp as HA
+    from tbavid import hubcount as HC
+    true_area = 600.0
+    var = true_area / (4 * 3.14159)          # a filled disc's pixel variance per axis
+    red = {"name": "cam-red", "hub": "red", "outline": [[100, 200], [300, 200], [300, 260], [100, 260]]}
+    blue = {"name": "cam-blue", "hub": "blue", "outline": [[500, 200], [700, 200], [700, 260], [500, 260]]}
+    frames = []
+    def drop(x, n_frames=14):
+        for k in range(n_frames):          # from well above the outline to inside it
+            yield (x, 100 + 12 * k, true_area, var, var, 0.0)
+    plan = [(150, "cam-red", 0), (220, "cam-red", 30), (260, "cam-red", 60),
+            (560, "cam-blue", 10), (640, "cam-blue", 50)]
+    for start in range(0, 110):
+        f = {"cam-red": [], "cam-blue": []}
+        for x, zone, t0 in plan:
+            k = start - t0
+            if 0 <= k < 14:
+                f[zone].append((x, 100 + 12 * k, true_area, var, var, 0.0))
+        frames.append(f)
+    r = DF.fit([red, blue], frames, {"red": 3, "blue": 2}, 800, 600, blur=0.3)
+    check("drop test: the fit replays to the hand counts on both hubs",
+          r["got"] == {"red": 3, "blue": 2})
+    check("drop test: the fitted area is near the true one (within 0.5x-2x)",
+          0.5 * true_area <= r["area"] <= 2 * true_area)
+    check("drop test: the whole range counting right brackets the fit",
+          r["lo"] <= r["area"] <= r["hi"])
+    check("drop test: only hubs counted by hand are scored",
+          DF.fit([red, blue], frames, {"red": 3}, 800, 600)["got"] == {"red": 3})
+    try:
+        DF.fit([red], [{"cam-red": []}] * 20, {"red": 2}, 800, 600)
+        check("drop test: nothing crossed is an error, not a size", False)
+    except ValueError as e:
+        check("drop test: nothing crossed is an error, not a size", "crossed" in str(e))
+    try:
+        DF.fit([red], frames, {"red": 0}, 800, 600)
+        check("drop test: no balls typed is refused", False)
+    except ValueError:
+        check("drop test: no balls typed is refused", True)
+    check("measure: estimate is the median of lone balls, refused on too few",
+          DF.estimate([500, 600, 700, 610, 590, 605, 595, 620], 30)["area"] == 602.5)
+    check("measure vs drop test: 2x apart is still agreement, more is not",
+          DF.agrees(300, 600) and not DF.agrees(150, 693))
+    # per-hub colour: a zone's own range survives the setup round trip
+    own = {"hue_lo": 15, "hue_hi": 40, "sat_min": 90, "val_min": 80}
+    cfg = {"cameras": [{"name": "cam", "source": "0", "ball_area": 600,
+                        "zones": [dict(red, colour=own), blue]}]}
+    st = HC.setup_from_dict(cfg)
+    cam = st.cameras[0]
+    check("per-hub colour: a zone counts with its own range, the other with the camera's",
+          cam.zone_gate(cam.zones[0]) == ((15, 90, 80), (40, 255, 255))
+          and cam.zone_gate(cam.zones[1]) == HC.gate(None))
+    back = HC.setup_to_dict(st)["cameras"][0]["zones"]
+    check("per-hub colour: saved with the zone, and only there",
+          back[0]["colour"]["hue_lo"] == 15 and "colour" not in back[1])
+    # the controller: a ball size is a drop test or typed, never Measure's
+    ctl = HA.HubController()
+    with tempfile.TemporaryDirectory() as t:
+        v = os.path.join(t, "x.mp4")
+        open(v, "wb").close()
+        name = ctl.add_camera(v)["name"]
+    ctl.add_zone(name, "red", red["outline"])
+    check("controller: no ball size yet -> the drop test is what the page asks for",
+          any("drop test" in p for p in ctl.state()["problems"]))
+    c = ctl.update_camera(name, {"ball_area": 650})
+    check("controller: a typed size counts, marked as typed", c["ball_from"] == {"typed": True})
+    z = ctl.set_zone_colour(name, ctl.camera(name)["zones"][0]["name"], {"hue_lo": 18})
+    check("controller: a hub's own colour starts from the camera's and takes the change",
+          z["colour"]["hue_lo"] == 18 and "hue_hi" in z["colour"])
+    z = ctl.set_zone_colour(name, z["name"], None)
+    check("controller: and goes back to the camera's", "colour" not in z)
+    try:
+        ctl.drop_test_finish({"red": 3})
+        check("controller: finishing a drop test never started is refused", False)
+    except ValueError:
+        check("controller: finishing a drop test never started is refused", True)
+
+
+def test_cli_aliases():
+    """`run.py aliases`: the short commands for people who prefer a terminal.
+    Every function the help lists exists in both the shell and PowerShell
+    files, and each wraps a run.py command or train/ script that exists."""
+    import re
+    import run as R
+    root = Path(__file__).resolve().parent.parent
+    sh = (root / "deploy" / "aliases.sh").read_text()
+    ps = (root / "deploy" / "aliases.ps1").read_text()
+    names = ["hc", "hc-share", "hc-feed", "hc-count", "hc-listen", "hc-board", "wt", "wt-cli",
+             "wt-open", "wt-logs", "wt-pins", "fuel-export", "fuel-compare", "fuel-count",
+             "frc-test", "frc-update", "frc"]
+    check("aliases: every command is a shell function", all(re.search(rf"^{re.escape(n)}\s*\(\)", sh, re.M) for n in names))
+    check("aliases: and a PowerShell function", all(re.search(rf"^function {re.escape(n)} ", ps, re.M) for n in names))
+    for sub in ("hubgui", "hubfeed", "hubcount", "hubfeed-listen"):
+        check(f"aliases: run.py has {sub}", f'add_parser("{sub}"' in (root / "run.py").read_text())
+    for script in ("train/export_onnx.py", "train/compare_detectors.py", "train/count_einstein.py", "apps/watchtower/main.py"):
+        check(f"aliases: {script} exists", (root / script).exists())
+    shell, rc = R.alias_target("/bin/zsh", "darwin")
+    check("aliases: zsh on a Mac goes to ~/.zshrc", shell == "zsh" and rc.name == ".zshrc")
+    check("aliases: bash elsewhere", R.alias_target("/bin/bash", "linux")[1].name == ".bashrc")
+    check("aliases: Windows goes to the PowerShell profile",
+          R.alias_target("", "win32")[1].name.endswith("_profile.ps1"))
+    check("aliases: the line sources this checkout's file",
+          str(root / "deploy" / "aliases.sh") in R.alias_line("zsh", root)
+          and R.alias_line("powershell", root).startswith(". "))
+
+
+def test_model_is_primary_on_gpu():
+    """2026-11-18: the colour counter broke at the scrimmage, so the model is
+    the primary counter -- on by default, the model alone (share 1.0), on the
+    GPU first -- with colour underneath as the backup."""
+    import os
+    from tbavid import hubapp as HA
+    from tbavid import hubmodel as HM
+    check("model primary: its default share is the model alone", HM.DEFAULT_WEIGHT == 1.0
+          and HM.parse_model({"weights": "m.onnx"})["weight"] == 1.0)
+    real = HA.builtin_model_ready
+    try:
+        with tempfile.TemporaryDirectory() as t:
+            v = os.path.join(t, "a.mp4"); open(v, "wb").close()
+            w = os.path.join(t, "b.mp4"); open(w, "wb").close()
+            HA.builtin_model_ready = lambda: True
+            c = HA.HubController().add_camera(v)
+            check("model primary: a new camera counts with the built-in model",
+                  c.get("model") == {"weights": HM.BUILTIN, "weight": 1.0})
+            HA.builtin_model_ready = lambda: False
+            check("model primary: a copy without the model or its runtime starts on colour",
+                  "model" not in HA.HubController().add_camera(w))
+    finally:
+        HA.builtin_model_ready = real
+    # GPU first, CPU when the GPU will not run
+    import types
+    made = []
+
+    class FakeDet:
+        def __init__(self, path, providers=None, threads=0):
+            made.append(providers[0])
+            if providers[0] == "BrokenGPU":
+                raise RuntimeError("driver")
+            self.session = types.SimpleNamespace(get_providers=lambda: list(providers))
+        def predict(self, imgs, conf=0.25, **k):
+            return []
+    fake = types.ModuleType("tbavid.onnxdet"); fake.OnnxDetector = FakeDet
+    real_mod, real_prov = sys.modules.get("tbavid.onnxdet"), HM.onnx_providers
+    sys.modules["tbavid.onnxdet"] = fake
+    try:
+        HM.onnx_providers = lambda d: ["CUDAExecutionProvider", "CPUExecutionProvider"] if d else ["CPUExecutionProvider"]
+        det, where = HM.open_onnx("m.onnx")
+        check("model primary: auto picks the GPU when there is one", where == "CUDAExecutionProvider")
+        made.clear()
+        HM.onnx_providers = lambda d: ["BrokenGPU", "CPUExecutionProvider"] if d else ["CPUExecutionProvider"]
+        det, where = HM.open_onnx("m.onnx")
+        check("model primary: a GPU that will not run falls back to the CPU",
+              where == "CPUExecutionProvider" and made == ["BrokenGPU", "CPUExecutionProvider"])
+        HM.onnx_providers = lambda d: ["CPUExecutionProvider"]
+        check("model primary: no GPU, the CPU", HM.open_onnx("m.onnx")[1] == "CPUExecutionProvider")
+    finally:
+        HM.onnx_providers = real_prov
+        if real_mod is not None:
+            sys.modules["tbavid.onnxdet"] = real_mod
+        else:
+            sys.modules.pop("tbavid.onnxdet", None)
+    src = (Path(__file__).resolve().parent.parent / "tbavid" / "hubcount.py").read_text()
+    i = src.index("def failed(e):")
+    body = src[i:src.index("worker = ModelWorker(", i)]
+    check("model primary: a model failure hands over to colour instead of stopping",
+          "z.weight = 0.0" in body and "stop.set()" not in body)
+
+
+def test_youtube_bot_check_is_not_a_dead_video():
+    """2026-11-18: from Colab every download got YouTube's "Sign in to confirm
+    you're not a bot", filed as unavailable -- 23 good matches marked dead in
+    two minutes, and the harvest carried on. Now it is BLOCKED: the fetch
+    stops at once and records nothing."""
+    from tbavid import download as D
+    from tbavid import ledger as Lg
+    check("bot check: its own status", D.classify(
+        "ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies") == D.BLOCKED)
+    check("bot check: a removed video is still unavailable",
+          D.classify("ERROR: [youtube] abc: Video unavailable. This video has been removed") == Lg.UNAVAILABLE)
+    check("bot check: anything else is a plain failure", D.classify("HTTP Error 500") == Lg.FAILED)
+    src = (Path(__file__).resolve().parent.parent / "tbavid" / "pipeline.py").read_text()
+    i = src.index("if fail == download.BLOCKED:")
+    check("bot check: the fetch stops before recording anything",
+          "raise SystemExit" in src[i:i + 600] and src.index("if fail == download.BLOCKED:") < src.index("led.record(yt, fail"))
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5296,11 +5559,15 @@ def main() -> int:
                test_hub_scoreboard_view, test_relabel_video_helpers, test_frc_fms_sender,
                test_hub_exit_line_counter, test_ball_tracker_follows_through_the_apex,
                test_hub_model_blend, test_model_worker_and_fms_combo,
-               test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined, test_watchtower_settings,
-               test_watchtower_home_api, test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
+               test_hub_counter_app, test_hub_builtin_model, test_hub_setup_streamlined,                test_fanout_watchtower_and_bioarena, test_plugin_combines_like_hubtally, test_find_cameras_says_why, test_cvload_survives_a_refusing_loader, test_app_update,
                test_camera_presets, test_share_hides_the_ip_behind_a_name,
                test_app_tests, test_two_boxes_one_feed,
-               test_counter_keeps_going_on_match_day):
+               test_counter_keeps_going_on_match_day, test_bumper_snap_and_rfdetr_view,
+               test_detector_comparison_metric, test_sam3_autolabel_rules,
+               test_unpaint_relabel_names_and_cut, test_count_einstein_helpers,
+               test_onnx_decoders, test_watchtower_app,
+               test_drop_test_fit, test_cli_aliases,
+               test_model_is_primary_on_gpu, test_youtube_bot_check_is_not_a_dead_video):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

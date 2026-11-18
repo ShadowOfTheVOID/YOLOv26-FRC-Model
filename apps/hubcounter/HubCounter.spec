@@ -1,26 +1,29 @@
 # PyInstaller spec for Hub Counter: an .app on macOS, a folder with
 # "Hub Counter.exe" on Windows, a folder with "Hub Counter" on Linux. Each is
 # built on its own OS by .github/workflows/hub-app.yml; by hand, on that OS:
-#   pip install pyinstaller opencv-python-headless numpy yt-dlp torch torchvision
-#   pip install --no-deps ultralytics ultralytics-thop
-#   pip install matplotlib pillow pyyaml requests psutil polars
+#   pip install pyinstaller opencv-python-headless numpy yt-dlp onnxruntime
+#   (Windows: onnxruntime-directml instead, for the GPU-or-NPU fallback)
+#   python train/export_onnx.py models/fuel_relabel.pt   (needs torch + ultralytics,
+#       in another venv: they must NOT be in the one that builds)
 #   pyinstaller apps/hubcounter/HubCounter.spec      (from the repo root)
-# (hub-app.yml does exactly this; on Linux, x64 and arm64, it takes torch from
-# PyTorch's CPU index: PyPI's Linux torch carries CUDA, and the arm64 build
-# came out at 3049 MB, over GitHub's 2 GB asset limit.)
+# (hub-app.yml does exactly this.) Until 2026-11-18 the apps carried torch +
+# Ultralytics: the Linux arm64 build reached 3049 MB with PyPI's CUDA torch,
+# and the CPU builds were still hundreds of MB. ONNX Runtime runs the same
+# weights (export_onnx.py refuses an export whose boxes differ).
 #
 # What goes in: tbavid's hub modules and the two pages they serve, OpenCV,
-# PyTorch + Ultralytics for the colour+model blend, and models/fuel_relabel.pt
-# (downloaded by the workflow; `model: built-in`). The scraper (tba,
+# ONNX Runtime for the colour+model blend, and models/fuel_relabel.onnx
+# (exported by the workflow from the release's .pt; `model: built-in`). The scraper (tba,
 # download, pipeline, ...) is never imported by them and is excluded.
 # HUBCOUNTER_REQUIRE_MODEL=1 makes a build without the model fail instead of
 # shipping one whose "Use built-in model" button is missing.
 #
 # The same spec builds the Watchtower app (apps/watchtower/) with
-# HUBAPP=watchtower: the hub counter plus the Watchtower FMS from a clone of
-# arnan-bajaj/watchtower-fms at WATCHTOWER_SRC (hub-app.yml clones the tag
-# in .github/watchtower-release). One spec, so the model, torchvision and
-# page fixes above apply to both.
+# HUBAPP=watchtower: the Watchtower FMS and its own hub-camera runner from a
+# clone of arnan-bajaj/watchtower-fms at WATCHTOWER_SRC (hub-app.yml checks
+# out the commit in .github/watchtower-release). Not our hub page (Watchtower
+# v2's cameras are in its own Control -> Setup), but the fuel model and ONNX
+# Runtime: the model is every hub's primary counter there too.
 import os
 import sys
 
@@ -37,7 +40,9 @@ SCRAPER = ["tbavid.tba", "tbavid.download", "tbavid.pipeline", "tbavid.stream",
            "tbavid.scoreboard", "tbavid.audio", "tbavid.db", "tbavid.api",
            "tbavid.detect", "tbavid.shooting"]
 HEAVY = ["tkinter", "PyQt5", "PyQt6", "PySide6", "IPython", "jupyter",
-         "tensorboard", "onnx", "onnxruntime", "openvino", "tensorrt"]
+         "tensorboard", "onnx", "openvino", "tensorrt",
+         # the model runs on onnxruntime; a .pt chosen by hand needs a checkout
+         "torch", "torchvision", "ultralytics", "rfdetr", "matplotlib", "scipy"]
 
 APP = os.environ.get("HUBAPP", "hubcounter")
 # Both apps open in their own windows (pywebview): only this OS's backend,
@@ -51,25 +56,43 @@ if APP == "watchtower":
     WSRC = os.path.abspath(os.environ.get("WATCHTOWER_SRC") or os.path.join(ROOT, "watchtower-src"))
     if not os.path.isfile(os.path.join(WSRC, "fms", "server.py")):
         raise SystemExit(f"no Watchtower at {WSRC}: clone arnan-bajaj/watchtower-fms there")
-    sys.path.insert(0, WSRC)
+    VSRC = os.path.join(WSRC, "vision")
+    sys.path[:0] = [WSRC, VSRC]
     NAME, ENTRY, BUNDLE_ID = "Watchtower", os.path.join(ROOT, "apps", "watchtower", "main.py"), "org.tbavid.watchtower"
     WAPP = os.path.join(ROOT, "apps", "watchtower")
-    EXTRA_PATH = [WSRC, WAPP]
-    EXTRA_DATAS = [(os.path.join(WAPP, "home.html"), "."),
-                   (os.path.join(WAPP, "queue.html"), "."),
+    EXTRA_PATH = [WSRC, VSRC, WAPP]
+    EXTRA_DATAS = [(os.path.join(WAPP, "queue.html"), "."),
+                   (os.path.join(WAPP, "theme.css"), "."),
                    (os.path.join(WSRC, "fms", "static"), "fms/static"),
                    (os.path.join(WSRC, "config", "event.example.yaml"), "config"),
-                   (os.path.join(WSRC, "config", "vision.example.yaml"), "config")]
-    # uvicorn picks its loop, protocols and lifespan by name at start.
+                   (os.path.join(WSRC, "config", "vision.example.yaml"), "config"),
+                   # run_vision.py is run from its folder (Watchtower --vision);
+                   # the counter plugins folder is read at start.
+                   (VSRC, "vision")]
+    # uvicorn picks its loop, protocols and lifespan by name at start; vision's
+    # modules import each other by bare name from vision/.
+    VISION = ["run_vision", "dropfit", "hubsetup", "vconfig", "count_feed", "scaler",
+              "pick_roi", "rescore"]
     EXTRA_IMPORTS = (collect_submodules("fms") + collect_submodules("uvicorn")
-                     + ["fastapi", "starlette", "websockets", "yaml", "requests", "settings"]
-                     + collect_submodules("qrcode") + WEBVIEW)
+                     + collect_submodules("counters") + collect_submodules("hubcounter")
+                     + ["fastapi", "starlette", "websockets", "yaml", "requests", "queue_tba",
+                        "tbavid.keepawake", "tbavid.cvload",
+                        # the fuel model, the primary counter (main.use_our_model_runtime)
+                        "tbavid.hubmodel", "tbavid.onnxdet", "tbavid.count", "tbavid.trackvis",
+                        "tbavid.fms_counter", "tbavid.hubcount", "tbavid.camprofile",
+                        "onnxruntime"] + VISION + WEBVIEW)
     EXTRA_DATAS += collect_data_files("webview")
+    HUB_IMPORTS = ["cv2", "numpy"]
 else:
     NAME, ENTRY, BUNDLE_ID = "Hub Counter", os.path.join(SPECPATH, "main.py"), "org.tbavid.hubcounter"
     EXTRA_PATH = []
     EXTRA_DATAS = collect_data_files("webview")
     EXTRA_IMPORTS = WEBVIEW
+    HUB_IMPORTS = ["tbavid.hubweb", "tbavid.hubapp", "tbavid.hubcount",
+                   "tbavid.hubfeed", "tbavid.fmslink", "tbavid.hubmodel",
+                   "tbavid.count", "tbavid.trackvis", "tbavid.camcheck",
+                   "tbavid.camprofile", "tbavid.onnxdet", "cv2", "numpy", "yt_dlp",
+                   "onnxruntime"]
 
 # The build's version, read at run time by tbavid/appupdate.py to offer
 # one-click updates (0.0.0 for pull-request builds, which offer none).
@@ -80,36 +103,20 @@ with open(os.path.join(_VDIR, "app_version.txt"), "w") as _f:
 EXTRA_DATAS = EXTRA_DATAS + [(os.path.join(_VDIR, "app_version.txt"), ".")]
 EXTRA_IMPORTS = EXTRA_IMPORTS + ["tbavid.appupdate"]
 
-MODEL = os.path.join(ROOT, "models", "fuel_relabel.pt")
+MODEL = os.path.join(ROOT, "models", "fuel_relabel.onnx")
 if not os.path.isfile(MODEL) and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
     raise SystemExit(f"{MODEL} is missing (hub-app.yml downloads it from the release)")
 MODELS = [(MODEL, "models")] if os.path.isfile(MODEL) else []
 
 
-def torchvision_ops():
-    """torchvision's compiled ops (_C_stable: nms, roi_align), which it loads
-    by path with torch.ops.load_library, so the bundler never sees them;
-    collect_dynamic_libs skips them too (no lib* name). Without them the
-    first prediction failed: "operator torchvision::nms does not exist"."""
-    tv = os.path.dirname(importlib.util.find_spec("torchvision").origin)
-    found = [f for ext in ("*.so", "*.pyd", "*.dylib", "*.dll")
-             for f in glob.glob(os.path.join(tv, ext))]
-    return [(f, "torchvision") for f in found]
-
 a = Analysis(
     [ENTRY],
     pathex=[ROOT] + EXTRA_PATH,
-    binaries=torchvision_ops(),
-    datas=[(os.path.join(TB, "hubweb.html"), "tbavid"),
-           (os.path.join(TB, "hubboard.html"), "tbavid")] + MODELS
-          # Ultralytics reads its default.yaml and tracker yamls at import
-          # and builds layers by name, so all of it goes in.
-          + collect_data_files("ultralytics") + EXTRA_DATAS,
-    hiddenimports=["tbavid.hubweb", "tbavid.hubapp", "tbavid.hubcount",
-                   "tbavid.hubfeed", "tbavid.fmslink", "tbavid.hubmodel",
-                   "tbavid.count", "tbavid.trackvis", "tbavid.camcheck",
-                   "tbavid.camprofile", "cv2", "numpy", "yt_dlp",
-                   "torch", "torchvision"] + collect_submodules("ultralytics") + EXTRA_IMPORTS,
+    binaries=[],
+    datas=([(os.path.join(TB, "hubweb.html"), "tbavid"),
+            (os.path.join(TB, "hubboard.html"), "tbavid")] if APP != "watchtower" else [])
+          + MODELS + EXTRA_DATAS,
+    hiddenimports=HUB_IMPORTS + EXTRA_IMPORTS,
     excludes=SCRAPER + HEAVY,
     noarchive=False,
 )

@@ -104,6 +104,17 @@ class TBAClient:
                 )
             if resp.status_code == 404:
                 return None
+            if resp.status_code == 403:
+                # TBA's firewall blocks some cloud machines outright -- Colab's
+                # answered 403 to a key that works elsewhere (2026-11-18) --
+                # whatever the key. A copy cached on a machine TBA does answer
+                # (copied into state/tba_cache) still does the job.
+                if cached:
+                    return cached["body"]
+                raise SystemExit(
+                    f"TBA refused this machine (403) for {path}, and there is no cached copy. "
+                    "TBA blocks some cloud machines whatever the key: fill state/tba_cache "
+                    "on a computer TBA answers (run.py fetch --dry-run there) and copy it here.")
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt == tries - 1:
                     break

@@ -173,7 +173,7 @@ class ColourCounter:
                                   "weight": cfg.get("model_weight", DEFAULT_WEIGHT),
                                   "device": cfg.get("device", "")}) \
             if cfg.get("model") else None
-        self.models: List = []          # a ModelCounter per zone, None for exits
+        self.models: List = []          # a model counter per zone (hubmodel.counter_for)
         self.worker = None
         self.frames = 0
         self.offline = False
@@ -239,14 +239,17 @@ class ColourCounter:
         return max((HC.combined(v, self.combine) for v in by.values()), default=0)
 
     def _build_model(self) -> None:
-        from .hubmodel import ModelCounter, ModelEye, ModelWorker, model_stride
+        """A model half for every zone: ModelCounter on an outline,
+        ModelExitCounter on an exit line (2026-11-18: balls went uncounted
+        through exit lines at the scrimmage, when exits were colour only)."""
+        from .hubmodel import ModelEye, ModelWorker, counter_for, model_stride
         self.stride = model_stride(self.fps)
-        outlines = {i: c.poly for i, (c, (kind, _, _)) in
-                    enumerate(zip(self.counters, self.zones)) if kind == "outline"}
-        self.models = [ModelCounter(outlines[i], self.fps / self.stride,
-                                    **self.model["counter"]) if i in outlines else None
-                       for i in range(len(self.counters))]
-        eye = ModelEye(self.model["weights"], outlines, self.model["device"])
+        self.models = [counter_for(kind, pts if kind == "outline" else list(pts), out,
+                                   self.fps / self.stride, self.model["counter"])
+                       for kind, pts, out in self.zones]
+        eye = ModelEye(self.model["weights"], {i: c.poly for i, c in enumerate(self.counters)},
+                       self.model["device"],
+                       exits=[i for i, (kind, _, _) in enumerate(self.zones) if kind == "exit"])
         self.worker = ModelWorker(
             eye, {i: m for i, m in enumerate(self.models) if m is not None},
             on_rise=lambda i, tag: None,       # read back in process()

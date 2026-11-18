@@ -8,9 +8,9 @@
 /* A screen beside the field: dark always, numbers readable across a gym.
    No web fonts or CDNs -- a field often has no internet. */
 :root{
-  --bg:#07090e; --ink:#eef2f8; --ink2:#9aa4b6; --line:#1d2330;
-  --red:#ff4d4f; --red-bg:#2a0d10; --blue:#3b8cff; --blue-bg:#0b1a33;
-  --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  --bg:#08090b; --ink:#eef0f3; --ink2:#959eaa; --line:#1f242b; --panel:#121519;
+  --red:#ff4b65; --red-bg:#2b0a12; --blue:#4f8fff; --blue-bg:#0a1a38; --fuel:#f5c400;
+  --ok:#3ccf87; --warn:#f0a43a; --bad:#ff7a59;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
@@ -19,15 +19,15 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
 .tnum{font-variant-numeric:tabular-nums}
 .wrap{display:grid;grid-template-rows:auto 1fr auto;height:100%}
 
-.bar{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);
+.bar{display:flex;align-items:center;gap:14px;padding:12px 22px;border-bottom:1px solid var(--line);background:rgba(18,21,25,.7);
   font-size:clamp(13px,1.6vw,22px);color:var(--ink2);min-height:56px}
 .pill{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border-radius:999px;
-  background:#121722;border:1px solid var(--line);white-space:nowrap}
+  background:var(--panel);border:1px solid var(--line);white-space:nowrap;font-weight:600}
 [hidden]{display:none!important}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--muted,#555)}
 .dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
 .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
-.clock{margin-left:auto;font-weight:700;color:var(--ink);font-size:clamp(20px,3vw,44px)}
+.clock{margin-left:auto;font-weight:800;color:var(--ink);font-size:clamp(20px,3vw,44px);letter-spacing:-.02em}
 .bar a,.bar button{color:var(--ink2);background:none;border:1px solid var(--line);border-radius:8px;
   padding:5px 10px;font:inherit;font-size:.8em;cursor:pointer;text-decoration:none}
 .bar a:hover,.bar button:hover{color:var(--ink)}
@@ -37,10 +37,12 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
   gap:1vh;min-width:0;transition:opacity .3s}
 .half.red{background:radial-gradient(80% 70% at 50% 45%,var(--red-bg),transparent)}
 .half.blue{background:radial-gradient(80% 70% at 50% 45%,var(--blue-bg),transparent);border-left:1px solid var(--line)}
-.name{font-weight:800;letter-spacing:.2em;font-size:clamp(18px,3.2vw,48px)}
+.name{font-weight:850;letter-spacing:.32em;font-size:clamp(16px,2.6vw,40px);padding-left:.32em}
 .red .name{color:var(--red)} .blue .name{color:var(--blue)}
-.num{font-weight:800;line-height:.9;font-size:clamp(90px,24vw,420px);letter-spacing:-.03em}
-.red .num{text-shadow:0 0 60px rgba(255,77,79,.35)} .blue .num{text-shadow:0 0 60px rgba(59,140,255,.35)}
+.num{font-weight:850;line-height:.9;font-size:clamp(90px,24vw,420px);letter-spacing:-.045em}
+.red .num{color:#fff;text-shadow:0 0 2px var(--red),0 0 80px rgba(255,75,101,.45)} .blue .num{color:#fff;text-shadow:0 0 2px var(--blue),0 0 80px rgba(79,143,255,.45)}
+.half::after{content:"";position:absolute;left:12%;right:12%;bottom:0;height:4px;border-radius:4px 4px 0 0}
+.half.red::after{background:var(--red)} .half.blue::after{background:var(--blue)}
 .num.bump{animation:bump .35s ease-out}
 @keyframes bump{0%{transform:scale(1.07)}100%{transform:scale(1)}}
 .sub{color:var(--ink2);font-size:clamp(14px,1.8vw,26px)}

@@ -7,23 +7,29 @@
 <style>
 /* No web fonts or CDNs: this runs on a laptop at a field with no internet.
    The system stack is SF Pro on a Mac, Segoe on Windows. */
+/* Watchtower's field-control look (its fms/static/style.css): polycarb-wall
+   grey, alliance red and blue, fuel yellow for focus; ink for the main
+   button. Dark follows the system, in the same hues. */
 :root{
-  --bg:#0b0e14; --bg2:#0f131b; --panel:#141923; --panel2:#1a2030; --line:#252c3b;
-  --ink:#e7ebf3; --ink2:#a9b2c3; --muted:#6f7a8f;
-  --red:#ff4d4f; --red-deep:#c9302c; --blue:#3b8cff; --blue-deep:#1f5fd1;
-  --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --accent:#e11d2a;
-  --radius:14px; --shadow:0 10px 30px rgba(0,0,0,.35);
+  --bg:#eceee9; --bg2:#f5f6f2; --panel:#ffffff; --panel2:#f5f6f2; --line:#e0e3dc;
+  --ink:#161a1f; --ink2:#2a3038; --muted:#5d656e;
+  --red:#cf1430; --red-deep:#a50f26; --blue:#0a5fbd; --blue-deep:#084c97;
+  --ok:#157045; --warn:#b4520a; --bad:#c2410c; --accent:#161a1f; --fuel:#f4c300; --fuel-soft:#fff5c7;
+  --radius:16px; --shadow:0 1px 2px rgba(17,24,39,.05),0 2px 8px rgba(17,24,39,.06);
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
-@media (prefers-color-scheme: light){
-  :root:not([data-theme="dark"]){
-    --bg:#f3f5f9; --bg2:#eef1f6; --panel:#ffffff; --panel2:#f6f8fb; --line:#e3e7ef;
-    --ink:#131722; --ink2:#434b5c; --muted:#7a8497; --shadow:0 8px 24px rgba(20,30,60,.08);
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#101317; --bg2:#161a20; --panel:#1b2027; --panel2:#222831; --line:#2e3540;
+    --ink:#eef1f4; --ink2:#c3c9d1; --muted:#8b94a0; --accent:#eef1f4;
+    --red:#ef3b55; --red-deep:#cf1430; --blue:#3b8cff; --blue-deep:#0a5fbd;
+    --ok:#34c27a; --warn:#f59e0b; --bad:#f87171; --fuel-soft:#4a3f0a;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 18px rgba(0,0,0,.35);
   }
 }
 *{box-sizing:border-box}
 html{min-height:100%;background:var(--bg)}
-body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 20% -10%,color-mix(in srgb,var(--accent) 12%,transparent),transparent) fixed,var(--bg);
+body{margin:0;min-height:100vh;background:var(--bg);
   color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",sans-serif;
   -webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
@@ -43,7 +49,7 @@ button,input,select{font:inherit;color:inherit}
 .pill.saved{color:var(--ok)} .pill.dirty{color:var(--warn)}
 /* One-click update (the Hub Counter app only: S.update is null elsewhere). */
 .updbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;border-radius:12px;
-  background:color-mix(in srgb,var(--accent) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line))}
+  background:var(--fuel-soft);border:1px solid color-mix(in srgb,var(--fuel) 55%,var(--line))}
 .updbar b{font-weight:650} .updbar .grow{flex:1} .updbar a{color:var(--accent)}
 
 /* ---------- buttons ---------- */
@@ -58,7 +64,22 @@ button,input,select{font:inherit;color:inherit}
 .btn.red:hover{background:color-mix(in srgb,var(--red) 12%,transparent)}
 .btn.blue{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 40%,var(--line))}
 .btn.blue:hover{background:color-mix(in srgb,var(--blue) 12%,transparent)}
-.btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:var(--panel)}
+.btn.primary:hover{background:var(--ink2);border-color:var(--ink2)}
+:focus-visible{outline:3px solid var(--fuel);outline-offset:2px}
+/* The setup guide: Watchtower's hub card, one step after another. */
+.camsteps{margin:0;padding:0;list-style:none;counter-reset:st}
+.camsteps>li{counter-increment:st;border-top:1px solid var(--line);padding:9px 0;min-width:0}
+.camsteps>li:first-child{border-top:0}
+.camsteps .stt{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.camsteps .stt::before{content:counter(st) ".";font-weight:800;color:var(--muted);width:16px}
+.camsteps li.done>.stt{color:var(--ok)} .camsteps li.done>.stt::before{content:"✓";color:var(--ok)}
+.camsteps li.cur{background:var(--fuel-soft);margin:0 -16px;padding:10px 16px;border-top-color:transparent}
+.camsteps li.cur+li{border-top-color:transparent}
+.camsteps .gt{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:0 7px;white-space:nowrap;font-weight:600}
+.camsteps .sx{margin:4px 0 0 22px;color:var(--ink2);font-size:12.5px}
+.camsteps .sx .row{margin-top:6px}
+.dropn{display:flex;align-items:center;gap:6px} .dropn input{width:80px}
 .btn.danger{color:var(--bad)}
 .btn.sm{height:28px;padding:0 10px;font-size:12px;border-radius:8px}
 .go{width:100%;height:54px;border-radius:12px;border:0;cursor:pointer;font-size:17px;font-weight:800;letter-spacing:.06em;color:#fff;
@@ -74,7 +95,12 @@ button,input,select{font:inherit;color:inherit}
 
 /* ---------- scoreboard ---------- */
 .board{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:12px;margin-bottom:14px}
-@media (max-width:760px){.board{grid-template-columns:1fr 1fr}.status{grid-column:1/-1}}
+@media (max-width:760px){.board{grid-template-columns:1fr 1fr}.status{grid-column:1/-1}
+  /* Phone width (390 px): the bar wraps to two rows instead of pushing
+     Save and Quit off the screen; button labels give way to their icons. */
+  .top{flex-wrap:wrap;gap:8px;padding:10px 12px}.top .file{order:9;flex-basis:100%}
+  .top .btn{padding:0 10px}.top .btn svg+*,.top .btn svg+span{display:none}
+  .wrap{padding:12px 12px 24px}}
 .score{position:relative;overflow:hidden;border-radius:var(--radius);padding:14px 18px 12px;color:#fff;min-height:108px}
 .score.red{background:linear-gradient(135deg,var(--red),var(--red-deep))}
 .score.blue{background:linear-gradient(135deg,var(--blue),var(--blue-deep))}
@@ -116,7 +142,7 @@ button,input,select{font:inherit;color:inherit}
 .hint{display:flex;align-items:center;gap:10px;margin:12px 2px 0;color:var(--ink2);min-height:22px}
 .hint b{color:var(--ink)}
 .progress{height:4px;border-radius:4px;background:var(--line);overflow:hidden;flex:1;max-width:220px;display:none}
-.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.progress i{display:block;height:100%;width:0;background:var(--fuel);transition:width .3s}
 details.log{margin-top:12px}
 details.log summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;list-style:none;display:inline-flex;align-items:center;gap:6px}
 details.log summary::before{content:"";width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:.15s}
@@ -158,17 +184,17 @@ details.log summary::-webkit-details-marker{display:none}
 .field.full{grid-column:1/-1}
 .field span{font-size:11.5px;font-weight:600;color:var(--muted)}
 .input{height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:var(--bg2);outline:none;transition:.12s;width:100%}
-.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.input:focus{border-color:var(--ink2);box-shadow:0 0 0 3px var(--fuel-soft)}
 .input.big{font-weight:700}
 .adv{margin-top:6px}
 .adv summary{cursor:pointer;color:var(--ink2);font-size:12.5px;font-weight:600}
 .slider{display:flex;align-items:center;gap:10px}
-input[type=range]{flex:1;accent-color:var(--accent)}
+input[type=range]{flex:1;accent-color:var(--ink2)}
 .switch{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;cursor:pointer;user-select:none}
 .switch input{display:none}
 .switch i{width:38px;height:22px;border-radius:999px;background:var(--line);position:relative;transition:.15s;flex:none}
 .switch i::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-.switch input:checked+i{background:var(--accent)} .switch input:checked+i::after{left:19px}
+.switch input:checked+i{background:var(--ok)} .switch input:checked+i::after{left:19px}
 .seg{display:inline-flex;padding:3px;border-radius:10px;background:var(--bg2);border:1px solid var(--line)}
 .seg button{border:0;background:none;padding:5px 12px;border-radius:7px;font-size:12px;font-weight:600;color:var(--ink2);cursor:pointer}
 .seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.25)}
@@ -194,6 +220,183 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .toast{min-width:260px;max-width:420px;padding:11px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line);
   box-shadow:var(--shadow);font-size:13px;display:flex;gap:10px;align-items:flex-start;animation:rise .2s ease}
 .toast .dot{margin-top:5px}
+
+/* ======================================================================
+   Studio layout (2026-11). One screen, no page scroll on a laptop: the
+   camera on a dark canvas with its drawing tools floating over it, an
+   inspector on the right (Set up / Run / Test), the live score and the
+   Start button always in the top bar. Fuel yellow is the one action colour;
+   red and blue only ever mean the alliances. Overrides the rules above.
+   ====================================================================== */
+:root{
+  --panel:#ffffff; --panel2:#f4f5f7; --panel3:#eceef1; --line:#e6e8eb; --line-strong:#d3d7dc;
+  --ink:#0f1216; --ink2:#3a414b; --muted:#6b7480; --canvas:#0d0f12;
+  --red:#d8173a; --blue:#1463d6; --ok:#118a50; --warn:#b45309; --bad:#c2410c;
+  --fuel:#f5c400; --fuel-ink:#1a1500; --fuel-soft:#fff7d1;
+  --shadow-s:0 1px 2px rgba(15,18,22,.06); --shadow-m:0 4px 16px rgba(15,18,22,.08),0 1px 3px rgba(15,18,22,.06);
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --panel:#16191d; --panel2:#1d2126; --panel3:#252a30; --line:#272c33; --line-strong:#353b44;
+  --ink:#eceef1; --ink2:#c0c6ce; --muted:#8a939e; --canvas:#08090b;
+  --red:#ff4762; --blue:#4c8dff; --ok:#3ccf87; --warn:#f0a43a; --bad:#ff7a59; --fuel-soft:#2e2808;
+  --shadow-s:0 1px 2px rgba(0,0,0,.4); --shadow-m:0 8px 24px rgba(0,0,0,.45);
+}}
+html,body{height:100%}
+body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--panel);font-size:13.5px;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI Variable","Segoe UI",Roboto,sans-serif}
+/* ---- top bar */
+.top{position:relative;display:flex;align-items:center;gap:14px;
+  height:56px;padding:0 14px 0 16px;background:var(--panel);border-bottom:1px solid var(--line);backdrop-filter:none}
+.brand{gap:9px;font-size:14px;font-weight:720;letter-spacing:-.01em}
+.logo{width:28px;height:28px;border-radius:8px;background:var(--fuel);box-shadow:none}
+.logo svg{width:17px;height:17px;filter:invert(1) brightness(.15)}
+.file{flex:1 1 0;gap:8px;color:var(--muted);font-size:12.5px;min-width:0}
+.file .name{max-width:28vw}
+.pill{height:20px;padding:0 8px;font-size:11px;font-weight:650;border:0;background:var(--panel2)}
+.pill.dirty{color:var(--warn)} .pill.saved{color:var(--ok)}
+.scorecap{display:flex;align-items:stretch;height:38px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+.sc{display:flex;align-items:center;gap:9px;padding:0 14px;font-weight:700}
+.sc b{font-size:10.5px;letter-spacing:.14em;opacity:.8}
+.sc .num{font-size:21px;font-weight:800;letter-spacing:-.02em;min-width:2ch;text-align:center}
+.sc.red{color:var(--red)} .sc.blue{color:var(--blue)}
+.sc.mid{padding:0 14px;font-size:12.5px;font-weight:650;color:var(--ink2);border-left:1px solid var(--line);border-right:1px solid var(--line);background:var(--panel);min-width:120px;justify-content:center}
+.scorecap{flex:none}
+.acts a.btn{text-decoration:none}
+.acts{flex:1 1 0;min-width:max-content;display:flex;align-items:center;justify-content:flex-end;gap:4px}
+.btn{height:34px;padding:0 12px;border-radius:10px;font-size:13px;font-weight:620;border:1px solid var(--line-strong);background:var(--panel);color:var(--ink);box-shadow:var(--shadow-s)}
+.btn:hover{background:var(--panel2);border-color:var(--line-strong)}
+.btn.ghost{border-color:transparent;background:transparent;box-shadow:none;color:var(--ink2)}
+.btn.ghost:hover{background:var(--panel2);color:var(--ink)}
+.btn.sm{height:30px;padding:0 11px;font-size:12.5px;border-radius:9px}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:var(--panel);box-shadow:none}
+.btn.primary:hover{background:var(--ink2);border-color:var(--ink2)}
+.btn.red{color:var(--red);background:color-mix(in srgb,var(--red) 7%,var(--panel));border-color:color-mix(in srgb,var(--red) 35%,var(--line))}
+.btn.blue{color:var(--blue);background:color-mix(in srgb,var(--blue) 7%,var(--panel));border-color:color-mix(in srgb,var(--blue) 35%,var(--line))}
+.btn svg{width:15px;height:15px}
+.gobtn{height:36px;min-width:92px;margin-left:8px;padding:0 18px;border:0;border-radius:10px;cursor:pointer;font-weight:780;font-size:13.5px;
+  letter-spacing:.02em;background:var(--fuel);color:var(--fuel-ink);box-shadow:0 1px 0 rgba(0,0,0,.08),0 4px 14px color-mix(in srgb,var(--fuel) 35%,transparent);transition:transform .08s,filter .15s}
+.gobtn:hover{filter:brightness(1.04)} .gobtn:active{transform:translateY(1px)}
+.gobtn.stop{background:var(--red);color:#fff;box-shadow:0 4px 14px color-mix(in srgb,var(--red) 35%,transparent)}
+.gobtn.wait{background:var(--panel2);color:var(--muted);box-shadow:none;border:1px solid var(--line)}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--fuel) 80%,transparent);outline-offset:2px}
+/* ---- studio */
+.studio{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 392px}
+.canvas{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--canvas);
+  background-image:radial-gradient(rgba(255,255,255,.045) 1px,transparent 1px);background-size:22px 22px}
+.stage{flex:1;min-height:0;display:grid;place-items:center;padding:20px 20px 84px;background:transparent;border:0;border-radius:0;box-shadow:none;overflow:hidden}
+.pic{border-radius:10px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.06),0 20px 60px rgba(0,0,0,.55)}
+.pic img{max-width:100%;max-height:calc(100vh - 56px - 104px)}
+.badges{left:20px;top:18px}
+.badge{background:rgba(22,25,29,.78);color:#e9ecef;border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(10px)}
+.banner{top:18px;background:rgba(22,25,29,.86);color:#f1f3f5;border:1px solid rgba(255,255,255,.1);border-radius:12px;backdrop-filter:blur(12px)}
+.empty{color:#8b939d;padding:0}.empty h3{color:#eef0f2;font-size:17px}
+.empty svg{opacity:.35}
+.toolbar{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:2px;padding:5px;
+  border-radius:14px;background:rgba(24,27,32,.82);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(16px) saturate(1.3);
+  -webkit-backdrop-filter:blur(16px) saturate(1.3);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.tb{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:#e7eaee;
+  font-weight:620;font-size:13px;cursor:pointer}
+.tb:hover{background:rgba(255,255,255,.08)} .tb svg{width:15px;height:15px}
+.tb.red svg{color:#ff5a72} .tb.blue svg{color:#5c97ff}
+.tb.on{background:rgba(255,255,255,.14)}
+.tb .sw{width:12px;height:12px;border-radius:4px;background:#ff2bd6;box-shadow:0 0 0 2px rgba(255,43,214,.25)}
+.toolbar .sep{width:1px;height:20px;background:rgba(255,255,255,.12);margin:0 4px}
+.hint{position:absolute;left:50%;bottom:74px;transform:translateX(-50%);z-index:4;margin:0;padding:8px 14px;border-radius:10px;max-width:min(640px,90%);
+  background:rgba(24,27,32,.86);color:#dfe3e8;font-size:12.5px;border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(12px)}
+.hint b{color:#fff}
+.hint:has(#hint:empty):has(.progress:not([style*="block"])){display:none}
+.updbar{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:5;margin:0;border-radius:12px;box-shadow:var(--shadow-m);
+  background:var(--panel);border:1px solid color-mix(in srgb,var(--fuel) 60%,var(--line))}
+/* ---- inspector */
+.inspector{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-left:1px solid var(--line)}
+.inspector .tabs{display:flex;gap:2px;margin:12px 14px 4px;padding:3px;border-radius:11px;background:var(--panel2);border:1px solid var(--line)}
+.tabs button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;height:32px;border:0;border-radius:8px;background:transparent;
+  font-weight:650;font-size:13px;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
+.tabs button:hover{color:var(--ink)}
+.tabs button.on{background:var(--panel);color:var(--ink);box-shadow:var(--shadow-s),0 0 0 1px var(--line)}
+.tn{min-width:18px;height:18px;padding:0 5px;border-radius:99px;display:inline-grid;place-items:center;font-size:10.5px;font-weight:800;background:var(--fuel);color:var(--fuel-ink)}
+.tn.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.tdot{width:7px;height:7px;border-radius:50%;background:var(--line-strong)}
+.tdot.on{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+.inspector .steps{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:10px 14px 18px;scrollbar-gutter:stable}
+.steps>[data-tab]{display:none} .steps>[data-tab].show{display:block}
+.card{border-radius:var(--r);border:1px solid var(--line);background:var(--panel);box-shadow:none}
+.step{padding:0;overflow:hidden}
+.step h2{margin:0;padding:13px 14px;font-size:13.5px;font-weight:700;gap:10px;letter-spacing:-.005em}
+.step.acc h2{cursor:pointer;user-select:none;border-radius:var(--r)}
+.step.acc h2:hover{background:var(--panel2)}
+.step h2 .n{width:22px;height:22px;font-size:11px;font-weight:800;background:var(--panel2);border:1px solid var(--line-strong);color:var(--ink2)}
+.step.done h2 .n{background:color-mix(in srgb,var(--ok) 14%,transparent);border-color:transparent;color:var(--ok)}
+.step:not(.acc) h2 .n{display:none}
+.step .sum{margin-left:auto;font-size:12px;font-weight:550;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%}
+.step .chev{width:15px;height:15px;flex:none;color:var(--muted);transition:transform .2s}
+.step.acc.open .chev{transform:rotate(180deg)}
+.step .sbody{padding:0 14px 14px}
+.step.acc:not(.open) .sbody{display:none}
+.step.acc.open{border-color:var(--line-strong);box-shadow:var(--shadow-m)}
+.runstat{padding:12px 14px;border-radius:var(--r);background:var(--panel2)}
+.runstat .sub{font-size:12.5px;color:var(--ink2)}
+/* the Next card */
+.next{position:relative;padding:14px;border-color:color-mix(in srgb,var(--fuel) 50%,var(--line));
+  background:linear-gradient(180deg,color-mix(in srgb,var(--fuel-soft) 85%,var(--panel)),var(--panel));box-shadow:var(--shadow-s)}
+.nexthead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.nexthead .bar{flex:1;height:5px;border-radius:99px;background:color-mix(in srgb,var(--ink) 9%,transparent);overflow:hidden}
+.nexthead .bar i{display:block;height:100%;background:var(--fuel);border-radius:99px;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.camsteps{margin:0;padding:0;list-style:none}
+.next .camsteps>li{border:0;padding:0;margin:0;background:none}
+.next .camsteps .stt{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.next .camsteps .stt::before{display:none}
+.next .camsteps .stt b{font-size:16.5px;font-weight:760;letter-spacing:-.02em;color:var(--ink)}
+.next .camsteps .gt{font-size:11px;font-weight:650;color:var(--muted);border:1px solid var(--line-strong);border-radius:99px;padding:1px 8px;background:var(--panel)}
+.next .camsteps .sx{margin:7px 0 0;font-size:13px;line-height:1.55;color:var(--ink2)}
+.next .camsteps .sx .row{margin-top:12px;gap:6px}
+.next .ready .stt b{color:var(--ok)}
+.next .camsteps>li.trail{display:flex;align-items:center;gap:0;margin-top:14px;padding-top:12px;border-top:1px solid color-mix(in srgb,var(--ink) 8%,transparent)}
+.pip{position:relative;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:800;flex:none;
+  background:var(--panel);border:1.5px solid var(--line-strong);color:var(--muted)}
+.pip+.pip{margin-left:14px}
+.pip+.pip::before{content:"";position:absolute;right:100%;top:50%;width:14px;height:1.5px;background:var(--line-strong)}
+.pip.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.pip.done+.pip::before{background:var(--ok)}
+.pip.opt:not(.done){border-style:dashed}
+.pip.cur{background:var(--ink);border-color:var(--ink);color:var(--panel);box-shadow:0 0 0 4px color-mix(in srgb,var(--fuel) 45%,transparent)}
+.dropn{display:flex;align-items:center;gap:6px}.dropn input{width:78px}
+/* fields, lists, switches */
+.item{border-radius:10px;padding:9px 11px;background:var(--panel);border-color:var(--line)}
+.item:hover{border-color:var(--line-strong)}
+.item.sel{border-color:var(--ink);background:var(--panel2);box-shadow:inset 0 0 0 1px var(--ink)}
+.input{height:36px;border-radius:9px;border:1px solid var(--line-strong);background:var(--panel);font-size:13.5px}
+.input:focus{border-color:var(--ink2);box-shadow:0 0 0 3px color-mix(in srgb,var(--fuel) 35%,transparent)}
+.field span{font-size:11.5px;font-weight:650;color:var(--muted)}
+.adv{border-top:1px solid var(--line);padding-top:10px;margin-top:12px}
+.adv summary{font-weight:650;font-size:12.5px;color:var(--ink2)}
+.switch input:checked+i{background:var(--ink)}
+input[type=range]{accent-color:var(--ink)}
+.go{height:52px;border-radius:12px;font-size:15px;letter-spacing:.1em;background:var(--fuel);color:var(--fuel-ink);box-shadow:0 6px 18px color-mix(in srgb,var(--fuel) 35%,transparent)}
+.go.stop{background:var(--red);color:#fff}
+.score{display:none}
+.log{margin:0;padding:8px 14px 10px;border-top:1px solid var(--line)}
+.log summary{font-size:10.5px;letter-spacing:.1em;color:var(--muted)}
+.log #log{max-height:160px}
+.toasts{bottom:18px;right:410px}
+/* ---- narrow screens: the page scrolls, the canvas on top */
+@media (max-width:980px){
+  body{height:auto;overflow:auto}
+  .top{flex-wrap:wrap;height:auto;padding:10px 12px;row-gap:8px}
+  .acts{flex:1 1 auto}
+  .top .file{display:none}
+  .scorecap{order:5;flex:1 1 100%}.sc.mid{flex:1}
+  .acts .btn span,.acts .btn.ghost:not(#quitbtn){display:none}
+  .studio{display:block}
+  .canvas{min-height:58vw}
+  .stage{padding:14px 14px 72px}
+  .pic img{max-height:none}
+  .inspector{border-left:0;border-top:1px solid var(--line)}
+  .inspector .steps{overflow:visible}
+  .toasts{right:12px}
+}
 </style>
 </head>
 <body>
@@ -215,37 +418,41 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   <symbol id="i-hub" viewBox="0 0 24 24"><path d="M5 20l2.6-9h8.8L19 20z" fill="rgba(255,255,255,.18)" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M7.6 11h8.8" stroke="#fff" stroke-width="1.8"/><circle cx="12" cy="6" r="3.2" fill="#facc15"/></symbol>
 </svg>
 
-<div class="top">
-  <div class="brand"><span class="logo"><svg><use href="#i-hub"/></svg></span>Hub Counter</div>
+<header class="top">
+  <div class="brand"><span class="logo"><svg><use href="#i-hub"/></svg></span><span class="bname">Hub Counter</span></div>
   <div class="file"><span class="name" id="path">New setup</span><span class="pill dirty" id="savestate">Not saved</span></div>
-  <a class="btn ghost" href="/board" target="_blank" rel="noopener" style="text-decoration:none" title="Full-screen live scoreboard for a TV or projector">Scoreboard ↗</a>
-  <button class="btn ghost" id="sharebtn" onclick="shareDialog()" title="Open this page on other devices on the Wi-Fi, behind a PIN"><svg><use href="#i-wifi"/></svg><span id="sharetxt">Share</span></button>
-  <button class="btn ghost" onclick="openSetup()"><svg><use href="#i-open"/></svg>Open</button>
-  <button class="btn" onclick="save()"><svg><use href="#i-save"/></svg>Save</button>
-  <button class="btn ghost" id="quitbtn" onclick="quitApp()" title="Stop the counter and close it">Quit</button>
-</div>
+  <div class="scorecap" title="What the field has been sent">
+    <span class="sc red"><b>RED</b><span class="num tnum" id="red">0</span></span>
+    <span class="sc mid"><span class="dot" id="sdot"></span><span id="stext">Stopped</span></span>
+    <span class="sc blue"><span class="num tnum" id="blue">0</span><b>BLUE</b></span>
+  </div>
+  <div class="acts">
+    <a class="btn ghost" href="/board" target="_blank" rel="noopener" title="Full-screen live scoreboard for a TV or projector">Scoreboard ↗</a>
+    <button class="btn ghost" id="sharebtn" onclick="shareDialog()" title="Open this page on other devices on the Wi-Fi, behind a PIN"><svg><use href="#i-wifi"/></svg><span id="sharetxt">Share</span></button>
+    <button class="btn ghost" onclick="openSetup()" title="Open a setup file"><svg><use href="#i-open"/></svg><span>Open</span></button>
+    <button class="btn" onclick="save()"><svg><use href="#i-save"/></svg><span>Save</span></button>
+    <button class="btn ghost" id="quitbtn" onclick="quitApp()" title="Stop the counter and close it">Quit</button>
+    <button class="gobtn" id="topgo" onclick="S&&S.running?stop():start()">Start</button>
+  </div>
+</header>
 
-<div class="wrap">
-  <div class="main">
+<div class="studio">
+  <section class="canvas">
     <div class="updbar" id="updbar" style="display:none"><span>Update available: <b id="updver"></b>
       <span class="muted" id="updnote"></span></span><span class="grow"></span>
       <a id="updnotes" target="_blank" rel="noopener">What's new</a>
       <button class="btn sm primary" id="updbtn" onclick="installUpdate()">Update</button></div>
-    <div class="board">
-      <div class="score red"><div class="lbl">RED HUB</div><div class="num tnum" id="red">0</div></div>
-      <div class="score blue"><div class="lbl">BLUE HUB</div><div class="num tnum" id="blue">0</div></div>
-      <div class="card status">
-        <div class="state"><span class="dot" id="sdot"></span><span id="stext">Stopped</span></div>
-        <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
-        <div class="chips" id="schips"></div>
-        <div class="chips" id="xcheck"></div>
-        <div class="chips" id="pchip"></div>
-      </div>
-    </div>
-
     <div class="stage" id="stage">
       <div class="badges" id="badges"></div>
       <div class="banner" id="banner"></div>
+      <div class="toolbar" id="toolbar">
+        <button class="tb red" onclick="draw('red')" title="Draw the red hub's outline"><svg><use href="#i-pen"/></svg>Red</button>
+        <button class="tb blue" onclick="draw('blue')" title="Draw the blue hub's outline"><svg><use href="#i-pen"/></svg>Blue</button>
+        <span class="sep"></span>
+        <button class="tb" onclick="measure()" title="Measure a ball (still balls, 5 s): the ruler while drawing"><svg><use href="#i-ruler"/></svg>Measure</button>
+        <button class="tb" id="tbfuel" onclick="$('showfuel').checked=!$('showfuel').checked;$('showfuel').dispatchEvent(new Event('change'))" title="Paint what counts as fuel magenta"><span class="sw"></span>Fuel</button>
+        <button class="tb" onclick="grab()" title="Take a new picture"><svg><use href="#i-image"/></svg></button>
+      </div>
       <div class="empty" id="empty">
         <svg><use href="#i-cam"/></svg>
         <h3>No picture yet</h3>
@@ -254,12 +461,26 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <div class="pic" id="pic" style="display:none"><img id="img" alt=""><canvas id="cv"></canvas></div>
     </div>
     <div class="hint"><span id="hint"></span><div class="progress" id="prog"><i></i></div></div>
-    <details class="log"><summary>Activity</summary><div id="log"></div></details>
-  </div>
+  </section>
+  <aside class="inspector">
+    <nav class="tabs" id="tabs" role="tablist">
+      <button data-tab="setup" role="tab" onclick="setTab('setup')"><span class="tn" id="tabsetupn"></span>Set up</button>
+      <button data-tab="run" role="tab" onclick="setTab('run')"><span class="tdot" id="tabrundot"></span>Run</button>
+      <button data-tab="test" role="tab" onclick="setTab('test')">Test</button>
+    </nav>
+    <div class="steps">
+    <section class="runstat" data-tab="run">
+      <div class="sub" id="ssub">Counts are sent to the field system once you press Start.</div>
+      <div class="chips" id="schips"></div><div class="chips" id="xcheck"></div><div class="chips" id="pchip"></div>
+    </section>
 
-  <div class="steps">
-    <section class="card step" id="st1">
-      <h2><span class="n">1</span>Cameras</h2>
+    <section class="card next" id="guide" data-tab="setup">
+      <div class="nexthead"><span class="eyebrow" id="guidecam">Setup</span><span class="bar"><i id="guidebar"></i></span><span class="muted tnum" id="guidecount"></span></div>
+      <ol class="camsteps" id="guidesteps"></ol>
+    </section>
+    <section class="card step acc" id="st1" data-tab="setup">
+      <h2 onclick="toggleStep(1)"><span class="n">1</span>Cameras<span class="sum" id="sum1"></span><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></h2>
+      <div class="sbody">
       <div class="list" id="cams"></div>
       <div class="row">
         <button class="btn" onclick="findCams()"><svg><use href="#i-search"/></svg>Find cameras</button>
@@ -310,10 +531,12 @@ input[type=range]{flex:1;accent-color:var(--accent)}
           <span class="muted" id="seekwrap">at <input class="input" id="seek" type="number" min="0" style="width:64px;height:28px;display:inline-block"> s</span>
         </div>
       </div>
+      </div>
     </section>
 
-    <section class="card step" id="st2">
-      <h2><span class="n">2</span>Where to count</h2>
+    <section class="card step acc" id="st2" data-tab="setup">
+      <h2 onclick="toggleStep(2)"><span class="n">2</span>Where to count<span class="sum" id="sum2"></span><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></h2>
+      <div class="sbody">
       <div class="list" id="zones"></div>
       <div class="muted" style="margin:2px 0 6px"><b style="color:var(--ink)">Outline around the hub's opening</b> — recommended. Put its top edge 3-4 ball widths above the hood, where a falling ball is still clear of the hood's mesh.</div>
       <div class="row">
@@ -321,7 +544,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <button class="btn blue" onclick="draw('blue')"><svg><use href="#i-pen"/></svg>Blue outline</button>
       </div>
       <details class="adv" id="exitbox"><summary>Exit line <span class="muted">(untested)</span></summary>
-        <div class="muted" style="margin:10px 0 6px">Balls pile up at the exit and stop crossing one by one. Only for a camera aimed right at the chute, and check it with 20 balls. A hub with both an outline and an exit line takes the larger of the two, never their total: they count the same balls.</div>
+        <div class="muted" style="margin:10px 0 6px">With the fuel model on (the default) the exit line is counted by the model, which follows each ball through it; colour alone missed balls through exits at the scrimmage. Balls can still pile up at an exit and stop crossing one by one. Only for a camera aimed right at the chute, and check it with 20 balls. A hub with both an outline and an exit line takes the larger of the two, never their total: they count the same balls.</div>
         <div class="row">
           <button class="btn sm red" onclick="draw('red','exit')"><svg><use href="#i-exit"/></svg>Red exit</button>
           <button class="btn sm blue" onclick="draw('blue','exit')"><svg><use href="#i-exit"/></svg>Blue exit</button>
@@ -341,32 +564,38 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="comb" id="conf_blue"><span class="muted">Blue: exits confirm entries after</span><input class="input tnum" id="confirm_blue" type="number" min="0" max="10" step="0.5" style="width:84px" placeholder="off" onchange="setConfirm('blue',this.value)"><span class="muted">s</span></div>
         <p class="muted" style="margin:8px 0 0">An entry that has not come out of an exit within the delay is taken back. Leave it off: step 5's check turns it on when a hand-counted recording shows it clearly closer.</p>
       </div>
+      </div>
     </section>
 
-    <section class="card step" id="st3">
-      <h2><span class="n">3</span>Ball size</h2>
-      <div class="row" style="align-items:flex-end">
-        <label class="field" style="flex:1"><span>One ball, in pixels</span><input class="input big tnum" id="f_ball_area" type="number" min="0" placeholder="not measured"></label>
-        <button class="btn primary" onclick="measure()"><svg><use href="#i-ruler"/></svg>Measure</button>
+    <section class="card step acc" id="st3" data-tab="setup">
+      <h2 onclick="toggleStep(3)"><span class="n">3</span>Ball size<span class="sum" id="sum3"></span><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></h2>
+      <div class="sbody">
+      <div id="dropbox"></div>
+      <div class="row" style="align-items:flex-end;margin-top:10px">
+        <label class="field" style="flex:1"><span>One ball, in pixels <span class="muted" id="ballfrom"></span></span><input class="input big tnum" id="f_ball_area" type="number" min="0" placeholder="drop test not done"></label>
+        <button class="btn" onclick="measure()"><svg><use href="#i-ruler"/></svg>Measure</button>
       </div>
-      <p class="muted" style="margin:8px 0 0">Put a few balls near the hub, apart from each other, then measure (5 s). Once measured, a ruler of ball widths follows the pointer while you draw an outline.</p>
+      <p class="muted" style="margin:8px 0 0">The size the hub counts with comes from the <b>drop test</b>: a measured size was ~9x off at Watchtower's first event. <b>Measure</b> (still balls, 5 s, works before any outline) only gives the ruler of ball widths for drawing outlines, and a check on the drop test.</p>
       <details class="adv"><summary>Calibration <span class="muted" id="calstate">(standard)</span></summary>
         <p class="muted" style="margin:10px 0 0">Leave these alone: step 5's <b>Check a recording</b> sets them when a hand-counted recording shows a clearly better setting.</p>
         <div class="slider" style="margin-top:10px"><span class="muted" style="width:92px">Blur correction</span><input type="range" id="f_blur" min="0" max="1" step="0.1"><b class="tnum" id="blurv">0</b></div>
         <label class="switch"><span>Ignore yellow that stays still</span><input type="checkbox" id="f_remove_static"><i></i></label>
       </details>
       <details class="adv" id="modelbox"><summary>Fuel model <span class="muted" id="modelstate">(off)</span></summary>
-        <p class="muted" style="margin:10px 0 8px">Blends a trained model's count with the colour count. On four Einstein matches: 6.8% error against 10.1% for colour alone; on the Central Valley broadcast it was worse (34.5%), so check it on your camera. Fast enough on Apple silicon or an NVIDIA GPU; on a slower computer it turns itself off after about 10 s and counts by colour.</p>
+        <p class="muted" style="margin:10px 0 8px">On by default: the built-in model is the primary counter, on this computer's GPU when it has one (else the CPU). The colour counter runs underneath as the backup and takes over by itself if the model cannot keep up or fails. Model's share 1.0 is the model alone; lower it only to blend with colour.</p>
         <div class="row"><button class="btn sm" id="modelbuiltin" onclick="setModel('built-in')"><svg><use href="#i-tune"/></svg>Use built-in model</button>
           <button class="btn sm" onclick="pickFile('model')"><svg><use href="#i-open"/></svg><span id="modelpick">Choose model (.pt)</span></button>
           <button class="btn sm" id="modeloff" onclick="setModel('')">Turn off</button></div>
         <div class="slider" id="mwrow" style="margin-top:10px"><span class="muted" style="width:92px">Model's share</span><input type="range" id="f_model_weight" min="0" max="1" step="0.1"><b class="tnum" id="mwv">0.5</b></div>
       </details>
+      </div>
     </section>
 
-    <section class="card step" id="st4">
-      <h2><span class="n">4</span>Run</h2>
-      <label class="field"><span>Send counts to <span class="muted">(bioarena host:port, or Watchtower https://KEY@watchtower.systemoverload.org or http://KEY@host:8000; both, separated by a comma)</span></span><input class="input tnum" id="target" value="10.0.100.5:8411" oninput="this.dataset.edited=1"></label>
+    <section class="card step" id="st4" data-tab="run">
+      <h2><span class="n">4</span>Field link</h2>
+      <div class="sbody">
+      <label class="field"><span>Send counts to</span><input class="input tnum" id="target" value="10.0.100.5:8411" title="bioarena host:port, Watchtower http://KEY@host:8000, or both separated by a comma" oninput="this.dataset.edited=1"></label>
+      <p class="muted" style="margin:6px 0 10px">bioarena as <b>host:port</b>, Watchtower as <b>http://KEY@host:8000</b>, or both with a comma between.</p>
       <label class="switch"><span>Practice with a test receiver</span><input type="checkbox" id="practice"><i></i></label>
       <label class="switch"><span>Main box: also send a partner box's counts <span class="muted">(one camera per box)</span></span><input type="checkbox" id="partner" onchange="renderPartnerHint()"><i></i></label>
       <div id="partnerbox" style="display:none;margin:-2px 0 8px">
@@ -380,10 +609,12 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <button class="btn" id="lockbtn" onclick="toggleLock()" style="display:none;margin-top:8px"></button>
         <p class="muted" id="lockhint" style="margin:6px 0 0;display:none"></p>
       </div>
+      </div>
     </section>
 
-    <section class="card step" id="st5">
-      <h2><span class="n">5</span>Test</h2>
+    <section class="card step" id="st5" data-tab="test">
+      <h2><span class="n">5</span>Check the counter</h2>
+      <div class="sbody">
       <p class="muted" style="margin:0 0 10px">Check the counter on your own cameras before trusting it with a match.</p>
       <div class="field"><span>Ball test <span class="muted">(bioarena's acceptance test: drop balls in by hand, then compare; zero difference passes)</span></span>
         <div class="row" style="margin-top:6px"><button class="btn" id="bt_start" onclick="ballTestStart()">Start ball test</button><button class="btn" id="bt_check" onclick="ballTestCheck()" style="display:none">Check</button></div>
@@ -395,8 +626,11 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="muted" id="rec_live" style="margin-top:6px;word-break:break-all"></div></div>
       <div class="field" style="margin-top:12px"><span>Check a recording <span class="muted">(every way of counting, and the calibration, against your hand count; offers only changes that are clearly better)</span></span>
         <div class="row" style="margin-top:6px"><button class="btn" onclick="pickFile('test')"><svg><use href="#i-film"/></svg>Check a recording against a hand count</button></div></div>
+      </div>
     </section>
-  </div>
+    </div>
+    <details class="log"><summary>Activity</summary><div id="log"></div></details>
+  </aside>
 </div>
 
 <div class="scrim" id="scrim"><div class="modal"><header id="mTitle"></header><div class="body" id="mBody"></div><footer id="mFoot"></footer></div></div>
@@ -404,7 +638,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
 <script>
 const $=id=>document.getElementById(id);
-const COL={red:"#ff4d4f",blue:"#3b8cff"};
+const COL={red:"#e11d48",blue:"#2563eb"};
 let S=null,cur=null,drawing=null,logId=0,lastPic="",jobSeen=0,pickMode=null,lastCounts={red:0,blue:0},savedCfg=null;
 
 /* ---------- plumbing ---------- */
@@ -448,7 +682,7 @@ async function refresh(){
   const dirty=JSON.stringify(S.cfg)!==savedCfg||!S.path;
   $("savestate").className="pill "+(dirty?"dirty":"saved");$("savestate").textContent=dirty?"Not saved":"Saved";
   if(!cam()&&S.cfg.cameras.length)cur=S.cfg.cameras[0].name;
-  renderCams();renderZones();renderZoneOptions();renderAlign();renderSteps();renderLive();renderModel();renderUpdate();handleJob();
+  renderCams();renderZones();renderZoneOptions();renderAlign();renderSteps();renderLive();renderModel();renderUpdate();renderDrop();renderGuide();renderTab();handleJob();
   autoPictures();
   const pic=cur&&S.pictures[cur];
   if(pic){const key=cur+":"+pic+":"+(S.running?Date.now():S.job.id);if(S.running||key!==lastPic){lastPic=key;loadImg();}}
@@ -472,6 +706,8 @@ function renderCams(){const L=$("cams");L.innerHTML="";
   for(const h of["red","blue"]){const e=$("confirm_"+h);if(e&&document.activeElement!==e)e.value=(S.cfg.confirm||{})[h]||"";}
   document.querySelectorAll(".seg").forEach(g=>{const v=S.cfg.combine[g.dataset.hub]||"sum";g.querySelectorAll("button").forEach(b=>b.className=b.textContent===v?"on":"");});
   $("start").style.display=S.running?"none":"";$("stop").style.display=S.running?"":"none";
+  {const g=$("topgo"),ready=!S.problems.length;g.textContent=S.running?"Stop":"Start";g.className="gobtn"+(S.running?" stop":ready?"":" wait");
+   g.title=S.running?"Stop counting":ready?"Start counting and sending to the field":"Not ready: "+S.problems.join(" ");}
   $("lockbtn").style.display=$("lockhint").style.display=S.running?"":"none";
   $("lockbtn").textContent=S.locked?"Unlock the setup":"Lock the setup";
   $("lockhint").textContent=S.locked?"Setup locked while counting: outlines, cameras and settings cannot be changed by a stray click.":"Setup unlocked: changes apply at the next Start.";}
@@ -516,7 +752,7 @@ for(const k of IMG_NUM)$("i_"+k).addEventListener("change",e=>setImage({[k]:e.ta
 $("i_fourcc").addEventListener("change",e=>setImage({fourcc:e.target.value||null}));
 for(const k of GATE){$("c_"+k).addEventListener("input",e=>$("c_"+k+"v").textContent=e.target.value);
   $("c_"+k).addEventListener("change",()=>{if(!$("showfuel").checked)$("showfuel").checked=true;const o={};for(const j of GATE)o[j]=+$("c_"+j).value;setColour({colour:o});});}
-$("showfuel").addEventListener("change",()=>{lastPic="";if(S.pictures[cur])loadImg();});
+$("showfuel").addEventListener("change",()=>{lastPic="";$("tbfuel").classList.toggle("on",$("showfuel").checked);if(S.pictures[cur])loadImg();});
 function resetColour(){setColour({colour_reset:true});}
 async function applyPreset(id){if(!cur)return;if(!id){refresh();return;}
   try{await api("apply_preset",{camera:cur,preset:id});toast("Preset applied");}catch(e){}
@@ -531,14 +767,15 @@ async function deletePreset(){const c=cam(),p=c&&presetOf(c);if(!p||p.builtin)re
   if(!ok)return;try{await api("delete_preset",{preset:p.id});toast("Preset deleted");}catch(e){}refresh();}
 /* On every refresh, not only in fillForm: turning the model on or off left
    the label at "(off)" until another camera was picked. */
-function renderModel(){const c=cam();const m=c&&c.model||null;$("modelstate").textContent=m?"("+m.weights.split(/[\/\\]/).pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.pt)";
+function renderModel(){const c=cam();const m=c&&c.model||null;$("modelstate").textContent=m?"("+m.weights.split(/[\/\\]/).pop()+")":"(off)";$("modelpick").textContent=m?"Change model":"Choose model (.onnx/.pt)";
   $("modelbuiltin").style.display=S.builtin_model&&!(m&&m.weights==="built-in")?"":"none";$("modeloff").style.display=m?"":"none";$("mwrow").style.display=m?"":"none";}
 function renderZones(){const L=$("zones");L.innerHTML="";const c=cam();
   if(!c||!c.zones.length){L.innerHTML=`<div class="muted" style="padding:2px 2px 4px">Nothing to count yet. Draw an outline around each hub's opening.</div>`;return;}
   for(const z of c.zones){const n=S.live.zones[z.name];const d=document.createElement("div");d.className="item";const ex=!!z.line;
     const pt=(S.live.parts||{})[z.name];const both=pt?` (colour ${pt.colour} · model ${pt.model})`:"";
-    d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in")+both:(ex?"exit line":z.outline.length+" corners")}</span><button class="x" title="Delete">✕</button>`;
-    d.querySelector(".x").onclick=()=>api("delete_zone",{camera:cur,zone:z.name}).then(refresh);L.appendChild(d);}}
+    d.innerHTML=`<span class="tag ${z.hub}">${z.hub.toUpperCase()}</span><span class="t">${esc(z.name)}</span><span class="s tnum">${n!==undefined?n+(ex?" out":" in")+both:(ex?"exit line":z.outline.length+" corners")}${z.colour?" · own colour":""}</span><button class="x c" title="This hub's own fuel colour" style="opacity:1">🎨</button><button class="x" title="Delete">✕</button>`;
+    d.querySelector(".x.c").onclick=()=>zoneColour(z.name);
+    d.querySelector(".x:not(.c)").onclick=()=>api("delete_zone",{camera:cur,zone:z.name}).then(refresh);L.appendChild(d);}}
 /* Combine and confirm only where they mean something: one outline per hub
    has nothing to combine, and confirm needs an outline and an exit line on
    the same hub. Seven controls stood in step 2 for every setup. */
@@ -568,9 +805,29 @@ async function keepReference(){try{await api("reference",{camera:cur});toast("Ke
 let autoFor=null;
 function autoPictures(){const key=S.path||"";if(autoFor===key||S.running||S.job.running||!S.cfg.cameras.length)return;
   autoFor=key;if(S.cfg.cameras.every(c=>S.pictures[c.name]))return;api("grab_all").catch(()=>{});}
+/* Steps 1-3 stay closed: the Next card above them says what to do and
+   has its buttons, so an open step under it said everything twice. A step
+   opens on a click, or when a Next-card button needs its controls. */
+let stepOpen=0;
+function toggleStep(n){stepOpen=stepOpen===n?0:n;renderSteps();}
 function renderSteps(){const cams=S.cfg.cameras;
   const done=[cams.length>0,cams.length>0&&cams.every(c=>c.zones.length),cams.length>0&&cams.every(c=>c.ball_area>0),S.running,testPassed];
-  done.forEach((d,i)=>{const s=$("st"+(i+1));s.classList.toggle("done",d);s.querySelector(".n").textContent=d?"✓":i+1;});}
+  done.forEach((d,i)=>{const s=$("st"+(i+1));s.classList.toggle("done",d);s.querySelector(".n").textContent=d?"✓":i+1;});
+  const open=stepOpen;
+  for(const n of[1,2,3])$("st"+n).classList.toggle("open",open===n);
+  const c=cam(),zs=c?c.zones:[];
+  $("sum1").textContent=cams.length?cams.map(x=>x.name).join(", "):"none yet";
+  $("sum2").textContent=zs.length?zs.map(z=>z.hub+(z.line?" exit":"")).join(" · "):"no outline";
+  $("sum3").textContent=c&&c.ball_area>0?Math.round(c.ball_area)+" px"+((c.ball_from||{}).drop?" · drop test":""):"not set";
+  const left=done.slice(0,3).filter(d=>!d).length;$("tabsetupn").textContent=left?left:"✓";$("tabsetupn").className="tn"+(left?"":" ok");
+  $("tabrundot").className="tdot"+(S.running?" on":"");}
+/* ---------- tabs: Set up / Run / Test ---------- */
+let tab=null,wasRunning=false;
+function setTab(t){tab=t;try{localStorage.setItem("hubtab",t);}catch(e){}
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
+  document.querySelectorAll(".steps>[data-tab]").forEach(x=>x.classList.toggle("show",x.dataset.tab===t));}
+function renderTab(){if(tab===null){let t="setup";try{t=localStorage.getItem("hubtab")||t;}catch(e){}setTab(S.running?"run":t);}
+  if(S.running&&!wasRunning&&tab==="setup")setTab("run");wasRunning=S.running;}
 let behindSeen={},behindAt={};
 function modelBehind(v){const now=Date.now();for(const[n,k]of Object.entries(v.model_behind||{})){if(k>(behindSeen[n]||0))behindAt[n]=now;behindSeen[n]=k;}
   return Object.keys(behindAt).filter(n=>now-behindAt[n]<5000);}
@@ -624,8 +881,8 @@ function handleJob(){const j=S.job;
   if(j.error){hint("");if(j.name==="find cameras")modal("Could not look for cameras",`<p>${esc(j.error)}</p>`,[{label:"OK",cls:"primary"}]);
     else toast(`${j.name[0].toUpperCase()+j.name.slice(1)} failed: ${j.error}`,"bad");return;}
   if(j.name==="find cameras")chooseCamera(j.result||[]);
-  else if(j.name==="measure"){if(j.result){hint(`One ball is <b>${Math.round(j.result)} px</b>. You can start now.`);toast("Ball measured: "+Math.round(j.result)+" px");}
-    else{hint("");modal("No ball found","<p>No single, round ball was seen near the outline. Put a few balls apart from each other near the hub and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
+  else if(j.name==="measure"){if(j.result){const c=cam();hint(`About <b>${Math.round(j.result)} px</b> a ball: the ruler while drawing outlines.`+(c&&c.zones.length&&!c.ball_area?" Next: the <b>drop test</b> sets the size counted with.":""));toast("Measured: about "+Math.round(j.result)+" px a ball");}
+    else{hint("");modal("No ball found","<p>No single, round ball was seen. Put a few balls apart from each other where the camera sees them and measure again.</p>",[{label:"OK",cls:"primary"}]);}}
   else if(j.name==="check"&&j.result)showCheck(j.result);
   else if(j.name==="pictures"){lastPic="";const bad=S.cfg.cameras.filter(c=>alignBad(c.name)).map(c=>c.name);
     hint(bad.length?`Check <b>${esc(bad.join(", "))}</b>: the picture does not match its outlines.`:"");}
@@ -666,7 +923,8 @@ function overlay(){const cv=$("cv"),g=cv.getContext("2d");g.clearRect(0,0,cv.wid
   else if(drawing){const col=COL[drawing.hub];g.setLineDash([6,4]);g.lineWidth=2;g.strokeStyle=col;g.beginPath();
     drawing.pts.forEach(([x,y],i)=>i?g.lineTo(x*k,y*k):g.moveTo(x*k,y*k));if(drawing.hover&&drawing.pts.length)g.lineTo(drawing.hover[0],drawing.hover[1]);g.stroke();g.setLineDash([]);
     drawing.pts.forEach(([x,y],i)=>{g.beginPath();g.arc(x*k,y*k,i===0?7:5,0,7);g.fillStyle=i===0?"#fff":col;g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke();});
-    if(drawing.hover&&c.ball_area>0)ballRuler(g,drawing.hover[0],drawing.hover[1],Math.sqrt(4*c.ball_area/Math.PI)*k);}}
+    const ruler=c.measured||c.ball_area;
+    if(drawing.hover&&ruler>0)ballRuler(g,drawing.hover[0],drawing.hover[1],Math.sqrt(4*ruler/Math.PI)*k);}}
 /* Four ball widths hanging below the pointer: the outline's top edge goes
    3-4 balls above the hood (HUB_FEED.md, Central Valley 38.9% -> 6.4%), and
    "3-4 balls" was a guess by eye. Put the pointer where the top corner goes;
@@ -695,7 +953,7 @@ function draw(hub,kind="outline"){if(!cam()||!S.pictures[cur]){toast("Add a came
 function cancelDraw(){drawing=null;$("banner").style.display="none";overlay();}
 async function finish(){if(!drawing)return;const d=drawing;
   try{await api("add_zone",{camera:cur,hub:d.hub,points:d.pts,kind:d.kind});cancelDraw();toast(d.hub.toUpperCase()+(d.kind==="exit"?" exit line saved":" outline saved"));
-    const c=cam();hint(c&&!c.ball_area?"Next: put a few balls near the hub and press <b>Measure</b>.":"");}catch(e){}refresh();}
+    const c=cam();hint(c&&!c.ball_area?"Next: the <b>drop test</b> (step 3) sets the ball size.":"");}catch(e){}refresh();}
 
 /* ---------- actions ---------- */
 async function storeForm(){const c=cam();if(!c)return;const f={};for(const k of["name","source","fps","size","ball_area"])f[k]=$("f_"+k).value;
@@ -707,7 +965,88 @@ $("f_model_weight").addEventListener("input",()=>$("mwv").textContent=(+$("f_mod
 $("f_model_weight").addEventListener("change",async()=>{try{await api("update_camera",{name:cur,fields:{model_weight:$("f_model_weight").value}});}catch(e){}refresh();});$("f_remove_static").addEventListener("change",storeForm);
 document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>api("combine",{hub:g.dataset.hub,how:b.textContent}).then(refresh)));
 function grab(){if(cur)api("grab",{camera:cur,at:$("seek").value}).then(()=>{lastPic="";});}
-function measure(){if(!cur){toast("Add a camera first","warn");return;}if(!cam().zones.length){toast("Draw the hub outline first — the ball is measured near it","warn");return;}api("measure",{camera:cur});}
+function measure(){if(!cur){toast("Add a camera first","warn");return;}api("measure",{camera:cur}).catch(()=>{});}
+/* ---------- drop test (tbavid/dropfit.py) ---------- */
+let dropMsg=null;
+async function dropStart(){if(!cur)return;try{await api("drop_start",{camera:cur});dropMsg=null;toast("Recording: drop balls into the hub");}catch(e){}refresh();}
+async function dropCancel(){try{await api("drop_cancel",{});}catch(e){}refresh();}
+async function dropDone(w){const d=S.drop;if(!d)return;const hand={};
+  for(const h of d.hubs){const v=($(`dropn_${w}_${h}`)||{}).value;if(v!==undefined&&v!=="")hand[h]=Number(v);}
+  if(!Object.values(hand).some(n=>n>0)){toast("Type how many balls went into the hub","warn");return;}
+  hint("<b>Working out the ball size…</b>");
+  try{const r=await api("drop_finish",{hand});
+    const ok=Object.keys(r.hand).every(h=>r.got[h]===r.hand[h]);
+    dropMsg={ok,text:`One ball = ${Math.round(r.area)} px. Replayed with it: `+Object.keys(r.hand).map(h=>`${h} ${r.got[h]} of ${r.hand[h]}`).join(", ")+"."
+      +(ok?"":" Not exact: check the outline covers the whole opening, and drop again.")
+      +(r.measured&&!r.agrees?` Measure said ${Math.round(r.measured)} px, more than 2x off: check the fuel colour.`:"")};
+    toast(ok?"Ball size set from the drop test":"Ball size set; the replay was not exact",ok?"ok":"warn");hint("");}
+  catch(e){hint("");}refresh();}
+function dropBody(c,w){const d=S.drop,mine=d&&d.camera===c.name;
+  // A recording source ends by itself, often before the count is typed:
+  // the boxes stay until Done or Cancel either way.
+  if(mine)return (d.recording?`<div><b>Recording ${Math.floor(d.seconds)} s.</b> Drop balls into the hub now (some one at a time, some in handfuls), then type how many and press Done.</div>`
+      :`<div><b>Recorded ${d.frames} frames.</b> Type how many balls went into ${d.hubs.length>1?"each hub":"the hub"} and press Done.</div>`)
+    +`<div class="row">${d.hubs.map(h=>`<label class="dropn"><span class="tag ${h}">${h.toUpperCase()}</span><input class="input tnum" type="number" min="0" id="dropn_${w}_${h}" placeholder="balls"></label>`).join("")}
+    <button class="btn primary sm" onclick="dropDone('${w}')">Done</button><button class="btn sm" onclick="dropCancel()">Cancel</button></div>`;
+  if(d&&!mine)return `<div class="muted">Recording a drop test on ${esc(d.camera)}.</div>`;
+  const has=c.ball_area>0,fr=c.ball_from||{};
+  return (has?"":`<div>Press <b>Drop test</b>, then drop 20 or more balls into the hub and type how many. It finds the ball size that counts exactly that.${c.model?" The model counts without it; the colour counter that takes over if the model stops needs it.":""}</div>`)
+    +`<div class="row"><button class="btn ${has?"":"primary"} sm" onclick="dropStart()" ${!c.zones.length||S.running?"disabled":""}>${has?"Drop test again":"Drop test"}</button></div>`
+    +(dropMsg?`<div style="margin-top:6px;color:${dropMsg.ok?"var(--ok)":"var(--warn)"}">${esc(dropMsg.text)}</div>`:"")
+    +(has&&!fr.drop&&!fr.typed?`<div style="margin-top:6px;color:var(--warn)">This size was not set by a drop test. Run one before trusting a count.</div>`:"");}
+function renderDrop(){const c=cam(),box=$("dropbox");if(!box)return;
+  if(!c){box.innerHTML=`<div class="muted">Add a camera first.</div>`;$("ballfrom").textContent="";return;}
+  if(!c.zones.length){box.innerHTML=`<div class="muted">Draw the hub outline (step 2) first: the drop test counts balls through it.</div>`;}
+  else if(document.activeElement&&document.activeElement.id&&document.activeElement.id.startsWith("dropn_"))return;
+  else box.innerHTML=dropBody(c,"s");
+  const fr=c.ball_from||{};$("ballfrom").textContent=fr.drop?"(drop test)":fr.typed?"(typed)":c.ball_area>0?"(not from a drop test)":"";}
+/* ---------- setup guide: Watchtower's hub card ---------- */
+function openBox(id){const b=$(id);if(!b)return;const st=b.closest(".step.acc");
+  if(st){stepOpen=Number(st.id.slice(2));renderSteps();}b.open=true;b.scrollIntoView({behavior:"smooth",block:"center"});}
+function renderGuide(){const L=$("guidesteps"),c=cam();$("guidecam").textContent=c?"Setting up "+c.name:"Setup";
+  if(document.activeElement&&document.activeElement.id&&document.activeElement.id.startsWith("dropn_"))return;
+  if(!c){$("guidebar").style.width="0";$("guidecount").textContent="";
+    L.innerHTML=`<li class="cur"><div class="stt"><span class="eyebrow">Next</span><b>Add a camera</b></div><div class="sx">A USB camera, a recording, a wireless camera or a stream.<div class="row"><button class="btn primary sm" onclick="findCams()">Find cameras</button><button class="btn sm" onclick="pickFile('add')">Add recording</button></div></div></li>`;return;}
+  const pic=S.pictures[c.name],local=S.kinds[c.name]==="camera",hasZone=c.zones.length>0,sized=c.ball_area>0,fr=c.ball_from||{};
+  const live=(S.live.cameras||{})[c.name],steps=[];const st=(state,title,tag,body)=>steps.push({state,title,tag,body});
+  st(pic?"done":"now","Camera",pic?`${pic[0]}×${pic[1]}`:"",pic?(live?`Getting ${live.fps} fps.`:""):`<div>Waiting for a picture. <button class="btn sm" onclick="grab()">Refresh picture</button></div>`);
+  if(pic){
+    st(c.image&&Object.keys(c.image).length?"done":"opt","Picture",local?(c.image&&Object.keys(c.image).length?"set":"recommended"):"not for this source",
+      local?`Set 60 fps and a fixed exposure under 16 ms, so fast balls don't blur. <div class="row"><button class="btn sm" onclick="openBox('picbox')">Camera settings</button></div>`:"A recording, stream or network camera keeps its own picture.");
+    st(c.colour?"done":"opt","Fuel colour",c.colour?"custom":"standard",
+      `Turn on <b>Show what counts as fuel</b>: every ball should turn magenta and little else. One camera on both hubs can give each hub its own colour (the 🎨 on its outline).<div class="row"><button class="btn sm" onclick="$('showfuel').checked=true;$('showfuel').dispatchEvent(new Event('change'));openBox('colbox')">Show fuel</button></div>`);
+    st(c.measured?"done":hasZone?"opt":"now","Measure ball",c.measured?`about ${Math.round(c.measured)} px`:"recommended",
+      (c.measured?"":`Put a few balls ${hasZone?"near the hub":"where the camera sees them"}, apart and still, and press Measure (5 s). It gives a ruler of ball widths for drawing the outline and a check on the drop test; it doesn't set the size the hub counts with.`)
+      +`<div class="row"><button class="btn sm ${c.measured?"":"primary"}" onclick="measure()" ${S.running?"disabled":""}>${c.measured?"Measure again":"Measure"}</button></div>`);
+    st(hasZone?"done":"now","Outline",hasZone?c.zones.map(z=>z.hub+(z.line?" exit":"")).join(", "):"",
+      (hasZone?"":`Click the corners of the hub's opening, going round; top edge 3-4 balls above the hood${c.measured?" (the ruler under the pointer shows 4 ball widths)":""}.`)
+      +`<div class="row"><button class="btn sm red" onclick="draw('red')">Red outline</button><button class="btn sm blue" onclick="draw('blue')">Blue outline</button></div>`
+      +(hasZone&&sized&&fr.drop?`<div class="muted" style="margin-top:4px">A new outline needs a new drop test.</div>`:""));}
+  if(hasZone)st(sized&&(fr.drop||fr.typed)?"done":"now","Ball size: drop test",sized?`one ball = ${Math.round(c.ball_area)} px`:"",dropBody(c,"g"));
+  if(sized)st(testPassed?"done":"now","Test it",testPassed?"ball test passed":"",
+    `Press <b>Start</b> on the Run tab, then run the <b>Ball test</b> on the Test tab: every hub must match your hand count exactly.<div class="row"><button class="btn primary sm" onclick="setTab('run')">Go to Run</button><button class="btn sm" onclick="setTab('test')">Go to Test</button></div>`);
+  const now=steps.findIndex(x=>x.state==="now"),need=steps.filter(x=>x.state!=="opt"),nd=need.filter(x=>x.state==="done").length;
+  $("guidebar").style.width=(100*nd/Math.max(need.length,1))+"%";$("guidecount").textContent=`${nd} of ${need.length}`;
+  if(now<0){L.innerHTML=`<li class="cur ready"><div class="stt"><b>Ready to count</b></div><div class="sx">Every step is done for ${esc(c.name)}. <div class="row"><button class="btn primary sm" onclick="setTab('run')">Go to Run</button></div></div></li>`;return;}
+  const x=steps[now];
+  L.innerHTML=`<li class="cur"><div class="stt"><span class="eyebrow">Next</span><b>${x.title}</b>${x.tag?`<span class="gt">${esc(x.tag)}</span>`:""}</div>${x.body?`<div class="sx">${x.body}</div>`:""}</li>`
+    +`<li class="trail">${steps.map((y,i)=>`<span class="pip ${y.state}${i===now?" cur":""}" title="${esc(y.title)}">${y.state==="done"?"✓":i+1}</span>`).join("")}</li>`;}
+/* ---------- a hub's own fuel colour ---------- */
+async function zoneColour(name){const c=cam(),z=c&&c.zones.find(x=>x.name===name);if(!z)return;
+  const col=Object.assign({},S.standard_colour,c.colour||{},z.colour||{});
+  const sl=(k,l,max)=>`<div class="slider"><span class="muted" style="width:110px">${l}</span><input type="range" min="0" max="${max}" id="zc_${k}" value="${col[k]}"><b class="tnum" id="zc_${k}v">${col[k]}</b></div>`;
+  const was=$("showfuel").checked;$("showfuel").checked=true;$("showfuel").dispatchEvent(new Event("change"));
+  const body=`<p class="muted">The ${z.hub} hub's own fuel colour, for a camera that sees the two hubs under different light. The picture shows it magenta around this outline.</p>`
+    +sl("hue_lo","Hue from",90)+sl("hue_hi","Hue to",90)+sl("sat_min","Min. colour",255)+sl("val_min","Min. brightness",255);
+  const p=modal(`${z.hub.toUpperCase()} hub colour`,body,[{label:"Use the camera's",value:"reset"},{label:"Cancel",value:null},{label:"Save",cls:"primary",value:"save"}]);
+  for(const k of GATE){const i=$("zc_"+k);i.oninput=()=>$("zc_"+k+"v").textContent=i.value;
+    i.onchange=()=>api("zone_colour",{camera:cur,zone:name,colour:Object.fromEntries(GATE.map(g=>[g,Number($("zc_"+g).value)]))}).then(()=>{lastPic="";refresh();}).catch(()=>{});}
+  const v=await p;
+  if(v==="save")await api("zone_colour",{camera:cur,zone:name,colour:Object.fromEntries(GATE.map(g=>[g,Number($("zc_"+g).value)]))}).catch(()=>{});
+  else if(v==="reset"||(v===null&&!z.colour))await api("zone_colour",{camera:cur,zone:name,colour:null}).catch(()=>{});
+  else if(v===null)await api("zone_colour",{camera:cur,zone:name,colour:z.colour}).catch(()=>{});
+  if(!was){$("showfuel").checked=false;$("showfuel").dispatchEvent(new Event("change"));}
+  lastPic="";refresh();}
 function findCams(){api("find_cameras").catch(()=>{});}
 let testPassed=false;
 function renderTests(v){const run=S.running,bt=v.ball_test;
@@ -804,7 +1143,7 @@ async function pickFile(mode,path=""){pickMode=mode;const L=await(await fetch("/
     `<div class="item" data-d="${esc(L.parent)}"><span class="icon"><svg><use href="#i-up"/></svg></span><span class="t">Up one folder</span></div>`+
     L.dirs.map(d=>`<div class="item" data-d="${esc(L.path+"/"+d)}"><span class="icon"><svg><use href="#i-folder"/></svg></span><span class="t">${esc(d)}</span></div>`).join("")+
     files.map(v=>`<div class="item" data-v="${esc(L.path+"/"+v)}"><span class="icon"><svg><use href="#i-${mode==="model"?"tune":"film"}"/></svg></span><span class="t">${esc(v)}</span></div>`).join("")+
-    (files.length||L.dirs.length?"":`<div class="muted">${mode==="model"?"No .pt files here.":"No videos here."}</div>`)+"</div>";
+    (files.length||L.dirs.length?"":`<div class="muted">${mode==="model"?"No .onnx or .pt files here.":"No videos here."}</div>`)+"</div>";
   const p=modal(title,body,[{label:"Cancel",value:null}]);
   document.querySelectorAll("#mBody .item").forEach(e=>e.onclick=()=>{closeModal(null);if(e.dataset.d!==undefined)pickFile(mode,e.dataset.d);else chose(e.dataset.v);});
   await p;}

@@ -151,17 +151,31 @@ class Share:
         return False
 
 
-LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+LOGIN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Hub Counter</title>
-<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-background:#0b0e14;color:#e7ebf3;font:16px system-ui,sans-serif}
-form{background:#141925;padding:28px;border-radius:14px;width:min(320px,90vw)}
-input{width:100%;box-sizing:border-box;font-size:28px;letter-spacing:6px;text-align:center;
-padding:10px;border-radius:10px;border:1px solid #2a3142;background:#0b0e14;color:#fff}
-button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;background:#e11d2a;
-color:#fff;font-size:16px;font-weight:600}p{color:#9aa3b5;font-size:14px}#e{color:#f87171}</style>
-</head><body><form id="f"><b>Hub Counter</b><p>Enter the PIN shown on the counting computer.</p>
-<input id="p" inputmode="numeric" autocomplete="one-time-code" autofocus>
+<style>
+:root{--bg:#f3f4f6;--panel:#fff;--ink:#0f1216;--muted:#6b7480;--line:#d3d7dc;--fuel:#f5c400;--bad:#c2410c}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0d10;--panel:#15181c;--ink:#eceef1;--muted:#8a939e;--line:#363c45;--bad:#ff7a59}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+form{width:min(360px,calc(100vw - 32px));padding:28px 24px 22px;border-radius:20px;background:var(--panel);
+  border:1px solid var(--line);box-shadow:0 1px 2px rgba(0,0,0,.05),0 18px 50px rgba(15,18,22,.1)}
+.logo{width:48px;height:48px;border-radius:14px;background:var(--fuel);display:grid;place-items:center;margin-bottom:16px}
+h1{margin:0 0 4px;font-size:21px;font-weight:780;letter-spacing:-.02em}
+p{margin:0 0 18px;color:var(--muted);font-size:14px}
+input{width:100%;height:60px;font:700 30px/1 ui-monospace,Menlo,monospace;letter-spacing:.4em;text-align:center;
+  padding:0 0 0 .4em;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--ink);outline:none}
+input:focus{border-color:var(--ink);box-shadow:0 0 0 4px color-mix(in srgb,var(--fuel) 40%,transparent)}
+button{width:100%;height:50px;margin-top:12px;border:0;border-radius:13px;background:var(--fuel);color:#1a1500;
+  font-size:16px;font-weight:780;letter-spacing:.02em;cursor:pointer}
+button:active{transform:translateY(1px)}
+#e{min-height:20px;margin:12px 0 0;color:var(--bad);font-weight:600;text-align:center}
+</style>
+</head><body><form id="f">
+<div class="logo"><svg width="26" height="26" viewBox="0 0 24 24"><path d="M5 20l2.6-9h8.8L19 20z" fill="rgba(0,0,0,.12)" stroke="#1a1500" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="6" r="3" fill="#1a1500"/></svg></div>
+<h1>Hub Counter</h1><p>Enter the PIN shown on the counting computer.</p>
+<input id="p" inputmode="numeric" autocomplete="one-time-code" maxlength="8" autofocus aria-label="PIN">
 <button>Open</button><p id="e"></p></form><script>
 document.getElementById("f").onsubmit=async e=>{e.preventDefault();
 const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -307,7 +321,7 @@ def _at(body) -> Optional[float]:
 # (HubController.locked), from this computer and from a shared phone alike.
 EDITS = {"add_camera", "remove_camera", "apply_preset", "delete_preset",
          "update_camera", "add_zone", "delete_zone", "combine", "confirm",
-         "apply_calibration", "load",
+         "apply_calibration", "load", "drop_start", "drop_finish", "zone_colour",
          # camcheck: moving the outlines, or taking a new reference picture
          "shift_zones", "reference"}
 
@@ -337,6 +351,10 @@ ACTIONS = {
     "shift_zones": lambda c, b: c.shift_zones(b["camera"], b["dx"], b["dy"]),
     "grab": lambda c, b: _job(c, "picture", lambda: (c.grab(b["camera"], _at(b)), None)[1]),
     "measure": lambda c, b: _job(c, "measure", lambda: c.measure(b["camera"])),
+    "drop_start": lambda c, b: c.drop_test_start(b["camera"]),
+    "drop_finish": lambda c, b: c.drop_test_finish(b.get("hand") or {}),
+    "drop_cancel": lambda c, b: c.drop_test_cancel(),
+    "zone_colour": lambda c, b: c.set_zone_colour(b["camera"], b["zone"], b.get("colour")),
     "find_cameras": lambda c, b: _job(c, "find cameras", probe_cameras),
     "calibrate": lambda c, b: _job(c, "calibrate", lambda: c.calibrate(
         b["camera"], b["video"], b.get("hand") or {})),

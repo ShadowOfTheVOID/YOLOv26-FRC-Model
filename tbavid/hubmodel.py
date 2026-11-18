@@ -20,7 +20,8 @@ the ball has been gone `vanish` frames and nothing has reappeared near it for
 the colour half; DEFAULT_MODEL holds the hold to what the tuning measured.
 
 `ModelCounter` is pure state (no torch, no OpenCV) so it is tested without a
-model; `ModelEye` runs the network and needs requirements-detect.txt.
+model; `ModelEye` runs the network: onnxruntime for a .onnx file (what the
+apps ship), requirements-detect.txt for a .pt.
 """
 from __future__ import annotations
 
@@ -71,11 +72,18 @@ MODEL_MAX_SKIP = 0.2
 # 300 ms, which the AUTO call's ~200 ms budget needs.
 DEFAULT_MODEL = {"min_track": 2, "vanish": 2, "reacquire": 2,
                  "require_entry": True, "pad": 0.08, "assist": False}
-# The model's share. 0.7 fit Einstein 4/5/8 best, but the model trained on
-# those three; on Einstein 1, which it never saw, 0.5-0.6 was better (4.3% /
-# 4.2% against 4.9% at 0.7) and the fits were flat from 0.5 to 0.7 (6.9 /
-# 6.6 / 6.7%), so the plain mean -- the least trust in the model.
-DEFAULT_WEIGHT = 0.5
+# The model's share. The model is the primary counter since 2026-11-18: the
+# colour counter broke at the scrimmage (lighting and a wrong ball size move
+# it by multiples, while the model reads balls, not yellow pixels). 1.0 =
+# the model alone; colour still runs underneath and takes over if the model
+# cannot keep up or fails. On Einstein 1 (2026-11-18 rebuild) the model alone
+# was 11.0% off against 9.6% for colour and 10.3% for the 50/50 blend: on a
+# clean broadcast colour is close, but it is the one that fails outright.
+DEFAULT_WEIGHT = 1.0
+# The October tuning's share for a blend (BLEND_WEIGHT): 0.7 fit Einstein
+# 4/5/8 best, but the model trained on those three; on Einstein 1 0.5-0.6
+# was better, so the plain mean. Kept for blends set by hand.
+BLEND_WEIGHT = 0.5
 
 # `model: built-in` (cams.json, the page's "Use built-in model", frc-fms's
 # vision.yaml) is fuel_relabel.pt shipped inside the Hub Counter app, or
@@ -84,16 +92,18 @@ DEFAULT_WEIGHT = 0.5
 # and the saved setup would then point at nothing.
 BUILTIN = "built-in"
 BUILTIN_FILE = "fuel_relabel.pt"
+BUILTIN_ONNX = "fuel_relabel.onnx"   # preferred: the app ships this, without torch
 _CHECKOUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def bundled_model() -> Optional[str]:
     """Path of the built-in model, or None in a build or checkout without it."""
     roots = [getattr(sys, "_MEIPASS", None), _CHECKOUT]
-    for r in roots:
-        p = os.path.join(r, "models", BUILTIN_FILE) if r else ""
-        if p and os.path.isfile(p):
-            return p
+    for r in roots:                       # the app's own bundle first, then a checkout
+        for name in (BUILTIN_ONNX, BUILTIN_FILE):
+            p = os.path.join(r, "models", name) if r else ""
+            if p and os.path.isfile(p):
+                return p
     return None
 
 
@@ -109,14 +119,17 @@ def resolve_weights(weights: str) -> str:
 REF_OUTLINE_PX = 194.0  # the broadcast outline width REACQUIRE_PX was set on
 
 
-def crop_box(poly: Sequence[Point], width: int, height: int) -> Tuple[int, int, int, int]:
-    """The square the model is run on for one outline, inside the frame."""
+def crop_box(poly: Sequence[Point], width: int, height: int,
+             up: float = CROP_UP_WIDTHS) -> Tuple[int, int, int, int]:
+    """The square the model is run on for one zone, inside the frame. An
+    outline's is raised (`up` outline widths: shots arc in from above); an
+    exit line's is centred on it (`up` 0: balls leave going down)."""
     xs = [p[0] for p in poly]
     ys = [p[1] for p in poly]
     w = max(max(xs) - min(xs), 1.0)
     side = int(min(max(CROP_MIN_PX, CROP_WIDTHS * w), width, height))
     cx = (min(xs) + max(xs)) / 2
-    cy = (min(ys) + max(ys)) / 2 - CROP_UP_WIDTHS * w
+    cy = (min(ys) + max(ys)) / 2 - up * w
     x0 = int(min(max(cx - side / 2, 0), width - side))
     y0 = int(min(max(cy - side / 2, 0), height - side))
     return x0, y0, x0 + side, y0 + side
@@ -179,6 +192,79 @@ class ModelCounter:
         return rise
 
 
+# The longest step, in the ball's own widths, one track may take between two
+# model frames and still be one ball. A ball fired at ~10 m/s on a broadcast
+# moves about 2 widths a frame at 30 fps.
+EXIT_STEP_BALLS = 3.0
+
+
+class ModelExitCounter:
+    """An exit line from model detections: the model's twin of
+    hubcount.ExitLineCounter (2026-11-18: at the scrimmage balls were not
+    counted through exit lines, which were colour only, and the model became
+    the primary counter -- so exits need a model half too).
+
+    BallTracker follows each ball near the line; a ball counts when its
+    track's centre crosses the segment towards `out`, and comes off again if
+    it crosses back (a bounce), as the colour exit line does. `reported` is
+    the high-water mark, so it never goes down. Same interface as
+    ModelCounter (`update`, `tracker`, `reported`) so ModelWorker drives
+    either. Pure state, no model or OpenCV."""
+
+    def __init__(self, line: Sequence[Point], out: Point, fps: float = MODEL_FPS,
+                 assist: bool = DEFAULT_MODEL["assist"], **_tuned_for_outlines):
+        a, b = (tuple(map(float, line[0])), tuple(map(float, line[1])))
+        self.line, self.out = (a, b), tuple(map(float, out))
+        from .hubcount import _side
+        self.out_sign = 1 if _side(a, b, self.out) > 0 else -1
+        pts = [a, b, self.out]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        self.box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+        self.margin = NEAR_WIDTHS * max(math.hypot(b[0] - a[0], b[1] - a[1]), 1.0)
+        self.assist = assist
+        self.tracker = BallTracker()
+        self.last: Dict[int, Point] = {}
+        self.net = 0
+        self.reported = 0
+
+    near = ModelCounter.near
+
+    def update(self, t: float, dets: Sequence[Tuple[XYXY, float]],
+               assist: Sequence[XYXY] = ()) -> int:
+        from .hubcount import _side, segments_cross
+        keep = [(b, c) for b, c in dets if c >= KEEP_CONF and self.near(b)]
+        if self.assist:
+            keep += [(tuple(b), ASSIST_CONF) for b in assist if self.near(b)]
+        a0, a1 = self.line
+        for tid, b in self.tracker.update(keep).items():
+            c = ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+            p = self.last.get(tid)
+            # A step longer than a few of the ball's own widths is the tracker
+            # joining two balls (one gone below the line, the next arriving
+            # above it), not one ball moving: crossed back, it took a real
+            # exit off again. Test video, 12 balls out of a chute: 5 counted
+            # with the jumps, 12 without.
+            size = max(b[2] - b[0], b[3] - b[1], 1.0)
+            jump = p is not None and math.hypot(c[0] - p[0], c[1] - p[1]) > EXIT_STEP_BALLS * size
+            if p is not None and not jump and segments_cross(p, c, a0, a1):
+                after = _side(a0, a1, c)
+                self.net += 1 if (after > 0) == (self.out_sign > 0) else -1
+            self.last[tid] = c
+        if len(self.last) > 4000:          # ids only grow; keep the recent ones
+            self.last = dict(list(self.last.items())[-2000:])
+        rise = max(0, self.net - self.reported)
+        self.reported += rise
+        return rise
+
+
+def counter_for(kind: str, pts: Sequence[Point], out: Optional[Point], fps: float, cfg: Dict):
+    """The model counter for a zone: ModelCounter for an outline,
+    ModelExitCounter for an exit line (two points plus `out`)."""
+    if kind == "exit":
+        return ModelExitCounter(pts[:2], out, fps, **cfg)
+    return ModelCounter(pts, fps, **cfg)
+
+
 def blend(colour: int, model: int, weight: float) -> int:
     """The zone's count: round(weight * model + (1 - weight) * colour).
     Monotone in both, so it never goes down while they do not."""
@@ -188,22 +274,42 @@ def blend(colour: int, model: int, weight: float) -> int:
 class ModelEye:
     """Runs the model on every model zone of one camera, one batch a frame.
 
-    Loads Ultralytics lazily: the API host and the colour-only counter never
-    import torch. `device` is passed to Ultralytics; "" picks CUDA, then
-    Apple MPS, then CPU (`pick_device`). On a 4-core CPU two 640 px crops
-    took 0.3 s, too slow to keep up live; a laptop GPU or Apple silicon is
-    needed.
+    A .onnx file runs on ONNX Runtime (tbavid/onnxdet.py): no torch, CPU by
+    default, so the GPU stays free; its detections matched the .pt's to
+    0.0002 px on every box (437 of 437, 2026-11-18). A .pt file runs on
+    Ultralytics, loaded lazily so the colour-only counter never imports
+    torch. `device` is "" (ONNX: `open_onnx`'s auto choice; .pt: CUDA, then
+    Apple MPS, then CPU, `pick_device`), "cpu", or "gpu"/"cuda"/"mps". On 4 CPU cores
+    two 640 px crops took 131 ms with ONNX Runtime and 178 ms with torch
+    (0.3 s on an older 4-core box): too slow for 30 fps, so ModelWorker
+    drops the model half there rather than let it drag the count.
     """
 
     def __init__(self, weights: str, polys: Dict[str, Sequence[Point]],
-                 device: str = ""):
-        from ultralytics import YOLO
-        self.model = YOLO(resolve_weights(weights))
-        self.device = device or pick_device()
+                 device: str = "", exits: Sequence[str] = ()):
+        path = resolve_weights(weights)
+        self.onnx = path.lower().endswith(".onnx")
+        if self.onnx:
+            self.model, self.device = open_onnx(path, device)
+        else:
+            from ultralytics import YOLO
+            self.model = YOLO(path)
+            self.device = device or pick_device()
         self.polys = dict(polys)
+        self.exits = set(exits)          # zones that are exit lines: crops not raised
         self.crops: Dict[str, Tuple[int, int, int, int]] = {}
         self.prev = None
         self.ball_px = 18.0
+
+    def _predict(self, imgs) -> List[Tuple[List, List]]:
+        """Per crop: (xyxy boxes, confidences) in crop pixels, fuel only."""
+        if self.onnx:
+            return [(b.tolist(), s.tolist()) for b, s, _ in
+                    self.model.predict(imgs, conf=DET_CONF, max_det=1500, classes=[0])]
+        rs = self.model.predict(imgs, imgsz=MODEL_IMGSZ, conf=DET_CONF,
+                                max_det=1500, classes=[0], verbose=False,
+                                device=self.device)
+        return [(r.boxes.xyxy.tolist(), r.boxes.conf.tolist()) for r in rs]
 
     def detect(self, frame) -> Tuple[List[Tuple[XYXY, float]], List[XYXY]]:
         """Every crop's detections in full-frame pixels, and colour_assist's
@@ -211,16 +317,14 @@ class ModelEye:
         from .trackvis import colour_assist
         if not self.crops:
             h, w = frame.shape[:2]
-            self.crops = {n: crop_box(p, w, h) for n, p in self.polys.items()}
+            self.crops = {n: crop_box(p, w, h, 0.0 if n in self.exits else CROP_UP_WIDTHS)
+                          for n, p in self.polys.items()}
         names = list(self.crops)
         imgs = [frame[y0:y1, x0:x1] for x0, y0, x1, y1 in (self.crops[n] for n in names)]
-        rs = self.model.predict(imgs, imgsz=MODEL_IMGSZ, conf=DET_CONF,
-                                max_det=1500, classes=[0], verbose=False,
-                                device=self.device)
         dets: List[Tuple[XYXY, float]] = []
-        for n, r in zip(names, rs):
+        for n, (boxes, confs) in zip(names, self._predict(imgs)):
             x0, y0 = self.crops[n][:2]
-            for b, c in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist()):
+            for b, c in zip(boxes, confs):
                 dets.append(((b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0), float(c)))
         assist: List[XYXY] = []
         if self.prev is not None:
@@ -232,6 +336,45 @@ class ModelEye:
                                                   self.ball_px)]
         self.prev = frame
         return dets, assist
+
+
+def open_onnx(path: str, device: str = ""):
+    """(detector, where it runs). "" is auto: the computer's accelerator
+    (CUDA, DirectML on Windows, CoreML on a Mac -- which may use the Neural
+    Engine), checked with one run, else the CPU (ModelWorker then hands over
+    to colour if it falls behind). On 4 Xeon cores two 640 px crops took 131
+    ms against the 27 ms a 30 fps frame allows; on a GPU two crops a frame is
+    ~1.2 TFLOP/s, a few percent of a laptop GPU."""
+    from .onnxdet import OnnxDetector
+    if device:
+        det = OnnxDetector(path, providers=onnx_providers(device))
+        return det, det.session.get_providers()[0]
+    # GPU first (2026-11-18: the model is now the primary counter, so it gets
+    # the hardware that keeps it at 30 fps); the CPU only when there is no
+    # accelerator or it will not run.
+    fast = onnx_providers("gpu")
+    if fast[0] != "CPUExecutionProvider":
+        try:
+            det = OnnxDetector(path, providers=fast)
+            det.predict([__import__("numpy").zeros((MODEL_IMGSZ, MODEL_IMGSZ, 3), "uint8")], conf=DET_CONF)
+            return det, det.session.get_providers()[0]
+        except Exception as e:     # a driver that will not load: the CPU still counts
+            print(f"model: {fast[0]} would not run ({type(e).__name__}: {e}); using the CPU")
+    return OnnxDetector(path, providers=["CPUExecutionProvider"]), "CPUExecutionProvider"
+
+
+def onnx_providers(device: str) -> List[str]:
+    """ONNX Runtime providers for a device setting. "" and "cpu" are the CPU
+    alone; "gpu"/"cuda"/"mps" take the first accelerator this ONNX Runtime
+    build has (CUDA, DirectML on Windows, CoreML on a Mac), CPU behind it."""
+    if device in ("", "cpu"):
+        return ["CPUExecutionProvider"]
+    import onnxruntime as ort
+    have = ort.get_available_providers()
+    for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider"):
+        if p in have:
+            return [p, "CPUExecutionProvider"]
+    return ["CPUExecutionProvider"]
 
 
 def pick_device() -> str:
@@ -398,7 +541,7 @@ def parse_model(raw: Optional[Dict]) -> Optional[Dict]:
     if not raw:
         return None
     if not raw.get("weights"):
-        raise ValueError("model: needs \"weights\", the .pt file")
+        raise ValueError("model: needs \"weights\", the .onnx or .pt file")
     w = float(raw.get("weight", DEFAULT_WEIGHT))
     if not 0.0 <= w <= 1.0:
         raise ValueError(f"model: weight is the model's share, 0 to 1 (got {w})")

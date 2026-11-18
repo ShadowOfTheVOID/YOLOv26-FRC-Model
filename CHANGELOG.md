@@ -9,6 +9,279 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **`train/colab_harvest_1280.ipynb`: harvest matches and train YOLO26s at
+  1280.** The bake-off's 1280 model was the best detector but had seen four
+  Einstein matches only. This notebook harvests 2026 competition matches
+  with `run.py fetch` (default 40, at most 2 per event, the Championship /
+  Einstein events left out so Einstein 1 stays the test), labels them with
+  the bake-off's recipe (`relabel_video.py --from-scraper` with the v0.3.0
+  models, then SAM 3 for fuel) in batches of 5 saved to Drive as each
+  finishes, trains on the harvest plus Einstein 4/5/8, then judges it on
+  Einstein 1 (score table and counting test) against the bake-off's 1280
+  model and fuel_relabel.pt, and exports the `.onnx`. Every step resumes after
+  a disconnect: the never-twice ledger and the harvest are copied to Drive
+  after every round of downloads. TBA and Hugging Face keys come from Colab
+  Secrets or a hidden prompt. An optional cookies.txt is offered for when
+  YouTube refuses cloud machines. The dataset assembly was checked here with
+  Ultralytics' own reader; the harvest, SAM 3 and training run only in Colab
+  and have not been run yet.
+
+- **Exit lines are counted by the model.** At the scrimmage balls went
+  uncounted through exit lines, which were colour only (the model counted
+  outlines alone). `hubmodel.ModelExitCounter` tracks each ball near the
+  line and counts it when its track crosses towards `out` (back across takes
+  it off, as the colour exit line does). A step longer than three of the
+  ball's own widths is the tracker joining two balls, not one ball moving,
+  and is not a crossing: without that rule a test video of 12 balls out of a
+  chute counted 5; with it, 12 (the outline test still 10 of 10). Used by the
+  Hub Counter, by `fms_counter` (frc-fms / Watchtower plugin), and in the
+  Watchtower app, whose runner now uses our current plugin rather than its
+  October copy. The model's crop for an exit is centred on it, not raised.
+
+- **The fuel model is the primary counter, on the GPU first.** The colour
+  counter broke at the scrimmage, so a new camera in the Hub Counter now
+  counts with the built-in model (fuel_relabel, share 1.0 = the model alone),
+  and the Watchtower app gives every hub `model: built-in, model_weight: 1.0`
+  (its counter loads models through our ONNX code, no torch). The model runs
+  on the GPU when the computer has one (CoreML on a Mac, DirectML on Windows,
+  CUDA where ONNX Runtime has it), checked with one run, else the CPU. Colour
+  still runs underneath: if the model falls behind or fails it takes over by
+  itself and the page says so -- a failure used to stop counting and restart
+  into the same failure. The ball size (drop test) is now for that backup.
+  Checked: the test video counted 10 of 10 with the model alone; the frozen
+  Linux Watchtower app loads and runs the model (and, with no GPU in the test
+  machine, handed over to colour as designed). Linux builds carry the CPU
+  ONNX Runtime only (the CUDA one is GBs), so a Linux box counts by model only
+  if its CPU keeps up.
+
+- **2026-11 model experiments: no new counting model.** Seven models scored
+  on 487 Einstein 1 frames (SAM 3 labels): YOLO26s at 1280 best (fuel AP50
+  0.963, F1 0.948), then YOLO26m 0.954, tuned RF-DETR (900 queries) 0.949 at
+  precision 0.837, P2 0.943, base YOLO26s 0.940, RF-DETR 0.935, YOLO26n 0.904.
+  Counting Einstein 1 against the scoreboard (621 / 415) with the shipped hub
+  counter, mean error at the buzzer: colour alone 9.6%; blended with colour,
+  fuel_relabel.pt 10.3%, base 10.6%, 1280 10.6%, n 11.1%, m 11.3%, P2 11.6%;
+  models alone 11.0% (fuel_relabel) to 13.5% (P2). Every model under-counts
+  blue by ~18% (~510 of 621): the tracker losing balls fired in streams,
+  which a better detector does not fix. fuel_relabel.pt stays; one match, so
+  differences of about a point are within noise. Setup rebuilt from the
+  recorded E4 outlines + E1 shift (count_einstein.py), not the scratch setup
+  behind HUB_FEED.md's 9.1% / 7.8%.
+
+- **Short terminal commands** (`deploy/aliases.sh`, `deploy/aliases.ps1`):
+  `python3 run.py aliases --install` adds one line to `~/.zshrc`,
+  `~/.bashrc` or the PowerShell profile; then `frc` lists them. `hc` (the
+  set-up page), `hc-share`, `hc-feed` (count and send with no page),
+  `hc-count` (a recording), `hc-listen` (stand-in bioarena), `hc-board`;
+  `wt` / `wt-cli` (Watchtower: the installed app, else this checkout),
+  `wt-open PORT PAGE`, `wt-pins`, `wt-logs`; `fuel-export`, `fuel-compare`,
+  `fuel-count`; `frc-test`, `frc-update`. They take the wrapped command's
+  options and use `.venv-train`'s Python when there is one. Checked in bash
+  and zsh; the PowerShell file is not yet run on Windows.
+
+- **Hub Counter page redesigned.** Watchtower's field-control look (wall grey,
+  alliance red and blue, fuel-yellow focus; dark mode follows the system),
+  and one job per tab: **Set up**, **Run**, **Test**. Set up opens with a
+  **Next** card that always says the one thing to do now, with its buttons
+  and a progress bar (Watchtower's hub card, as a single step); the steps
+  below it -- Cameras, Where to count, Ball size -- fold to one line with
+  their state and open on a click. Starting the count moves to Run.
+  Works at phone width (390 px, no sideways scroll).
+- **Drop test for the ball size** (step 3, and the Next card): record, drop
+  balls, type how many per hub, Done. It replays the counter at many sizes
+  and keeps the one that counts exactly that (tbavid/dropfit.py, ported
+  from Watchtower). On a synthetic recording with 10 balls of 452 px it
+  fitted 436 px and replayed 10 of 10. **Measure** now works before any
+  outline and only sets the ruler, and says when it disagrees with the drop
+  test by more than 2x. A hub can have its **own fuel colour** (the 🎨 on its
+  outline) for one camera watching both hubs under different light.
+
+- **Watchtower app rebuilt on Watchtower v2** (arnan-bajaj/watchtower-fms at
+  its v2.7 commit; it was v0.1.0). It now opens one window on Watchtower's
+  own Control page, whose Setup holds the event, teams, PINs, TBA, the field
+  link and Field control, Match13 and the hub cameras (picture, fuel colour
+  with magenta preview, Measure, outline, drop test, step-by-step hub cards,
+  Run and Test). Watchtower's own camera runner runs beside it as a second
+  copy of the app (`--vision`), restarted 3 s after it stops, and stops by
+  itself 20 s after the FMS is gone, so a killed app leaves no camera open.
+  A menu opens the field display, the stream overlay, the match queue and
+  the event folder, checks for updates (refused mid-match) and quits. Our
+  Home window, its settings editor and the bundled Hub Counter page are
+  gone: v2 moved all of it into Control -> Setup. The match queue (`/queue`)
+  stays. Checked from a checkout with `apps/watchtower/smoke_test.py`
+  (Control, queue, both hubs reporting, vision key, quit) and the kill test;
+  not yet built by CI.
+
+- **The apps run the fuel model without PyTorch.** Hub Counter and Watchtower
+  now carry `fuel_relabel.onnx` and ONNX Runtime (`tbavid/onnxdet.py`)
+  instead of torch + Ultralytics, which were most of each 300-400 MB
+  download. The weights are the same: on the same images the export's boxes
+  matched the `.pt`'s, 437 of 437, worst 0.0002 px, scores equal.
+  `train/export_onnx.py` makes the export and refuses (deletes it, exit 1)
+  any whose detections differ; `hub-app.yml` runs it on every build, with
+  torch in a separate venv so it cannot reach the apps. It reads YOLO
+  exports with or without NMS and RF-DETR exports, so whichever model the
+  2026-11 experiments pick drops in as one file. The model now runs on the
+  CPU when two crops fit in 27 ms, leaving the GPU free; otherwise on the
+  accelerator (CoreML on a Mac, DirectML on Windows). On 4 server cores
+  ONNX Runtime took 131 ms for two crops against PyTorch's 178 ms, so
+  most laptops will use the accelerator. Not yet built by CI or run on a
+  real camera; the Einstein 1 counting check with the `.onnx` is still to
+  run in Colab. A `.pt` still works from a checkout with Ultralytics.
+
+- **Experiment: reading team numbers off bumpers** (`experiments/bumper_moondream.py`,
+  not wired into run.py). Moondream2 (Apache-2.0) is asked for the number on
+  each robot crop, and the answer is only accepted when it names one of the
+  three teams on that bumper colour's alliance and several frames agree. That
+  guard is needed: on one public field photo, shrunk to broadcast size,
+  three red digits read right down to 7 px numerals, but four blue digits
+  became "32 69" at 14 px, and a half-hidden bumper was read as a confident
+  "131". FRC numerals on a 1080p wide shot are about 10 px, right at the
+  edge. Not yet tried on broadcast frames.
+- **`train/train_rfdetr.py`**: trains RF-DETR (Apache-2.0, no NMS) on a
+  dataset prepared for YOLO26, through a symlinked view in RF-DETR's layout,
+  for a bake-off against YOLO26. Checked end to end on CPU with a 4-image
+  set; no real training run yet, so whether it beats YOLO26 on small fuel is
+  unknown.
+- **`train/colab_bakeoff.ipynb`**: trains YOLO26 and RF-DETR on the same
+  data in Colab, then compares them, and runs the Moondream 2 vs 3.1 bumper
+  test. Checkpoints are kept in Drive and resume after a disconnect. Its
+  dataset, training, resume and compare cells were run locally on CPU with a
+  stand-in Drive folder; the Colab-only cells and Moondream 3.1 (which needs
+  an Ampere or newer GPU) have not been run.
+- **`train/compare_detectors.py`**: scores both models with one AP50, plus
+  AP50 on boxes under 24 px (the fuel column), recall and precision at the
+  working threshold, and ms per image, on the same validation images.
+- Fixed before release: RF-DETR reports class names 1-based while a model
+  trained on our labels predicts 0-based ids, which shifted every class by
+  one. The bumper reader would have labelled a red robot `robot_blue` and
+  matched it against the wrong alliance. Both scripts now take the 0-based
+  list from the checkpoint (`train_rfdetr.load_rfdetr`).
+- **`train/autolabel_sam3.py`**: labels fuel and robots with SAM 3 text
+  prompts ("yellow ball", "robot") into a new dataset beside the old one,
+  which is never modified. The prompt is configurable for next season's game
+  piece. Robots go through `autolabel_robots.py`'s measured rules (box
+  screening, alliance from the bumper band, painting out unknown alliance,
+  the minimum-robots gate). Hub labels are copied from the hand-recorded
+  ones. Frames are tiled because SAM 3 squashes input to 1008x1008, which
+  would shrink fuel in our 1920x504 strips to about 9 px. A fuel box over 4x
+  the frame's median box is a pile SAM 3 returned as one object, so that
+  frame is left out. `--compare N` draws current vs SAM 3 labels to look at
+  first. Not run with the real weights (they are gated): checked with a
+  stand-in model for the dataset logic, and with a small random-weight SAM 3
+  for every transformers call. That second run found a bug, fixed before
+  release: painting out an unknown robot also removed the label of a
+  labelled robot overlapping it.
+- The Colab notebook gained section 4b (SAM 3: compare, then optionally
+  relabel and train both models on the result, zipped to Drive).
+- **The notebook rebuilds the dataset from the Einstein videos** (now its
+  default, `SOURCE = "einstein"`), because the original images are gone.
+  It runs `relabel_video.py` with the settings in `train/README.md` and the
+  two models that built the original set, downloaded from the v0.3.0
+  release and checked against the checksums recorded here. The result is
+  saved to Drive as `dataset-relabel.zip`, so it is built once. It first
+  lists which of e1/e4/e5/e8.mp4 it found and flags any video that is not
+  1920x1080, since the split-screen and scoreboard settings assume that.
+  It needs at least one training and one validation video. The 2026nhdur
+  part of the original set is not rebuilt; it needs the Mac's harvest.
+  Checked with stand-in clips: building, reuse from Drive, training on the
+  result. An empty rebuild (e.g. a start time past the end of the video)
+  now stops with the reason instead of training on nothing, and is never
+  saved to Drive for reuse.
+- **First real run on Colab (2026-11-16): YOLO26 vs RF-DETR on SAM 3 fuel
+  labels, scored the same way on 487 Einstein 1 frames neither trained on**
+  (82,581 fuel boxes): fuel AP50 0.940 vs 0.935 (small balls 0.933 vs
+  0.927), fuel precision 0.941 vs 0.884, robots 0.91 vs 0.89, 36 vs 34
+  ms/image; YOLO26 trained in 1 h, RF-DETR in about 3. A tie on fuel, so
+  YOLO26 stays: it is already in the counter, the apps and `run.py`.
+- **The notebook stops redoing finished work on every Run all.** A result
+  in Drive that is newer than the models it was made from is shown, not
+  recomputed: the section 7 table, both bumper tests (and the Moondream 3.1
+  install), the experiments table and the Einstein 1 counting. With
+  `dataset-sam3.zip` already in Drive, SAM 3 no longer asks for the token or
+  re-cuts the unpainted frames from the videos. Estimated 15-25 L4 minutes
+  saved per resume. RF-DETR gets 8 data loader workers instead of 4.
+  Mixed precision was already on (bf16 on the L4 for RF-DETR, AMP for
+  YOLO), so nothing to gain there; FP8 and `torch.compile` were left out
+  as untested.
+- **Faster experiments:** 25 epochs instead of 40 (YOLO26s peaked at epochs
+  10-25 on this data, and `best.pt` keeps the best one), decoded images
+  cached in RAM with 8 loader workers, and an automatic batch size filling
+  80% of GPU memory. Estimated 4-5 h on an L4 instead of about 8; not yet
+  timed for real.
+- **Tuned RF-DETR in the experiments (`train_rfdetr.py --queries --scheduler`).**
+  RF-DETR small answers with at most 300 objects per image, and Einstein
+  frames average ~170 fuel with the crowded ones past 300 (82,581 boxes in
+  487 frames). `--queries 900` raises that. RF-DETR 1.12 refuses to grow the
+  pretrained 300 queries ("size mismatch for refpoint_embed.weight: [3900, 4]
+  vs [11700, 4]"), so `expand_queries` tiles each training group's slots up to
+  900 and nudges the copies' reference points; the checkpoint records the new
+  count and the loader takes it unchanged. Checked on CPU: trains, resumes
+  from `last.ckpt`, and returns 900 boxes. `--scheduler cosine`: the first
+  run's learning rate never decayed (the default step drops at epoch 100).
+  The notebook trains it for 30 epochs (the first run peaked at 27).
+- **`compare_detectors.py` reports each model's best F1 at its own
+  threshold**, because a single `--conf` can favour one model: RF-DETR's fuel
+  precision was 0.884 against YOLO26's 0.941 at conf 0.25, and DETR-style
+  scores spread differently. `--rfdetr` is repeatable like `--yolo`.
+- **`train/count_einstein.py`: models judged by counting, not mAP.** Both
+  detectors are at the labels' ceiling (~0.94), so mAP no longer separates
+  them. This runs the shipped hub counter (`count_recording`: colour,
+  model on hub crops, and the 0.5 blend) on Einstein 1 once per model and
+  scores each against the scoreboard at the buzzer (blue 621, red 415). The
+  setup is rebuilt from the recorded Einstein 4 outlines and Einstein 1's
+  recorded shift, because the file behind the documented 9.1% was never
+  saved, so absolute errors may differ from it; every model gets the same
+  setup. `compare_detectors.py --yolo` now takes several named models.
+- **Notebook section 11, experiments:** YOLO26s with the P2 small-object
+  head, YOLO26m, YOLO26s at 1280 px and YOLO26n, each trained on the same
+  dataset (skipped once done, resumable), then one score table and the
+  Einstein 1 counting test with the current `fuel_relabel.pt` as baseline.
+  Checked on stand-in data end to end; not yet run for real.
+- **SAM 3 now boxes fuel only; robots are copied from the current labels**
+  (`autolabel_sam3.py --robots labels`, the default). First real comparison,
+  three Einstein frames (1/5/8), current labels vs SAM 3:
+  - robots: SAM 3 found 0, 0 and 1 of about four per frame, so every
+    frame was left out by `--min-robots`. The current robot boxes come from
+    the scouting model, checked good by eye on qm7;
+  - fuel: SAM 3 gave one fitted box per ball, where the current labels have
+    several small overlapping boxes per ball in piles and hoppers (most of
+    the 470-vs-220 count gap). It also boxed about five balls at the hub
+    mouth that the current labels missed;
+  - SAM 3 still misses shaded balls behind clear plastic (hub bin, deep in
+    hoppers).
+  `--robots sam3` prompts for robots as before, for frames with no labels
+  yet (a new game at kickoff). Three frames is a small sample.
+- **`train/unpaint_relabel.py`: SAM 3 is judged on frames without the
+  grey paint.** The rebuilt dataset paints grey over yellow its detector
+  could not box. Those are exactly the hard balls (piles, hoppers, in
+  flight) SAM 3 is being tried for, so on painted images the comparison
+  was rigged towards the old labels. The script re-cuts every image from
+  its video (the name holds the frame and tile; relabel_report.json the
+  split-screen rows and scoreboard masks, which stay greyed). The notebook
+  runs it before SAM 3 when `SOURCE = "einstein"`. Checked on stand-in
+  clips: pixels outside the paint match the labelled images to JPEG noise
+  (mean difference 1.2 levels), so the boxes still fit.
+- **Moved to RF-DETR 1.12** (from 1.5). It runs on transformers 5 like SAM 3
+  and Moondream 2, so the notebook installs one set of versions instead of
+  swapping between cells; Moondream 2 read the same bumpers on 5 as on 4
+  (360, "32 68"). What 1.12 changed, each found by running it:
+  - it refuses a dataset whose split folder is a link leading outside it, so
+    the RF-DETR view is now real folders of per-file links, kept beside the
+    dataset. Kept under runs/ as before, it would also have failed in Colab,
+    where runs/ is in Google Drive and Drive cannot hold links;
+  - checkpoints moved to Lightning (`last.ckpt` to resume) and record their
+    classes differently; `load_rfdetr` reads both formats;
+  - at low thresholds it returns its no-object slot as `__background__`,
+    which our code had turned into a class named "2" (42 of 300 boxes on the
+    smoke model); those are now dropped, so the bumper reader never asks
+    Moondream to read a bumper on nothing;
+  - speed is timed with its optimised predictor, as YOLO's is.
+  YOLO26 is still Ultralytics' newest model (8.4.213); nothing newer to move to.
+- `experiments/bumper_moondream.py --moondream 3.1` uses Moondream 3.1
+  through its Photon engine (Moondream Model License: building a product on
+  it is allowed; offering Moondream itself as a hosted service is not).
+
 ## v0.5.8 — 2026-10-10
 
 - **Fixed: the Watchtower app on a Mac could not open any camera.** Find

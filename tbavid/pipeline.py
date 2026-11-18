@@ -89,6 +89,13 @@ def fetch(cfg: dict, count: int, retry_failed: bool = False,
         print(f"\n[2/4] ({n}/{len(picks)}) {vid}")
 
         raw, fail, meta = download.download(yt, RAW_DIR, cfg)
+        if fail == download.BLOCKED:
+            # The same answer for every video from here: stop, record nothing.
+            raise SystemExit(
+                "YouTube refused this computer (\"Sign in to confirm you're not a bot\"). "
+                "Nothing was recorded, so these matches are tried again next time. "
+                "Wait and retry, give yt-dlp a cookies file (config: ytdlp_cookies), "
+                "or harvest on another computer.")
         if fail:
             print(f"  ! download {fail}: {meta.get('title', '')[:60]}")
             led.record(yt, fail, **_extras(cand, meta))
