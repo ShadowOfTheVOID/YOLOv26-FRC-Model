@@ -1407,8 +1407,19 @@ def run(sender, setup: Setup, realtime: bool = False,
                 report(cam, z, captured)
 
         def failed(e):
-            errors.append(f"{cam.name}: model failed: {e}")
-            stop.set()
+            # Since the model became the primary counter (2026-11-18: the
+            # colour counter broke at the scrimmage) a model failure must not
+            # stop counting: stopping restarted run(), which opened the same
+            # failing model again. Colour takes over, as when it is too slow,
+            # and the error stays on the page.
+            errors.append(f"{cam.name}: model failed: {e} -- counting by colour")
+            for z in zones.values():
+                z.weight = 0.0
+            model_off.append(cam.name)
+            out(f"{cam.name}: the model failed ({e}) -- counting by colour only "
+                f"for this session")
+            for z in zones.values():
+                report(cam, z, time.monotonic())
 
         worker = ModelWorker(
             eye, {n: z.model for n, z in zones.items()},

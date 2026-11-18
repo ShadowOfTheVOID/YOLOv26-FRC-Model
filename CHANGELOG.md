@@ -9,6 +9,22 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **The fuel model is the primary counter, on the GPU first.** The colour
+  counter broke at the scrimmage, so a new camera in the Hub Counter now
+  counts with the built-in model (fuel_relabel, share 1.0 = the model alone),
+  and the Watchtower app gives every hub `model: built-in, model_weight: 1.0`
+  (its counter loads models through our ONNX code, no torch). The model runs
+  on the GPU when the computer has one (CoreML on a Mac, DirectML on Windows,
+  CUDA where ONNX Runtime has it), checked with one run, else the CPU. Colour
+  still runs underneath: if the model falls behind or fails it takes over by
+  itself and the page says so -- a failure used to stop counting and restart
+  into the same failure. The ball size (drop test) is now for that backup.
+  Checked: the test video counted 10 of 10 with the model alone; the frozen
+  Linux Watchtower app loads and runs the model (and, with no GPU in the test
+  machine, handed over to colour as designed). Linux builds carry the CPU
+  ONNX Runtime only (the CUDA one is GBs), so a Linux box counts by model only
+  if its CPU keeps up.
+
 - **2026-11 model experiments: no new counting model.** Seven models scored
   on 487 Einstein 1 frames (SAM 3 labels): YOLO26s at 1280 best (fuel AP50
   0.963, F1 0.948), then YOLO26m 0.954, tuned RF-DETR (900 queries) 0.949 at

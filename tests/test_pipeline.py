@@ -5288,7 +5288,7 @@ def test_watchtower_app():
           "os": os, "socket": __import__("socket")}
     for n in ast.parse(src).body:
         if (isinstance(n, ast.FunctionDef) and n.name in ("vision_config", "port_open")) or (
-                isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in ("CAMERAS", "ORPHAN_S")):
+                isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in ("CAMERAS", "ORPHAN_S", "MODEL_DEFAULTS")):
             exec(compile(ast.Module([n], []), "main.py", "exec"), ns)
     with tempfile.TemporaryDirectory() as t:
         (Path(t) / "config").mkdir()
@@ -5296,6 +5296,11 @@ def test_watchtower_app():
     check("watchtower app: cameras reported to this FMS, colour counter, hubs from Setup",
           "fms_url: http://127.0.0.1:8123" in text and "counter: colour" in text
           and "hubs: {red: {}, blue: {}}" in text)
+    from tbavid.hubmodel import bundled_model
+    check("watchtower app: every hub counts with the built-in model (alone) when the app has it",
+          ("model: built-in, model_weight: 1.0" in text) == bool(bundled_model()))
+    check("watchtower app: his counter loads models through our ONNX runtime",
+          'sys.modules["hubcounter.hubmodel"] = hubmodel' in src and "use_our_model_runtime()" in src)
     check("watchtower app: a killed app's camera runner stops by itself", ns["ORPHAN_S"] <= 30
           and "_exit_with_fms" in src and "os._exit(0)" in src)
     check("watchtower app: the runner is restarted if it stops, never mid-quit",
@@ -5428,6 +5433,68 @@ def test_cli_aliases():
           and R.alias_line("powershell", root).startswith(". "))
 
 
+def test_model_is_primary_on_gpu():
+    """2026-11-18: the colour counter broke at the scrimmage, so the model is
+    the primary counter -- on by default, the model alone (share 1.0), on the
+    GPU first -- with colour underneath as the backup."""
+    import os
+    from tbavid import hubapp as HA
+    from tbavid import hubmodel as HM
+    check("model primary: its default share is the model alone", HM.DEFAULT_WEIGHT == 1.0
+          and HM.parse_model({"weights": "m.onnx"})["weight"] == 1.0)
+    real = HA.builtin_model_ready
+    try:
+        with tempfile.TemporaryDirectory() as t:
+            v = os.path.join(t, "a.mp4"); open(v, "wb").close()
+            w = os.path.join(t, "b.mp4"); open(w, "wb").close()
+            HA.builtin_model_ready = lambda: True
+            c = HA.HubController().add_camera(v)
+            check("model primary: a new camera counts with the built-in model",
+                  c.get("model") == {"weights": HM.BUILTIN, "weight": 1.0})
+            HA.builtin_model_ready = lambda: False
+            check("model primary: a copy without the model or its runtime starts on colour",
+                  "model" not in HA.HubController().add_camera(w))
+    finally:
+        HA.builtin_model_ready = real
+    # GPU first, CPU when the GPU will not run
+    import types
+    made = []
+
+    class FakeDet:
+        def __init__(self, path, providers=None, threads=0):
+            made.append(providers[0])
+            if providers[0] == "BrokenGPU":
+                raise RuntimeError("driver")
+            self.session = types.SimpleNamespace(get_providers=lambda: list(providers))
+        def predict(self, imgs, conf=0.25, **k):
+            return []
+    fake = types.ModuleType("tbavid.onnxdet"); fake.OnnxDetector = FakeDet
+    real_mod, real_prov = sys.modules.get("tbavid.onnxdet"), HM.onnx_providers
+    sys.modules["tbavid.onnxdet"] = fake
+    try:
+        HM.onnx_providers = lambda d: ["CUDAExecutionProvider", "CPUExecutionProvider"] if d else ["CPUExecutionProvider"]
+        det, where = HM.open_onnx("m.onnx")
+        check("model primary: auto picks the GPU when there is one", where == "CUDAExecutionProvider")
+        made.clear()
+        HM.onnx_providers = lambda d: ["BrokenGPU", "CPUExecutionProvider"] if d else ["CPUExecutionProvider"]
+        det, where = HM.open_onnx("m.onnx")
+        check("model primary: a GPU that will not run falls back to the CPU",
+              where == "CPUExecutionProvider" and made == ["BrokenGPU", "CPUExecutionProvider"])
+        HM.onnx_providers = lambda d: ["CPUExecutionProvider"]
+        check("model primary: no GPU, the CPU", HM.open_onnx("m.onnx")[1] == "CPUExecutionProvider")
+    finally:
+        HM.onnx_providers = real_prov
+        if real_mod is not None:
+            sys.modules["tbavid.onnxdet"] = real_mod
+        else:
+            sys.modules.pop("tbavid.onnxdet", None)
+    src = (Path(__file__).resolve().parent.parent / "tbavid" / "hubcount.py").read_text()
+    i = src.index("def failed(e):")
+    body = src[i:src.index("worker = ModelWorker(", i)]
+    check("model primary: a model failure hands over to colour instead of stopping",
+          "z.weight = 0.0" in body and "stop.set()" not in body)
+
+
 def main() -> int:
     for fn in (test_cuts, test_clustering, test_crop_bands, test_formats,
                test_format_tuning, test_district_catalogue,
@@ -5456,7 +5523,8 @@ def main() -> int:
                test_detector_comparison_metric, test_sam3_autolabel_rules,
                test_unpaint_relabel_names_and_cut, test_count_einstein_helpers,
                test_onnx_decoders, test_watchtower_app,
-               test_drop_test_fit, test_cli_aliases):
+               test_drop_test_fit, test_cli_aliases,
+               test_model_is_primary_on_gpu):
         fn()
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     for f in FAILED:

@@ -92,14 +92,20 @@ CAMERAS = """# Written by the Watchtower app on every start, as launch.py writes
 fms_url: http://127.0.0.1:{port}
 record_dir: ""
 test_dir: '{tests}'
-defaults: {{counter: colour, width: 1920, height: 1080, fps: 60}}
+defaults: {{counter: colour, width: 1920, height: 1080, fps: 60{model}}}
 hubs: {{red: {{}}, blue: {{}}}}
 """
+# The model is the primary counter (2026-11-18: the colour counter broke at
+# the scrimmage): every hub counts with the built-in fuel model, on the GPU
+# first, colour running under it as the backup that takes over by itself.
+MODEL_DEFAULTS = ", model: built-in, model_weight: 1.0"
 
 
 def vision_config(d: Path, port: int) -> Path:
     p = d / "config" / "vision.cameras.yaml"
-    p.write_text(CAMERAS.format(port=port, tests=(d / "recordings").as_posix()))
+    from tbavid.hubmodel import bundled_model
+    model = MODEL_DEFAULTS if bundled_model() else ""
+    p.write_text(CAMERAS.format(port=port, tests=(d / "recordings").as_posix(), model=model))
     return p
 
 
@@ -113,6 +119,7 @@ def run_vision(config: str) -> int:
     opened; this process is where OpenCV is used now."""
     from tbavid import cvload
     cvload.load()
+    use_our_model_runtime()
     src = watchtower_src()
     vision = src / "vision"
     sys.path[:0] = [str(vision), str(src)]
@@ -146,6 +153,16 @@ def _exit_with_fms(config: str) -> None:
         elif time.monotonic() - gone > ORPHAN_S:
             print("the FMS is gone: stopping the hub cameras", flush=True)
             os._exit(0)
+
+
+def use_our_model_runtime() -> None:
+    """Watchtower's copy of our counter (vision/hubcounter) loads models with
+    Ultralytics, i.e. torch, which this app does not carry. Its hubmodel is
+    replaced by ours, which runs .onnx on ONNX Runtime, GPU first: the same
+    names (ModelEye, ModelWorker, ModelCounter, parse_model, blend), so his
+    counter code is unchanged."""
+    from tbavid import hubmodel
+    sys.modules["hubcounter.hubmodel"] = hubmodel
 
 
 class Vision:

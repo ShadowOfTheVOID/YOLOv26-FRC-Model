@@ -170,6 +170,14 @@ def double_count_risks(cfg: Dict) -> List[str]:
     return out
 
 
+def builtin_model_ready() -> bool:
+    """Is there a built-in model, and the runtime to run it?"""
+    p = bundled_model()
+    if not p:
+        return False
+    return _has("onnxruntime") if p.endswith(".onnx") else _has("ultralytics")
+
+
 def _has(module: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(module) is not None
@@ -539,6 +547,11 @@ class HubController:
                                      name),
                    "source": source, "ball_area": 0, "blur": DEFAULT_BLUR,
                    "zones": []}
+            # The model is the primary counter (2026-11-18: colour broke at the
+            # scrimmage): a new camera counts with the built-in model when this
+            # copy has one and can run it; colour runs under it as the backup.
+            if builtin_model_ready():
+                cam["model"] = {"weights": BUILTIN, "weight": DEFAULT_WEIGHT}
             self.cfg["cameras"].append(cam)
         self.say(f"added {cam['name']} ({redact(source)})")
         if source_kind(source) == "stream":

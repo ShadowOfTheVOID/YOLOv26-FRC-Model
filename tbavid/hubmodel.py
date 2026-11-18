@@ -72,11 +72,18 @@ MODEL_MAX_SKIP = 0.2
 # 300 ms, which the AUTO call's ~200 ms budget needs.
 DEFAULT_MODEL = {"min_track": 2, "vanish": 2, "reacquire": 2,
                  "require_entry": True, "pad": 0.08, "assist": False}
-# The model's share. 0.7 fit Einstein 4/5/8 best, but the model trained on
-# those three; on Einstein 1, which it never saw, 0.5-0.6 was better (4.3% /
-# 4.2% against 4.9% at 0.7) and the fits were flat from 0.5 to 0.7 (6.9 /
-# 6.6 / 6.7%), so the plain mean -- the least trust in the model.
-DEFAULT_WEIGHT = 0.5
+# The model's share. The model is the primary counter since 2026-11-18: the
+# colour counter broke at the scrimmage (lighting and a wrong ball size move
+# it by multiples, while the model reads balls, not yellow pixels). 1.0 =
+# the model alone; colour still runs underneath and takes over if the model
+# cannot keep up or fails. On Einstein 1 (2026-11-18 rebuild) the model alone
+# was 11.0% off against 9.6% for colour and 10.3% for the 50/50 blend: on a
+# clean broadcast colour is close, but it is the one that fails outright.
+DEFAULT_WEIGHT = 1.0
+# The October tuning's share for a blend (BLEND_WEIGHT): 0.7 fit Einstein
+# 4/5/8 best, but the model trained on those three; on Einstein 1 0.5-0.6
+# was better, so the plain mean. Kept for blends set by hand.
+BLEND_WEIGHT = 0.5
 
 # `model: built-in` (cams.json, the page's "Use built-in model", frc-fms's
 # vision.yaml) is fuel_relabel.pt shipped inside the Hub Counter app, or
@@ -253,47 +260,29 @@ class ModelEye:
         return dets, assist
 
 
-# The CPU must answer two crops in this long to keep up with MODEL_FPS, with
-# a fifth spare for the colour half and the camera on the same cores.
-CPU_BUDGET_S = 0.8 / MODEL_FPS
-
-
 def open_onnx(path: str, device: str = ""):
-    """(detector, where it runs). "" is auto: the CPU when it keeps up --
-    two 640 px crops inside CPU_BUDGET_S, median of 5 after a warm-up --
-    else the computer's accelerator, else the CPU anyway (ModelWorker then
-    drops the model half if it falls behind). On 4 Xeon cores the crops took
-    131 ms against the 27 ms budget, so a laptop like that uses its
-    accelerator: two crops a frame is ~1.2 TFLOP/s at 30 fps, a few percent
-    of a laptop GPU, and on a Mac CoreML may put it on the Neural Engine."""
+    """(detector, where it runs). "" is auto: the computer's accelerator
+    (CUDA, DirectML on Windows, CoreML on a Mac -- which may use the Neural
+    Engine), checked with one run, else the CPU (ModelWorker then hands over
+    to colour if it falls behind). On 4 Xeon cores two 640 px crops took 131
+    ms against the 27 ms a 30 fps frame allows; on a GPU two crops a frame is
+    ~1.2 TFLOP/s, a few percent of a laptop GPU."""
     from .onnxdet import OnnxDetector
     if device:
         det = OnnxDetector(path, providers=onnx_providers(device))
         return det, det.session.get_providers()[0]
-    det = OnnxDetector(path, providers=["CPUExecutionProvider"])
-    if cpu_keeps_up(det):
-        return det, "CPUExecutionProvider"
+    # GPU first (2026-11-18: the model is now the primary counter, so it gets
+    # the hardware that keeps it at 30 fps); the CPU only when there is no
+    # accelerator or it will not run.
     fast = onnx_providers("gpu")
     if fast[0] != "CPUExecutionProvider":
         try:
             det = OnnxDetector(path, providers=fast)
+            det.predict([__import__("numpy").zeros((MODEL_IMGSZ, MODEL_IMGSZ, 3), "uint8")], conf=DET_CONF)
             return det, det.session.get_providers()[0]
-        except Exception:      # a driver that will not load: the CPU still counts
-            pass
-    return det, "CPUExecutionProvider"
-
-
-def cpu_keeps_up(det, runs: int = 5) -> bool:
-    import time
-    import numpy as np
-    crops = [np.full((MODEL_IMGSZ, MODEL_IMGSZ, 3), 90, np.uint8)] * 2
-    det.predict(crops, conf=DET_CONF)
-    took = []
-    for _ in range(runs):
-        t = time.perf_counter()
-        det.predict(crops, conf=DET_CONF)
-        took.append(time.perf_counter() - t)
-    return sorted(took)[runs // 2] <= CPU_BUDGET_S
+        except Exception as e:     # a driver that will not load: the CPU still counts
+            print(f"model: {fast[0]} would not run ({type(e).__name__}: {e}); using the CPU")
+    return OnnxDetector(path, providers=["CPUExecutionProvider"]), "CPUExecutionProvider"
 
 
 def onnx_providers(device: str) -> List[str]:

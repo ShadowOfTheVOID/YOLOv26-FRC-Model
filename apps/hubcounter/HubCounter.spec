@@ -21,8 +21,9 @@
 # The same spec builds the Watchtower app (apps/watchtower/) with
 # HUBAPP=watchtower: the Watchtower FMS and its own hub-camera runner from a
 # clone of arnan-bajaj/watchtower-fms at WATCHTOWER_SRC (hub-app.yml checks
-# out the commit in .github/watchtower-release). It carries neither our hub
-# page nor the model: Watchtower v2's cameras are in its own Control -> Setup.
+# out the commit in .github/watchtower-release). Not our hub page (Watchtower
+# v2's cameras are in its own Control -> Setup), but the fuel model and ONNX
+# Runtime: the model is every hub's primary counter there too.
 import os
 import sys
 
@@ -75,10 +76,11 @@ if APP == "watchtower":
     EXTRA_IMPORTS = (collect_submodules("fms") + collect_submodules("uvicorn")
                      + collect_submodules("counters") + collect_submodules("hubcounter")
                      + ["fastapi", "starlette", "websockets", "yaml", "requests", "queue_tba",
-                        "tbavid.keepawake", "tbavid.cvload"] + VISION + WEBVIEW)
+                        "tbavid.keepawake", "tbavid.cvload",
+                        # the fuel model, the primary counter (main.use_our_model_runtime)
+                        "tbavid.hubmodel", "tbavid.onnxdet", "tbavid.count", "tbavid.trackvis",
+                        "onnxruntime"] + VISION + WEBVIEW)
     EXTRA_DATAS += collect_data_files("webview")
-    # Only the hub counter app runs our model: none of this in Watchtower,
-    # whose colour counter needs OpenCV and numpy alone.
     HUB_IMPORTS = ["cv2", "numpy"]
 else:
     NAME, ENTRY, BUNDLE_ID = "Hub Counter", os.path.join(SPECPATH, "main.py"), "org.tbavid.hubcounter"
@@ -101,8 +103,7 @@ EXTRA_DATAS = EXTRA_DATAS + [(os.path.join(_VDIR, "app_version.txt"), ".")]
 EXTRA_IMPORTS = EXTRA_IMPORTS + ["tbavid.appupdate"]
 
 MODEL = os.path.join(ROOT, "models", "fuel_relabel.onnx")
-if (APP != "watchtower" and not os.path.isfile(MODEL)
-        and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1"):
+if not os.path.isfile(MODEL) and os.environ.get("HUBCOUNTER_REQUIRE_MODEL") == "1":
     raise SystemExit(f"{MODEL} is missing (hub-app.yml downloads it from the release)")
 MODELS = [(MODEL, "models")] if os.path.isfile(MODEL) else []
 
@@ -112,8 +113,8 @@ a = Analysis(
     pathex=[ROOT] + EXTRA_PATH,
     binaries=[],
     datas=([(os.path.join(TB, "hubweb.html"), "tbavid"),
-            (os.path.join(TB, "hubboard.html"), "tbavid")] + MODELS
-           if APP != "watchtower" else []) + EXTRA_DATAS,
+            (os.path.join(TB, "hubboard.html"), "tbavid")] if APP != "watchtower" else [])
+          + MODELS + EXTRA_DATAS,
     hiddenimports=HUB_IMPORTS + EXTRA_IMPORTS,
     excludes=SCRAPER + HEAVY,
     noarchive=False,
