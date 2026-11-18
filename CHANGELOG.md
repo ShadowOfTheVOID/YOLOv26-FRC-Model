@@ -9,6 +9,23 @@ the build rather than publishing an empty release.
 
 ## Unreleased
 
+- **Hub Counter page redesigned.** Watchtower's field-control look (wall grey,
+  alliance red and blue, fuel-yellow focus; dark mode follows the system),
+  and one job per tab: **Set up**, **Run**, **Test**. Set up opens with a
+  **Next** card that always says the one thing to do now, with its buttons
+  and a progress bar (Watchtower's hub card, as a single step); the steps
+  below it -- Cameras, Where to count, Ball size -- fold to one line with
+  their state and open on a click. Starting the count moves to Run.
+  Works at phone width (390 px, no sideways scroll).
+- **Drop test for the ball size** (step 3, and the Next card): record, drop
+  balls, type how many per hub, Done. It replays the counter at many sizes
+  and keeps the one that counts exactly that (tbavid/dropfit.py, ported
+  from Watchtower). On a synthetic recording with 10 balls of 452 px it
+  fitted 436 px and replayed 10 of 10. **Measure** now works before any
+  outline and only sets the ruler, and says when it disagrees with the drop
+  test by more than 2x. A hub can have its **own fuel colour** (the 🎨 on its
+  outline) for one camera watching both hubs under different light.
+
 - **Watchtower app rebuilt on Watchtower v2** (arnan-bajaj/watchtower-fms at
   its v2.7 commit; it was v0.1.0). It now opens one window on Watchtower's
   own Control page, whose Setup holds the event, teams, PINs, TBA, the field
