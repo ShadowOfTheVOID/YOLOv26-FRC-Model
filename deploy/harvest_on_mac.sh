@@ -13,9 +13,12 @@
 #   curl -fsSL https://raw.githubusercontent.com/ShadowOfTheVOID/YOLOv26-FRC-Model/main/deploy/harvest_on_mac.sh | bash
 #   ... | bash -s -- 20                    # another number
 #
-# Needs: Homebrew (brew.sh), Google Drive for desktop signed in to the
-# Drive that holds frc-harvest/, and a TBA Read API key (it asks; or set
-# TBA_AUTH_KEY). Safe to run again: matches already downloaded are kept and
+# Needs: Google Drive for desktop signed in to the Drive that holds
+# frc-harvest/, and a TBA Read API key (it asks; or set TBA_AUTH_KEY). No
+# Homebrew: ffmpeg and ffprobe are static builds fetched into
+# ~/frc-harvest/bin when they are not already installed (osxexperts.net for
+# Apple silicon, evermeet.cx for Intel), yt-dlp goes into the script's own
+# Python environment, and Python 3 is the one macOS's developer tools have. Safe to run again: matches already downloaded are kept and
 # never downloaded twice.
 set -euo pipefail
 N="${1:-40}"
@@ -37,14 +40,35 @@ else
     | tar -xz -C "$REPO" --strip-components 1
 fi
 
-command -v brew >/dev/null || { echo "Install Homebrew first: https://brew.sh"; exit 1; }
+command -v python3 >/dev/null && python3 -c "import venv" 2>/dev/null \
+  || { echo "Python 3 is needed: run  xcode-select --install  (Apple's developer tools), then this again."; exit 1; }
 DRIVE="$(ls -d "$HOME"/Library/CloudStorage/GoogleDrive-*/"My Drive" 2>/dev/null | head -1 || true)"
 [ -n "$DRIVE" ] || { echo "Google Drive for desktop is not set up on this Mac (no ~/Library/CloudStorage/GoogleDrive-*). Install it from google.com/drive/download and sign in."; exit 1; }
 DEST="$DRIVE/frc-harvest"
 mkdir -p "$DEST/hdata" "$DEST/state" "$LOCAL/hdata"
 
 say "Tools (ffmpeg, and a Python environment with yt-dlp)"
-command -v ffmpeg >/dev/null || brew install ffmpeg
+BIN="$LOCAL/bin"
+export PATH="$BIN:$PATH"
+latest() {   # the newest link on a download page matching a pattern
+  curl -fsSL "$1" | grep -oE "$2" | head -1
+}
+fetch_bin() {   # $1 = ffmpeg or ffprobe
+  local url
+  if [ "$(uname -m)" = "arm64" ]; then
+    url="$(latest https://www.osxexperts.net/ "https://www\.osxexperts\.net/$1[0-9]+arm\.zip")"
+  else
+    url="https://evermeet.cx/ffmpeg/$(latest https://evermeet.cx/ffmpeg/ "$1-[0-9.]+\.zip")"
+  fi
+  [ -n "$url" ] && [ "${url%/}" != "https://evermeet.cx/ffmpeg" ] \
+    || { echo "Could not find a $1 download; install ffmpeg yourself and run this again."; exit 1; }
+  echo "  $1 <- $url"
+  curl -fsSL "$url" -o "$BIN/$1.zip" && unzip -o -q "$BIN/$1.zip" -x "__MACOSX/*" -d "$BIN" && rm "$BIN/$1.zip"
+  chmod +x "$BIN/$1"
+}
+mkdir -p "$BIN"
+for t in ffmpeg ffprobe; do command -v "$t" >/dev/null || fetch_bin "$t"; done
+ffmpeg -version | head -1
 [ -x "$REPO/.venv-harvest/bin/python" ] || python3 -m venv "$REPO/.venv-harvest"
 "$REPO/.venv-harvest/bin/pip" -q install --upgrade -r "$REPO/requirements.txt" yt-dlp
 export PATH="$REPO/.venv-harvest/bin:$PATH"            # the yt-dlp just installed
