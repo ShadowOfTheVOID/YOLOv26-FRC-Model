@@ -70,7 +70,7 @@ DRY_RUN = True            # True: 2 matches, a few frames, 1 epoch -- checks eve
 
 DRIVE_DIR   = "/content/drive/MyDrive/frc-harvest"    # everything this notebook makes
 BAKEOFF_DIR = "/content/drive/MyDrive/frc-bakeoff"    # the bake-off: Einstein 1 to judge on, Einstein 4/5/8 to train on
-BRANCH      = "claude/practical-einstein-bgrb3r"      # switch to "main" once this work is merged
+BRANCH      = "main"                                  # merged 2026-11-18 (v0.6.0)
 
 # Harvest
 MATCHES       = 40        # how many matches to label and train on (more is better; each is ~150 MB in Drive)
