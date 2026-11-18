@@ -91,6 +91,16 @@ def at(timeline: Sequence[Sequence[float]], t: float) -> Dict[str, float]:
     return {"red": row[1], "blue": row[2]} if row else {"red": 0, "blue": 0}
 
 
+def cut_short(r: Dict, end: float) -> str:
+    """Why a count is not a count: the video ended before `end`. On
+    2026-11-18 Colab's Drive mount dropped while the fourth model read
+    e1.mp4 from Drive ("Invalid NAL unit size ... partial file") and that
+    model "counted" 172 / 112 against 621 / 415 -- the match cut off, not
+    the model."""
+    got = float(r.get("seconds") or 0)
+    return f"video ended at {got:.0f} s of {end:.0f}" if got < end - 1.0 else ""
+
+
 def table(rows: List[Dict]) -> str:
     t_end, truth = E1_TRUTH["buzzer"]
     t_auto, auto = E1_TRUTH["auto"]
@@ -98,6 +108,9 @@ def table(rows: List[Dict]) -> str:
            f"AUTO t={t_auto:.0f}s truth {auto['blue']} - {auto['red']} (red by 1: decides nothing)",
            f"{'counter':34} {'blue':>6} {'red':>6} {'error':>7}   AUTO blue-red"]
     for r in rows:
+        if r.get("short"):
+            out.append(f"{r['label']:34}   NOT A COUNT: {r['short']}")
+            continue
         a = r.get("auto")
         out.append(f"{r['label']:34} {r['blue']:>6.0f} {r['red']:>6.0f} {r['error']:>6.1f}%"
                    + (f"   {a['blue']:.0f}-{a['red']:.0f}" if a else ""))
@@ -115,7 +128,7 @@ def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer
     r = count_recording(setup_from_dict(e1_setup(video)), video, CAMERA, end=end, every=1.0)
     c = {"blue": r["blue"], "red": r["red"]}
     rows.append(dict(label="colour counter alone (shipped)", **c, error=error(c, truth),
-                     auto=at(r["timeline"], t_auto)))
+                     auto=at(r["timeline"], t_auto), short=cut_short(r, end)))
     print(f"colour: {c} in {r['took_s']}s ({r['speed']} fps)", flush=True)
     if on_rows:
         on_rows(rows)
@@ -124,9 +137,13 @@ def run(video: str, models: List[Tuple[str, str]], end: float = E1_TRUTH["buzzer
                             end=end, every=1.0)
         m = hub_values(r["model"])
         b = {"blue": r["blue"], "red": r["red"]}
-        rows.append(dict(label=f"{name}: model alone", **m, error=error(m, truth)))
+        short = cut_short(r, end)
+        rows.append(dict(label=f"{name}: model alone", **m, error=error(m, truth), short=short))
         rows.append(dict(label=f"{name}: colour + model (0.5)", **b, error=error(b, truth),
-                         auto=at(r["timeline"], t_auto)))
+                         auto=at(r["timeline"], t_auto), short=short))
+        if short:
+            print(f"  ! {name}: {short} -- not a count (was the video read from a Drive "
+                  f"that dropped?)", flush=True)
         print(f"{name}: model {m}, blend {b} in {r['took_s']}s", flush=True)
         if on_rows:
             on_rows(rows)
