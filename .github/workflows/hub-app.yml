@@ -50,7 +50,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # macos-14 was retired by GitHub ("The configuration
+          # 'macos-14-arm64-us-default' is not supported", 2026-11-18): the job
+          # was cancelled before its first step. macos-15 is Apple silicon too.
+          - os: macos-15
             asset: HubCounter-mac.dmg
             program: dist/Hub Counter.app/Contents/MacOS/Hub Counter
             wasset: Watchtower-mac.dmg
