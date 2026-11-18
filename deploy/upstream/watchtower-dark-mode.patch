@@ -1,0 +1,154 @@
+diff --git a/fms/static/control.html b/fms/static/control.html
+index ffe94ea..c3bb828 100644
+--- a/fms/static/control.html
++++ b/fms/static/control.html
+@@ -91,7 +91,7 @@
+   .fcbtns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .3rem; margin-top: .25rem; }
+   .fcbtns button { min-height: 40px; padding: .2rem .1rem; font-size: .76rem; white-space: nowrap; overflow: hidden; }
+   .fcbtns button.estop { background: var(--red); border-color: var(--red); color: #fff; font-weight: 800; }
+-  .fcbtns button.sel { background: var(--ink); border-color: var(--ink); color: #fff; }
++  .fcbtns button.sel { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+   .fcrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .5rem; align-items: end; margin-top: .6rem; }
+   /* Setup -> Run / Test */
+   .runhubs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+diff --git a/fms/static/display.html b/fms/static/display.html
+index 8664ea5..b4d3102 100644
+--- a/fms/static/display.html
++++ b/fms/static/display.html
+@@ -1,5 +1,5 @@
+ <!doctype html>
+-<html lang="en"><head>
++<html lang="en" class="fixed-theme"><head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <link rel="stylesheet" href="/static/style.css">
+diff --git a/fms/static/index.html b/fms/static/index.html
+index c6b46ea..8b2881b 100644
+--- a/fms/static/index.html
++++ b/fms/static/index.html
+@@ -21,7 +21,7 @@
+   .station b { display: block; font-size: 1.05rem; }
+   .station span.d { color: var(--muted); font-size: .85rem; }
+   .station::after { content: "›"; margin-left: auto; font-size: 1.6rem; color: var(--line-strong); }
+-  .station.main { background: var(--ink); color: #fff; border-color: var(--ink); }
++  .station.main { background: var(--bar); color: #fff; border-color: var(--bar); }
+   .station.main span.d { color: #b9bec5; }
+ </style>
+ </head><body>
+diff --git a/fms/static/overlay.html b/fms/static/overlay.html
+index 98db47a..ffa6132 100644
+--- a/fms/static/overlay.html
++++ b/fms/static/overlay.html
+@@ -1,5 +1,5 @@
+ <!doctype html>
+-<html lang="en"><head>
++<html lang="en" class="fixed-theme"><head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <link rel="stylesheet" href="/static/style.css">
+diff --git a/fms/static/style.css b/fms/static/style.css
+index 0da1420..68b65db 100644
+--- a/fms/static/style.css
++++ b/fms/static/style.css
+@@ -13,6 +13,7 @@
+   color: var(--ink); background: var(--wall);
+   -webkit-text-size-adjust: 100%;
+   -webkit-tap-highlight-color: transparent;
++  --on-ink: #fff; --bar: #161a1f;   /* text on ink, and the status bar: dark in both themes */
+ }
+ * { box-sizing: border-box; }
+ [hidden] { display: none !important; }
+@@ -40,7 +41,7 @@ button {
+ button:hover:not(:disabled) { border-color: var(--ink-2); }
+ button:active:not(:disabled) { transform: translateY(1px) scale(.99); }
+ button:disabled { opacity: .38; cursor: not-allowed; }
+-button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
++button.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+ button.primary:hover:not(:disabled) { background: var(--ink-2); }
+ button.red { background: var(--red); border-color: var(--red); color: #fff; }
+ button.blue { background: var(--blue); border-color: var(--blue); color: #fff; }
+@@ -52,7 +53,7 @@ button.small { min-height: 34px; padding: .3rem .7rem; font-size: .85rem; }
+ 
+ input, select, textarea {
+   min-height: var(--tap); padding: .5rem .7rem; border-radius: var(--r-sm);
+-  border: 1px solid var(--line-strong); background: #fff; font-size: 16px; /* 16px: no iOS focus zoom */
++  border: 1px solid var(--line-strong); background: var(--panel); font-size: 16px; /* 16px: no iOS focus zoom */
+   max-width: 100%;
+ }
+ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--ink-2); box-shadow: 0 0 0 3px var(--fuel-soft); }
+@@ -102,7 +103,7 @@ td.r, th.r { text-align: right; }
+ /* status bar shared by every page */
+ .bar { display: flex; justify-content: space-between; align-items: center; gap: .75rem;
+   padding: calc(.65rem + env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) .65rem max(1rem, env(safe-area-inset-left));
+-  background: var(--ink); color: #fff; position: sticky; top: 0; z-index: 5; min-height: 52px; }
++  background: var(--bar); color: #fff; position: sticky; top: 0; z-index: 5; min-height: 52px; }
+ .bar > span:first-child { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+ .bar b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ .bar .pill { background: rgba(255, 255, 255, .1); color: #e8eaed; border-color: rgba(255, 255, 255, .14); }
+@@ -122,7 +123,7 @@ td.r, th.r { text-align: right; }
+ .hub.red { border-color: var(--red-line); } .hub.blue { border-color: var(--blue-line); }
+ .hub.red.on { border-color: var(--red); } .hub.blue.on { border-color: var(--blue); }
+ .hub.on { background: var(--fuel); box-shadow: 0 0 0 4px var(--fuel-soft), 0 0 30px rgba(244, 195, 0, .7); }
+-.hub.on .name { color: var(--ink); }
++.hub.on .name, .hub.on .state { color: var(--bar); }
+ .hub.off .state { color: var(--line-strong); }
+ 
+ .clock { font-size: 3.2rem; font-weight: 850; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+@@ -131,14 +132,14 @@ td.r, th.r { text-align: right; }
+ .teams { font-weight: 650; }
+ /* per-device "Flip sides" (ref, emcee, control; display styles its own) */
+ .flipbar { justify-content: flex-end; margin-bottom: .6rem; }
+-button.flip.sel { background: var(--ink); border-color: var(--ink); color: #fff; }
++button.flip.sel { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+ 
+ /* login gate */
+ .gate { max-width: 380px; margin: 12vh auto 0; padding: 1.6rem; width: calc(100% - 2rem); }
+ .gate h2 { font-size: 1.3rem; margin-bottom: 1rem; }
+ .gate input { width: 100%; margin-bottom: .7rem; font-size: 1.2rem; }
+ .gate::before { content: ""; display: block; width: 44px; height: 44px; margin-bottom: 1rem; border-radius: 12px;
+-  background: url(/static/icon.svg) center / cover, var(--ink); }
++  background: url(/static/icon.svg) center / cover, var(--bar); }
+ 
+ /* tabs: one scrollable row of segments, never wraps */
+ .tabs { display: flex; gap: .25rem; margin: 0 0 1rem; padding: .3rem; background: var(--panel);
+@@ -148,10 +149,10 @@ button.flip.sel { background: var(--ink); border-color: var(--ink); color: #fff;
+ .tabs button { flex: none; min-height: 38px; border: 0; background: transparent; color: var(--muted);
+   font-weight: 600; padding: .4rem .9rem; border-radius: 8px; white-space: nowrap; }
+ .tabs button:hover:not(.sel) { background: var(--panel-2); color: var(--ink); }
+-.tabs button.sel { background: var(--ink); color: #fff; }
++.tabs button.sel { background: var(--ink); color: var(--on-ink); }
+ 
+ .toast { position: fixed; left: 50%; bottom: calc(1.2rem + env(safe-area-inset-bottom)); transform: translateX(-50%);
+-  background: var(--ink); color: #fff; padding: .75rem 1.1rem; border-radius: var(--r-md); z-index: 20;
++  background: var(--ink); color: var(--on-ink); padding: .75rem 1.1rem; border-radius: var(--r-md); z-index: 20;
+   max-width: min(92vw, 520px); box-shadow: 0 10px 30px rgba(0, 0, 0, .25); font-weight: 550;
+   overflow-wrap: anywhere; animation: toast-in .18s ease-out; }
+ .toast.err { background: var(--warn); }
+@@ -167,3 +168,27 @@ button.flip.sel { background: var(--ink); border-color: var(--ink); color: #fff;
+   th, td { padding: .5rem .45rem; }
+ }
+ @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
++
++/* ---------- dark mode: follows the phone or laptop's setting
++   Refs, scorers and the emcee hold phones in dim gyms, where a white page is
++   the brightest thing in the stands. Light mode is unchanged. The field
++   display and the stream overlay keep their own look (class="fixed-theme"
++   on their <html>): one is a TV across the gym, the other is drawn over
++   the stream, and both already use dark backgrounds. */
++@media (prefers-color-scheme: dark) {
++  :root:not(.fixed-theme) {
++    color-scheme: dark;
++    --wall: #0b0d10; --panel: #15181c; --panel-2: #1c2025; --ink: #eceef1; --ink-2: #c0c6ce;
++    --muted: #8a939e; --line: #262b31; --line-strong: #363c45;
++    --red: #ff4b65; --red-soft: rgba(255, 75, 101, .11); --red-line: rgba(255, 75, 101, .38);
++    --blue: #4f8fff; --blue-soft: rgba(79, 143, 255, .11); --blue-line: rgba(79, 143, 255, .38);
++    --ok: #3ccf87; --ok-soft: rgba(60, 207, 135, .13); --warn: #f0a43a; --warn-soft: rgba(240, 164, 58, .13);
++    --fuel-soft: rgba(244, 195, 0, .16);
++    --shadow: 0 1px 2px rgba(0, 0, 0, .35);
++    --on-ink: #0b0d10; --bar: #111418;
++  }
++  :root:not(.fixed-theme) .bar { border-bottom: 1px solid rgba(255, 255, 255, .06); }
++  :root:not(.fixed-theme) .warnbox { border-color: rgba(240, 164, 58, .35); color: var(--warn); }
++  :root:not(.fixed-theme) .toast.err { color: #fff; }
++}
++
