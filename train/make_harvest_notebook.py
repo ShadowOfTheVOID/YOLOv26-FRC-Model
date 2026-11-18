@@ -115,6 +115,27 @@ def secret(names, prompt):
 os.environ["TBA_AUTH_KEY"] = secret(("TBA_AUTH_KEY", "TBA_KEY", "tba_auth_key"),
                                     "TBA Read API key (thebluealliance.com -> Account): ")
 assert os.environ["TBA_AUTH_KEY"], "No TBA key: add TBA_AUTH_KEY in Colab Secrets or paste it when asked."
+
+def sh(args, cwd=REPO):
+    """Run a step and show its output here as it comes. Colab does not show what a program
+    started with subprocess.run prints, so the first dry run said only "nothing downloaded"
+    and hid why (2026-11-18)."""
+    p = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, bufsize=1)
+    for line in p.stdout:
+        print(line, end="", flush=True)
+    return p.wait()
+
+# The key, checked now: a wrong one used to surface only as "nothing downloaded"
+import urllib.request, urllib.error
+try:
+    req = urllib.request.Request("https://www.thebluealliance.com/api/v3/events/2026/simple",
+                                 headers={"X-TBA-Auth-Key": os.environ["TBA_AUTH_KEY"]})
+    n_events = len(json.load(urllib.request.urlopen(req, timeout=30)))
+    print(f"TBA key works: {n_events} events in 2026")
+except urllib.error.HTTPError as e:
+    raise SystemExit(f"TBA refused the key ({e.code}). Use the Read API key from "
+                     f"thebluealliance.com -> Account -> Read API Keys (not a Write key).")
 ''')
 
 md(r'''
@@ -158,8 +179,8 @@ rounds = 0
 while len(usable()) < target and rounds < 12:
     n = min(5, target - len(usable()))
     print(f"--- fetching {n} more ({len(usable())} of {target} so far)", flush=True)
-    subprocess.run([sys.executable, "run.py", "--config", CFG, "fetch", "-n", str(n),
-                    "--per-event-cap", str(PER_EVENT_CAP), "--seed", str(SEED)], cwd=REPO)
+    sh([sys.executable, "run.py", "--config", CFG, "fetch", "-n", str(n),
+        "--per-event-cap", str(PER_EVENT_CAP), "--seed", str(SEED)])
     sync(H, DH); sync(f"{REPO}/state", f"{DRIVE_DIR}/state")      # saved after every round
     rounds += 1
 
@@ -169,8 +190,9 @@ if not have:
     why = {}
     for v, e in manifest()["videos"].items():
         why[e.get("status")] = why.get(e.get("status"), 0) + 1
-    raise SystemExit(f"Nothing downloaded ({why or 'no videos tried'}). If the messages above say "
-                     f"'confirm you're not a bot', see 'If downloads fail' at the top.")
+    raise SystemExit(f"Nothing downloaded ({why or 'no video was even tried'}). The fetch messages "
+                     f"above say why: 'confirm you're not a bot' -> see 'If downloads fail' at the top; "
+                     f"'nothing new to pull' -> every match is already in the ledger (state/ in Drive).")
 ''')
 
 md(r'''
@@ -205,16 +227,15 @@ for i in range(0, len(todo), LABEL_BATCH):
     print(f"===== labelling {len(batch)} matches -> {name}", flush=True)
     rl, sam = "/content/rl", "/content/sam"
     !rm -rf {rl} {sam}
-    r = subprocess.run([sys.executable, "train/relabel_video.py", "--out", rl, "--from-scraper", "--data", H,
-                        "--matches", *batch, "--every", str(every), "--device", "0",
-                        "--fuel", "/content/models/fuel_best.pt", "--robots", "/content/models/fuel_withBotbest.pt"],
-                       cwd=REPO)
-    if r.returncode != 0 or not glob.glob(f"{rl}/images/*/*"):
+    code = sh([sys.executable, "train/relabel_video.py", "--out", rl, "--from-scraper", "--data", H,
+               "--matches", *batch, "--every", str(every), "--device", "0",
+               "--fuel", "/content/models/fuel_best.pt", "--robots", "/content/models/fuel_withBotbest.pt"])
+    if code != 0 or not glob.glob(f"{rl}/images/*/*"):
         print(f"!! relabel_video found nothing to label in {batch} -- skipped (its messages are above)"); continue
     limit = ["--limit", "8"] if DRY_RUN else []
-    r = subprocess.run([sys.executable, "train/autolabel_sam3.py", "--data", f"{rl}/dataset.yaml", "--out", sam,
-                        "--fuel-prompt", FUEL_PROMPT, *limit], cwd=REPO)
-    if r.returncode != 0:
+    code = sh([sys.executable, "train/autolabel_sam3.py", "--data", f"{rl}/dataset.yaml", "--out", sam,
+               "--fuel-prompt", FUEL_PROMPT, *limit])
+    if code != 0:
         raise SystemExit("SAM 3 failed: its error is above (no access to facebook/sam3? a bad token?)")
     !cd {sam} && zip -qr "{DRIVE_DIR}/labelled/{name}" .
     done[name] = batch
