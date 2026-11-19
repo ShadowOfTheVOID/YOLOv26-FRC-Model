@@ -187,10 +187,22 @@ sync(DH, H)
 sync(f"{DRIVE_DIR}/state", f"{REPO}/state")
 # matches downloaded on a Mac without the Drive app arrive as one zip (deploy/harvest_on_mac.sh);
 # its ledger and clips are newer than anything here, so they replace older copies
-if os.path.exists(f"{DRIVE_DIR}/harvest.zip"):
-    print("unpacking harvest.zip from the Mac ...")
-    subprocess.run(["unzip", "-q", "-o", f"{DRIVE_DIR}/harvest.zip", "hdata/*", "-d", "/content"], check=False)
-    subprocess.run(["unzip", "-q", "-o", f"{DRIVE_DIR}/harvest.zip", "state/*", "-d", REPO], check=False)
+FROM_MAC = os.path.exists(f"{DRIVE_DIR}/harvest.zip")
+if FROM_MAC:
+    # Copied to this disk first: the first one was 5 GB, and unzip reading that straight through
+    # Drive's mount is where a mount drop (Errno 107) would cut it off half-written.
+    z = "/content/harvest.zip"
+    for attempt in range(3):
+        print(f"copying harvest.zip from Drive ({os.path.getsize(f'{DRIVE_DIR}/harvest.zip') / 1e9:.1f} GB) ...", flush=True)
+        if subprocess.run(["cp", f"{DRIVE_DIR}/harvest.zip", z]).returncode == 0 and \
+           subprocess.run(["unzip", "-tq", z], capture_output=True).returncode == 0:
+            break
+    else:
+        raise SystemExit("harvest.zip did not copy whole from Drive three times: run this cell again.")
+    print("unpacking harvest.zip from the Mac ...", flush=True)
+    subprocess.run(["unzip", "-q", "-o", z, "hdata/*", "-d", "/content"], check=True)
+    subprocess.run(["unzip", "-q", "-o", z, "state/*", "-d", REPO], check=True)
+    os.remove(z)
 # TBA's event and match lists saved on a machine TBA answers: used when it refuses Colab (403)
 if os.path.exists(f"{DRIVE_DIR}/tba_cache.zip"):
     os.makedirs(f"{REPO}/state/tba_cache", exist_ok=True)
@@ -215,6 +227,10 @@ def usable():
 
 target = 2 if DRY_RUN else MATCHES
 rounds, code = 0, 0
+if FROM_MAC:
+    # The Mac did the downloading: YouTube refuses Colab, so trying here only stops the run.
+    print(f"using the {len(usable())} matches harvested on the Mac (harvest.zip); not downloading here")
+    target = min(target, len(usable()))
 while len(usable()) < target and rounds < 12:
     n = min(5, target - len(usable()))
     print(f"--- fetching {n} more ({len(usable())} of {target} so far)", flush=True)
